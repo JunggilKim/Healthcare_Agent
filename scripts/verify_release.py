@@ -22,6 +22,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from backend.app.evaluation.annotations import (  # noqa: E402
+    AdjudicatedAnnotation,
+    AnnotationAssignment,
+    AnnotationReview,
+    adjudicate_annotations,
+    load_jsonl,
+)
 from backend.app.infrastructure.snapshot_loader import (  # noqa: E402
     SnapshotIntegrityError,
     load_verified_snapshot,
@@ -53,6 +60,11 @@ REQUIRED_FILES = (
     "scripts/smoke_test_deployment.sh",
     "scripts/cleanup_expired.py",
     "scripts/estimate_cost.py",
+    "scripts/generate_benchmark.py",
+    "scripts/paraphrase_benchmark.py",
+    "scripts/prepare_annotations.py",
+    "scripts/submit_gemini_batch.py",
+    "scripts/validate_annotations.py",
     "scripts/validate_snapshot.py",
     "scripts/verify_release.py",
     "scripts/package_submission.py",
@@ -65,6 +77,7 @@ REQUIRED_PROMPTS = (
     "answer_interpreter_v1.md",
     "question_renderer_v1.md",
     "report_renderer_v1.md",
+    "synthetic_paraphrase_v1.md",
 )
 EXPECTED_MODELS = {
     "primary": "gemini-3.6-flash",
@@ -524,6 +537,54 @@ class Verifier:
             return
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         annotations = json.loads(annotation_path.read_text(encoding="utf-8"))
+        annotation_integrity = False
+        annotation_detail = ""
+        try:
+            artifact_paths: dict[str, Path] = {}
+            for prefix in ("assignment", "review", "adjudicated"):
+                raw_path = annotations.get(f"{prefix}_jsonl_path")
+                if not isinstance(raw_path, str) or not raw_path:
+                    raise ValueError(f"{prefix.upper()}_JSONL_PATH_MISSING")
+                candidate = (REPOSITORY_ROOT / raw_path).resolve()
+                candidate.relative_to(REPOSITORY_ROOT)
+                if not candidate.is_file():
+                    raise ValueError(f"{prefix.upper()}_JSONL_MISSING")
+                expected_hash = annotations.get(f"{prefix}_jsonl_sha256")
+                actual_hash = hashlib.sha256(candidate.read_bytes()).hexdigest()
+                if expected_hash != actual_hash:
+                    raise ValueError(f"{prefix.upper()}_JSONL_HASH_MISMATCH")
+                artifact_paths[prefix] = candidate
+            assignment_rows = [
+                AnnotationAssignment.model_validate(item.model_dump(mode="json"))
+                for item in load_jsonl(artifact_paths["assignment"], AnnotationAssignment)
+            ]
+            review_rows = [
+                AnnotationReview.model_validate(item.model_dump(mode="json"))
+                for item in load_jsonl(artifact_paths["review"], AnnotationReview)
+            ]
+            adjudicated_rows = [
+                AdjudicatedAnnotation.model_validate(item.model_dump(mode="json"))
+                for item in load_jsonl(artifact_paths["adjudicated"], AdjudicatedAnnotation)
+            ]
+            recomputed, annotation_summary = adjudicate_annotations(assignment_rows, review_rows)
+            recomputed_payload = [item.model_dump(mode="json") for item in recomputed]
+            stored_payload = [item.model_dump(mode="json") for item in adjudicated_rows]
+            if recomputed_payload != stored_payload:
+                raise ValueError("ADJUDICATED_JSONL_RECOMPUTE_MISMATCH")
+            if annotations.get("records") != [item.record_id for item in recomputed]:
+                raise ValueError("ADJUDICATED_MANIFEST_RECORD_MISMATCH")
+            if annotations.get("completed_pairs") != annotation_summary["completed_pairs"]:
+                raise ValueError("ADJUDICATED_MANIFEST_COUNT_MISMATCH")
+            if (
+                annotations.get("completed_dual_reviews")
+                != annotation_summary["completed_dual_reviews"]
+            ):
+                raise ValueError("ADJUDICATED_MANIFEST_DUAL_COUNT_MISMATCH")
+            if annotation_summary["incomplete"]:
+                raise ValueError("ADJUDICATED_REVIEW_STILL_INCOMPLETE")
+            annotation_integrity = True
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            annotation_detail = str(exc)
         matching_keys = {
             "criterion_macro_f1",
             "hard_fail_recall",
@@ -685,6 +746,7 @@ class Verifier:
         )
         annotation_ok = (
             annotations.get("status") == "ADJUDICATED"
+            and annotation_integrity
             and annotations.get("completed_pairs", 0) >= 200
             and annotations.get("completed_dual_reviews", 0) >= 50
             and annotations.get("adjudicated_pairs", 0) == annotations.get("completed_pairs", -1)
@@ -727,6 +789,7 @@ class Verifier:
                 f"evaluation.{name}",
                 passed,
                 summary,
+                annotation_detail if name == "annotations" else "",
             )
         passed = metrics.get("acceptance_eligible") is True and all(groups.values())
         all_missing = sorted(

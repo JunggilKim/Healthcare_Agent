@@ -124,12 +124,29 @@ def _facts_for_values(world_id: str, values: dict[str, list[TypedValue]]) -> lis
     ]
 
 
-def _render_narrative(facts: list[WorldFact]) -> str:
-    statements = [
-        f"{_SLOT_LABEL.get(fact.slot_id, fact.slot_id)}: {_value_text(fact.value)}"
-        for fact in facts
-    ]
-    return "Synthetic structured record. " + "; ".join(statements) + "."
+def _render_narrative(
+    world_id: str, facts: list[WorldFact]
+) -> tuple[str, dict[str, list[SourceSpan]]]:
+    narrative = "Synthetic structured record. "
+    spans: dict[str, list[SourceSpan]] = {}
+    for index, fact in enumerate(facts):
+        if index:
+            narrative += "; "
+        statement = f"{_SLOT_LABEL.get(fact.slot_id, fact.slot_id)}: {_value_text(fact.value)}"
+        start = len(narrative)
+        narrative += statement
+        spans[fact.fact_id] = [
+            SourceSpan(
+                source_id=f"benchmark:{world_id}:narrative",
+                start=start,
+                end=len(narrative),
+                quote=statement,
+                sha256=hashlib.sha256(statement.encode()).hexdigest(),
+                language="en",
+            )
+        ]
+    narrative += "."
+    return narrative, spans
 
 
 def _patient_facts(facts: list[WorldFact], evaluation_date: date) -> list[PatientFact]:
@@ -219,11 +236,13 @@ def _make_world(
     world_id = f"S004-{suffix}"
     facts = _facts_for_values(world_id, values)
     conflicts = conflict_slots or []
+    narrative, fact_span_map = _render_narrative(world_id, facts)
     return PatientWorld(
         world_id=world_id,
         nct_id=fixture.compiled_trial.nct_id,
         world_type=world_type,
         split=_split(fixture.compiled_trial.nct_id),
+        evaluation_date=date(2026, 8, 11),
         compiled_protocol_hash=fixture.compiled_trial.content_hash,
         criterion_source_hashes=[
             criterion.source_text_sha256 for criterion in fixture.compiled_trial.criteria
@@ -231,7 +250,9 @@ def _make_world(
         facts=facts,
         conflict_slots=conflicts,
         unavailable_slots=unavailable_slots or [],
-        narrative=_render_narrative(facts),
+        template_narrative=narrative,
+        narrative=narrative,
+        fact_span_map=fact_span_map,
         criterion_truth=_truth(fixture, facts, conflicts, date(2026, 8, 11)),
     )
 

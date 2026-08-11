@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from typing import Any, Literal
+
+from backend.app.domain.canonical import canonical_json_bytes
+from backend.app.domain.evidence import SourceSpan
+from backend.app.domain.model_outputs import PatientExtractionResult, PatientFactProposal
+from backend.app.evaluation.models import BenchmarkArtifact, PatientWorld, WorldFact
+
+PARAPHRASE_MODEL_ID = "gemini-3.5-flash-lite"
+EXTRACTION_MODEL_ID = "gemini-3.6-flash"
+PARAPHRASE_PROMPT_VERSION = "synthetic-paraphrase-v1"
+
+
+@dataclass(frozen=True, slots=True)
+class SelectedWorld:
+    world_id: str
+    language: Literal["ko", "en"]
+
+
+def _selection_key(seed: int, world_id: str) -> tuple[str, str]:
+    return hashlib.sha256(f"{seed}:paraphrase:{world_id}".encode()).hexdigest(), world_id
+
+
+def select_paraphrase_worlds(benchmark: BenchmarkArtifact) -> list[SelectedWorld]:
+    count = min(120, round(len(benchmark.worlds) * 0.30))
+    selected = sorted(
+        benchmark.worlds,
+        key=lambda world: _selection_key(benchmark.seed, world.world_id),
+    )[:count]
+    return [
+        SelectedWorld(world_id=world.world_id, language="ko" if index % 2 == 0 else "en")
+        for index, world in enumerate(selected)
+    ]
+
+
+def build_paraphrase_requests(
+    benchmark: BenchmarkArtifact,
+    *,
+    prompt_template: str,
+) -> tuple[list[dict[str, Any]], list[SelectedWorld]]:
+    worlds = {world.world_id: world for world in benchmark.worlds}
+    selected = select_paraphrase_worlds(benchmark)
+    requests: list[dict[str, Any]] = []
+    response_schema = {
+        "type": "OBJECT",
+        "properties": {"narrative": {"type": "STRING"}},
+        "required": ["narrative"],
+    }
+    for item in selected:
+        world = worlds[item.world_id]
+        facts = [fact.model_dump(mode="json") for fact in world.facts]
+        prompt = (
+            prompt_template.replace(
+                "{target_language}", "Korean" if item.language == "ko" else "English"
+            )
+            .replace("{structured_facts_json}", canonical_json_bytes(facts).decode())
+            .replace("{template_narrative}", world.template_narrative)
+        )
+        requests.append(
+            {
+                "id": item.world_id,
+                "request": {
+                    "contents": [
+                        {"role": "user", "parts": [{"text": prompt}]},
+                    ],
+                    "generationConfig": {
+                        "temperature": 0.2,
+                        "maxOutputTokens": 768,
+                        "responseMimeType": "application/json",
+                        "responseSchema": response_schema,
+                    },
+                },
+            }
+        )
+    return requests, selected
+
+
+def _response_text(row: dict[str, Any]) -> str:
+    if row.get("error"):
+        raise ValueError(f"BATCH_RESPONSE_ERROR:{row.get('id')}:{row['error']}")
+    response = row.get("response")
+    if not isinstance(response, dict):
+        raise ValueError("BATCH_RESPONSE_PAYLOAD_MISSING")
+    candidates = response.get("candidates")
+    if not isinstance(candidates, list) or len(candidates) != 1:
+        raise ValueError("BATCH_RESPONSE_CANDIDATE_INVALID")
+    content = candidates[0].get("content") if isinstance(candidates[0], dict) else None
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(parts, list) or not parts or not isinstance(parts[0], dict):
+        raise ValueError("BATCH_RESPONSE_TEXT_MISSING")
+    text = parts[0].get("text")
+    if not isinstance(text, str) or not text:
+        raise ValueError("BATCH_RESPONSE_TEXT_MISSING")
+    return text
+
+
+def parse_paraphrase_responses(
+    response_rows: list[dict[str, Any]],
+    selected: list[SelectedWorld],
+) -> dict[str, str]:
+    expected = {item.world_id for item in selected}
+    responses: dict[str, str] = {}
+    for row in response_rows:
+        world_id = row.get("id")
+        if not isinstance(world_id, str) or world_id not in expected or world_id in responses:
+            raise ValueError("PARAPHRASE_RESPONSE_ID_INVALID")
+        payload = json.loads(_response_text(row))
+        if set(payload) != {"narrative"} or not isinstance(payload["narrative"], str):
+            raise ValueError(f"PARAPHRASE_RESPONSE_SCHEMA_INVALID:{world_id}")
+        narrative = payload["narrative"].strip()
+        if not narrative:
+            raise ValueError(f"PARAPHRASE_RESPONSE_EMPTY:{world_id}")
+        responses[world_id] = narrative
+    if set(responses) != expected:
+        raise ValueError("PARAPHRASE_RESPONSE_SET_INCOMPLETE")
+    return responses
+
+
+def build_extraction_requests(
+    paraphrases: dict[str, str],
+    *,
+    patient_prompt_template: str,
+    response_schema: dict[str, Any],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": world_id,
+            "request": {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": patient_prompt_template.replace("{patient_text}", narrative)}
+                        ],
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0,
+                    "maxOutputTokens": 2048,
+                    "responseMimeType": "application/json",
+                    "responseSchema": response_schema,
+                },
+            },
+        }
+        for world_id, narrative in sorted(paraphrases.items())
+    ]
+
+
+def parse_extraction_responses(
+    response_rows: list[dict[str, Any]], expected_ids: set[str]
+) -> dict[str, PatientExtractionResult]:
+    responses: dict[str, PatientExtractionResult] = {}
+    for row in response_rows:
+        world_id = row.get("id")
+        if not isinstance(world_id, str) or world_id not in expected_ids or world_id in responses:
+            raise ValueError("EXTRACTION_RESPONSE_ID_INVALID")
+        responses[world_id] = PatientExtractionResult.model_validate_json(_response_text(row))
+    if set(responses) != expected_ids:
+        raise ValueError("EXTRACTION_RESPONSE_SET_INCOMPLETE")
+    return responses
+
+
+def _value_key(fact: WorldFact) -> bytes:
+    return canonical_json_bytes(
+        {"slot_id": fact.slot_id, "value": fact.value.model_dump(mode="json")}
+    )
+
+
+def _validated_spans(
+    world: PatientWorld,
+    narrative: str,
+    extraction: PatientExtractionResult,
+) -> dict[str, list[SourceSpan]]:
+    expected: dict[bytes, list[WorldFact]] = {}
+    for fact in world.facts:
+        expected.setdefault(_value_key(fact), []).append(fact)
+    extracted: dict[bytes, list[PatientFactProposal]] = {}
+    for proposal in extraction.facts:
+        key = canonical_json_bytes(
+            {"slot_id": proposal.slot_id, "value": proposal.value.model_dump(mode="json")}
+        )
+        extracted.setdefault(key, []).append(proposal)
+    if {key: len(value) for key, value in expected.items()} != {
+        key: len(value) for key, value in extracted.items()
+    }:
+        raise ValueError(f"PARAPHRASE_FACT_RECOVERY_MISMATCH:{world.world_id}")
+    spans: dict[str, list[SourceSpan]] = {}
+    for key, facts in expected.items():
+        proposals = extracted[key]
+        for fact, proposal_obj in zip(
+            sorted(facts, key=lambda item: item.fact_id), proposals, strict=True
+        ):
+            proposal = proposal_obj
+            if (
+                proposal.end > len(narrative)
+                or narrative[proposal.start : proposal.end] != proposal.quote
+            ):
+                raise ValueError(f"PARAPHRASE_EXTRACTION_SPAN_INVALID:{world.world_id}")
+            spans[fact.fact_id] = [
+                SourceSpan(
+                    source_id=f"benchmark:{world.world_id}:paraphrase",
+                    start=proposal.start,
+                    end=proposal.end,
+                    quote=proposal.quote,
+                    sha256=hashlib.sha256(proposal.quote.encode()).hexdigest(),
+                    language=extraction.language,
+                )
+            ]
+    return spans
+
+
+def apply_validated_paraphrases(
+    benchmark: BenchmarkArtifact,
+    paraphrases: dict[str, str],
+    extractions: dict[str, PatientExtractionResult],
+    selected: list[SelectedWorld],
+) -> BenchmarkArtifact:
+    selection = {item.world_id: item for item in selected}
+    if set(paraphrases) != set(extractions) or set(paraphrases) != set(selection):
+        raise ValueError("PARAPHRASE_APPLY_SET_MISMATCH")
+    updated: list[PatientWorld] = []
+    for world in benchmark.worlds:
+        item = selection.get(world.world_id)
+        if item is None:
+            updated.append(world)
+            continue
+        extraction = extractions[world.world_id]
+        if extraction.language != item.language:
+            raise ValueError(f"PARAPHRASE_LANGUAGE_MISMATCH:{world.world_id}")
+        narrative = paraphrases[world.world_id]
+        spans = _validated_spans(world, narrative, extraction)
+        artifact_hash = hashlib.sha256(
+            canonical_json_bytes(
+                {
+                    "narrative": narrative,
+                    "extraction": extraction.model_dump(mode="json"),
+                }
+            )
+        ).hexdigest()
+        updated.append(
+            world.model_copy(
+                update={
+                    "narrative": narrative,
+                    "narrative_language": item.language,
+                    "narrative_method": "FLASH_LITE_PARAPHRASE",
+                    "fact_span_map": spans,
+                    "paraphrase_model_id": PARAPHRASE_MODEL_ID,
+                    "paraphrase_prompt_version": PARAPHRASE_PROMPT_VERSION,
+                    "paraphrase_artifact_hash": artifact_hash,
+                }
+            )
+        )
+    target_count = min(120, round(len(updated) * 0.30))
+    paraphrased = sum(world.narrative_method == "FLASH_LITE_PARAPHRASE" for world in updated)
+    blocking = [
+        reason
+        for reason in benchmark.blocking_reasons
+        if "paraphrase validation is pending" not in reason
+    ]
+    if paraphrased != target_count:
+        blocking.append(
+            f"Validated paraphrase count is {paraphrased}; exact target is {target_count}."
+        )
+    counts = {**benchmark.counts, "paraphrased_worlds": paraphrased}
+    return BenchmarkArtifact.model_validate(
+        {
+            **benchmark.model_dump(mode="json"),
+            "worlds": [world.model_dump(mode="json") for world in updated],
+            "counts": counts,
+            "blocking_reasons": blocking,
+            "acceptance_eligible": not blocking,
+        }
+    )

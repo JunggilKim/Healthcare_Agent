@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from functools import lru_cache
 
 from backend.app.domain.ast import AstNode, AstOperator
+from backend.app.domain.canonical import load_yaml
 from backend.app.domain.enums import CriterionVerdict, EvidenceGrade
 from backend.app.domain.evidence import EligibilityContext, PatientFact
 from backend.app.domain.proof import DerivationStep
@@ -21,8 +23,29 @@ from backend.app.domain.values import (
 )
 from backend.app.engine.temporal import directional_days
 from backend.app.engine.unit_converter import UnitConversionError, default_unit_converter
+from backend.app.settings import REPOSITORY_ROOT
 
 EVALUATOR_VERSION = "evaluator-v1"
+
+
+@lru_cache(maxsize=1)
+def _ontology_relations() -> set[tuple[str | None, str, str]]:
+    payload = load_yaml(REPOSITORY_ROOT / "config" / "ontology_whitelist.yaml")
+    if payload.get("version") != "ontology-whitelist-v1":
+        raise ValueError("ONTOLOGY_WHITELIST_VERSION_INVALID")
+    relations: set[tuple[str | None, str, str]] = set()
+    for item in payload.get("relations", []):
+        if not isinstance(item, dict):
+            raise ValueError("ONTOLOGY_WHITELIST_RELATION_INVALID")
+        child = item.get("child")
+        ancestor = item.get("ancestor")
+        system = item.get("system")
+        if not isinstance(child, str) or not isinstance(ancestor, str):
+            raise ValueError("ONTOLOGY_WHITELIST_RELATION_INVALID")
+        if system is not None and not isinstance(system, str):
+            raise ValueError("ONTOLOGY_WHITELIST_RELATION_INVALID")
+        relations.add((system, child.casefold(), ancestor.casefold()))
+    return relations
 
 
 @dataclass(slots=True)
@@ -191,6 +214,25 @@ def _compare_fact(node: AstNode, fact: PatientFact) -> tuple[CriterionVerdict, s
         return (
             CriterionVerdict.PASS if fact.value.days >= node.value.days else CriterionVerdict.FAIL
         ), None
+    if node.op is AstOperator.IS_A:
+        if not isinstance(fact.value, CategoricalValue) or not isinstance(
+            node.value, CategoricalValue
+        ):
+            return CriterionVerdict.UNKNOWN, "TYPE_MISMATCH"
+        child = fact.value.value.strip().casefold()
+        ancestor = node.value.value.strip().casefold()
+        compatible_system = (
+            node.value.system is None
+            or fact.value.system is None
+            or node.value.system == fact.value.system
+        )
+        if compatible_system and child == ancestor:
+            return CriterionVerdict.PASS, None
+        relation = (node.value.system or fact.value.system, child, ancestor)
+        generic_relation = (None, child, ancestor)
+        if relation in _ontology_relations() or generic_relation in _ontology_relations():
+            return CriterionVerdict.UNKNOWN, "ONTOLOGY_RELATION_NOT_HARD_ADMISSIBLE"
+        return CriterionVerdict.UNKNOWN, "ONTOLOGY_RELATION_NOT_WHITELISTED"
     if node.op in {AstOperator.BEFORE, AstOperator.AFTER} and isinstance(node.value, DateValue):
         if not isinstance(fact.value, DateValue):
             return CriterionVerdict.UNKNOWN, "TYPE_MISMATCH"

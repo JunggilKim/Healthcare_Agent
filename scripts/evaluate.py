@@ -25,6 +25,16 @@ from backend.app.evaluation.ablation import (  # noqa: E402
     EvaluationAblationConfig,
     ablation_config,
 )
+from backend.app.evaluation.annotations import (  # noqa: E402
+    AdjudicatedAnnotation,
+    AnnotationAssignment,
+    load_compiled_trials,
+    load_jsonl,
+)
+from backend.app.evaluation.execution import (  # noqa: E402
+    evaluate_adjudicated_subset,
+    evaluate_world,
+)
 from backend.app.evaluation.metrics import (  # noqa: E402
     classification_metrics,
     mean,
@@ -55,10 +65,55 @@ def _args() -> argparse.Namespace:
         required=True,
     )
     parser.add_argument("--config", type=Path, default=Path("config/eval.yaml"))
+    parser.add_argument("--benchmark", type=Path, default=BENCHMARK_PATH)
+    parser.add_argument("--compiled-trials", type=Path, action="append")
+    parser.add_argument("--annotation-manifest", type=Path)
     parser.add_argument("--policies", default="all")
     parser.add_argument("--seed", type=int, default=20260811)
     parser.add_argument("--all", action="store_true", dest="all_ablations")
     return parser.parse_args()
+
+
+def _repository_artifact(path_value: object) -> Path:
+    if not isinstance(path_value, str) or not path_value:
+        raise RuntimeError("EVALUATION_ANNOTATION_ARTIFACT_PATH_MISSING")
+    path = (REPOSITORY_ROOT / path_value).resolve()
+    try:
+        path.relative_to(REPOSITORY_ROOT)
+    except ValueError as exc:
+        raise RuntimeError("EVALUATION_ANNOTATION_ARTIFACT_OUTSIDE_REPOSITORY") from exc
+    if not path.is_file():
+        raise RuntimeError(f"EVALUATION_ANNOTATION_ARTIFACT_MISSING:{path_value}")
+    return path
+
+
+def _release_criterion_suite(
+    manifest_path: Path,
+    compiled_paths: list[Path],
+) -> dict[str, Any]:
+    manifest = orjson.loads(manifest_path.read_bytes())
+    if manifest.get("status") != "ADJUDICATED":
+        raise RuntimeError("EVALUATION_ANNOTATIONS_NOT_ADJUDICATED")
+    assignment_path = _repository_artifact(manifest.get("assignment_jsonl_path"))
+    gold_path = _repository_artifact(manifest.get("adjudicated_jsonl_path"))
+    for prefix, path in (("assignment", assignment_path), ("adjudicated", gold_path)):
+        expected = manifest.get(f"{prefix}_jsonl_sha256")
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if expected != actual:
+            raise RuntimeError(f"EVALUATION_{prefix.upper()}_HASH_MISMATCH")
+    assignments = [
+        AnnotationAssignment.model_validate(item.model_dump(mode="json"))
+        for item in load_jsonl(assignment_path, AnnotationAssignment)
+    ]
+    gold = [
+        AdjudicatedAnnotation.model_validate(item.model_dump(mode="json"))
+        for item in load_jsonl(gold_path, AdjudicatedAnnotation)
+    ]
+    return evaluate_adjudicated_subset(
+        assignments,
+        gold,
+        load_compiled_trials(compiled_paths),
+    )
 
 
 def _git_sha() -> str:
@@ -157,8 +212,27 @@ async def _retrieval_suite() -> dict[str, Any]:
 
 
 def _criterion_suite(benchmark: BenchmarkArtifact) -> dict[str, Any]:
-    truth = [item.verdict.value for world in benchmark.worlds for item in world.criterion_truth]
-    replayed = list(truth)
+    fixture = load_vertical_slice()
+    truth: list[str] = []
+    replayed: list[str] = []
+    predictions: list[dict[str, Any]] = []
+    for world in benchmark.worlds:
+        evaluated = evaluate_world(fixture.compiled_trial, world)
+        for item in world.criterion_truth:
+            result = evaluated[item.criterion_id]
+            truth.append(item.verdict.value)
+            replayed.append(result.verdict.value)
+            predictions.append(
+                {
+                    "suite": "criterion",
+                    "world_id": world.world_id,
+                    "criterion_id": item.criterion_id,
+                    "truth": item.verdict.value,
+                    "prediction": result.verdict.value,
+                    "evidence_fact_ids": result.evidence_fact_ids,
+                    "missing_slot_ids": result.missing_slot_ids,
+                }
+            )
     labels = [item.value for item in CriterionVerdict]
     full_metrics = classification_metrics(truth, replayed, labels)
     hard_fail = full_metrics["per_class"]
@@ -188,17 +262,7 @@ def _criterion_suite(benchmark: BenchmarkArtifact) -> dict[str, Any]:
                 "explanation_verdict_consistency": 1.0,
             },
         },
-        "predictions": [
-            {
-                "suite": "criterion",
-                "world_id": world.world_id,
-                "criterion_id": item.criterion_id,
-                "truth": item.verdict.value,
-                "prediction": item.verdict.value,
-            }
-            for world in benchmark.worlds
-            for item in world.criterion_truth
-        ],
+        "predictions": predictions,
     }
 
 
@@ -478,9 +542,9 @@ def main() -> None:
     config = yaml.safe_load(args.config.read_text())
     if args.seed != int(config["seed"]):
         raise RuntimeError("SEED_MUST_MATCH_COMMITTED_EVAL_CONFIG")
-    if not BENCHMARK_PATH.is_file():
+    if not args.benchmark.is_file():
         raise RuntimeError("BENCHMARK_MISSING_RUN_GENERATE_BENCHMARK_FIRST")
-    benchmark = BenchmarkArtifact.model_validate(orjson.loads(BENCHMARK_PATH.read_bytes()))
+    benchmark = BenchmarkArtifact.model_validate(orjson.loads(args.benchmark.read_bytes()))
     suites = (
         ["retrieval", "criterion", "interactive", "ablation"]
         if args.suite == "all"
@@ -492,7 +556,17 @@ def main() -> None:
         if suite == "retrieval":
             payload = asyncio.run(_retrieval_suite())
         elif suite == "criterion":
-            payload = _criterion_suite(benchmark)
+            if args.annotation_manifest is not None:
+                if not benchmark.acceptance_eligible:
+                    raise RuntimeError("RELEASE_ANNOTATIONS_REQUIRE_RELEASE_DATASET_A_BENCHMARK")
+                if not args.compiled_trials:
+                    raise RuntimeError("RELEASE_CRITERION_EVALUATION_REQUIRES_COMPILED_TRIALS")
+                payload = _release_criterion_suite(
+                    args.annotation_manifest,
+                    args.compiled_trials,
+                )
+            else:
+                payload = _criterion_suite(benchmark)
         elif suite == "interactive":
             payload = _interactive_suite(
                 benchmark,

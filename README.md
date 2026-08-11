@@ -119,6 +119,11 @@ uv run python scripts/acquire_trec.py
 uv run python scripts/render_eval_report.py --latest
 ```
 
+The reviewed Dataset A handoff uses `scripts/prepare_annotations.py` and
+`scripts/validate_annotations.py`. They produce blinded, exact-hash JSONL assignments and reject
+incomplete or non-independent adjudication. See `docs/ANNOTATION_GUIDE.md` for the versioned
+world-generation, two-pass paraphrase validation, and review-row commands.
+
 Committed Phase-6 numbers are explicitly `acceptance_eligible=false`: they are a one-trial S004
 structured engineering smoke, not Dataset A, stable-top-3 evidence, or clinical validation. The
 mandatory 24–36-trial reviewed corpus, 200-pair annotation subset, and paid B5/P0/P1 baselines are

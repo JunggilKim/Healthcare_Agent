@@ -15,6 +15,7 @@ Annotators must not see the system verdict or baseline output before submitting 
 - `PASS`: explicit admissible evidence satisfies the normalized criterion.
 - `FAIL`: explicit admissible evidence contradicts the normalized criterion.
 - `UNKNOWN`: available evidence cannot decide the criterion, including missing or incompatible data.
+- `CONFLICT`: two or more admissible facts disagree and the conflict is unresolved.
 - `OPAQUE`: source meaning cannot be represented safely in the bounded AST.
 - `NOT_APPLICABLE`: the record is outside the adjudicated pairing definition; never treat as pass.
 
@@ -35,9 +36,72 @@ three-level label: relevant, partially relevant, irrelevant.
 ## Sampling and split
 
 The reviewed corpus contains 24–36 diverse trials and at least 200 independently annotated
-patient–trial pairs. Split by NCT ID before generating observations so no protocol appears in both
+criterion–patient pairs. Split by NCT ID before generating observations so no protocol appears in both
 train/development and held-out test. Freeze source hashes, seed, split IDs, annotation-tool version,
 and rubric version before adjudication.
+
+## Reproducible review handoff
+
+First generate worlds from the exact reviewed AST corpus. Release mode rejects a corpus outside
+24–36 unique interventional trials, unverified protocols, failed boundary tests, unsatisfiable
+critical criteria, or fewer than 5 generated worlds for any trial:
+
+```bash
+uv run python scripts/generate_benchmark.py --mode release \
+  --compiled-trials data/demo/current/sessions/S004/compiled_trials.json \
+  --compiled-trials data/demo/current/sessions/S008/compiled_trials.json \
+  --compiled-trials data/demo/current/sessions/S001/compiled_trials.json \
+  --raw-trials data/demo/current/sessions/S004/raw_trials.json \
+  --raw-trials data/demo/current/sessions/S008/raw_trials.json \
+  --raw-trials data/demo/current/sessions/S001/raw_trials.json \
+  --evaluation-date 2026-08-11 \
+  --output data/eval/generated/benchmark.pre-paraphrase.json
+```
+
+Then use `scripts/paraphrase_benchmark.py` in three stages: `prepare` creates the exact fixed-seed
+Flash-Lite batch JSONL for 30% of worlds (maximum 120, Korean/English balanced),
+`prepare-validation` consumes those batch responses and creates a primary-model patient-extraction
+batch, and `apply` accepts only narratives for which every original typed fact and exact source span
+is recovered. Uploading JSONL and submitting either paid job is an explicit operation; use
+`scripts/submit_gemini_batch.py` only with both `--allow-paid-batch` and
+`ALLOW_PAID_BATCH_CALLS=true`. Failed paraphrases are not imputed or silently retained as valid.
+
+After the validated release benchmark exists, create a fresh versioned directory;
+the command refuses to overwrite prior review material:
+
+```bash
+uv run python scripts/prepare_annotations.py \
+  --benchmark data/eval/generated/benchmark.json \
+  --compiled-trials data/demo/current/sessions/S004/compiled_trials.json \
+  --compiled-trials data/demo/current/sessions/S008/compiled_trials.json \
+  --compiled-trials data/demo/current/sessions/S001/compiled_trials.json \
+  --output-dir data/eval/annotations/round-1
+```
+
+`assignments.jsonl` deliberately contains neither generated truth nor system predictions. Reviewers
+receive the exact source span, normalized AST, materiality, required slots, and structured facts so
+they can judge executability without seeing a system verdict. Reviewers append
+`trial-opt-annotation-review-v1` rows to a separate `reviews.jsonl`. Each row binds the
+assignment hash, reviewer alias, role (`PRIMARY`, `SECONDARY`, or `ADJUDICATOR`), revision,
+timestamp, verdict, evidence fact IDs, missing slot IDs, executability, explanation support, and a
+short rationale. Exactly the hash-selected dual-review records receive a secondary review. A
+disagreement requires a distinct adjudicator and a disagreement reason.
+
+Validate and freeze the handoff without overwriting previous rounds:
+
+```bash
+uv run python scripts/validate_annotations.py \
+  --assignments data/eval/annotations/round-1/assignments.jsonl \
+  --reviews data/eval/annotations/round-1/reviews.jsonl \
+  --output-dir data/eval/annotations/adjudicated-1 \
+  --publish-manifest data/eval/annotations/manifest.json
+```
+
+The final command refuses fewer than 200 completed records, fewer than 50 completed independent
+dual reviews, unresolved disagreements, changed assignment hashes, unknown evidence IDs, or reused
+reviewer identities. Publishing is allowed only for a complete review and binds the three JSONL
+paths and hashes into the root manifest consumed by the strict verifier. `--allow-incomplete` may
+produce an explicitly pending progress manifest; it cannot produce `status=ADJUDICATED`.
 
 ## Quality control
 

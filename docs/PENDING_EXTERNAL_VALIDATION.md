@@ -46,10 +46,16 @@ local infrastructure state. They are not represented as completed.
 - Blocker: the exact-hash reviewed 24–36-trial Dataset A corpus, at least 200 project-reviewer
   criterion annotations, 50 dual reviews, and adjudication metadata do not yet exist. Paid direct
   LLM baselines B5/P0/P1 also require approved Google Cloud execution.
-- Completed independently: deterministic AST-derived S004 engineering-smoke worlds (9 worlds,
-  54 missingness observations, 63 criterion labels), B0/B1/B2/B3/B4/B6 policy code, P2/P3 proof
-  baselines, config-driven A1–A8 ablations with eval-only safety guards, retrieval metric code,
-  charts, static UI JSON, and fixed-seed reproduction commands.
+- Completed independently: a generic verified-AST world generator covering full-pass, isolated and
+  multi-failure, unknown, conflict, and boundary worlds; exact narrative fact-span hashes; the
+  fixed-seed 30% Korean/English Flash-Lite batch request builder; a second primary-model extraction
+  batch that rejects any paraphrase whose typed facts and spans are not fully recovered; blinded
+  hash-bound annotation assignment; independent dual-review/adjudication validation; strict
+  recomputation of the final JSONL handoff; deterministic S004 engineering-smoke worlds (9 worlds,
+  54 missingness observations, 63 criterion labels); B0/B1/B2/B3/B4/B6 policy code; P2/P3 proof
+  baselines; config-driven A1–A8 ablations with eval-only safety guards; retrieval metric code;
+  charts; static UI JSON; and fixed-seed reproduction commands. Paid batch submission is guarded by
+  both a CLI flag and `ALLOW_PAID_BATCH_CALLS=true` and was not invoked.
 - Claim boundary: all committed Phase 6 numbers are marked `acceptance_eligible=false` and
   `project-created S004 structured fixture engineering smoke`. They are not Dataset A results,
   clinical validation, stable-top-3 evidence, or a basis for claiming the release thresholds.
