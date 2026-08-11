@@ -21,6 +21,7 @@ from backend.app.engine.branch_builder import build_branches, deterministic_ques
 from backend.app.engine.incremental import build_reverse_slot_index, reevaluate_for_answered_slot
 from backend.app.engine.multi_trial_optimizer import (
     FullOptimizationState,
+    OptimizerScoringFlags,
     branch_discrimination,
     generate_slot_candidates,
     select_next_action,
@@ -109,6 +110,31 @@ def test_full_optimizer_uses_real_utility_and_exposes_top_candidates() -> None:
     assert 1 <= len(selection.top_alternatives) <= 3
     assert all(item.utility_components is not None for item in selection.top_alternatives)
     assert state.recompiled_trial_ids == []
+
+
+def test_optimizer_ablation_flags_change_shared_scoring_without_forking_policy() -> None:
+    state = _full_state()
+    full = select_next_action(state)
+    no_minimum = select_next_action(
+        state,
+        scoring_flags=OptimizerScoringFlags(minimum_branch_utility=False),
+    )
+    assert full.top_alternatives
+    assert no_minimum.top_alternatives
+    full_by_slot = {item.slot_id: item for item in full.top_alternatives}
+    no_minimum_by_slot = {item.slot_id: item for item in no_minimum.top_alternatives}
+    shared_slots = set(full_by_slot) & set(no_minimum_by_slot)
+    assert shared_slots
+    for slot_id in shared_slots:
+        full_components = full_by_slot[slot_id].utility_components
+        ablated_components = no_minimum_by_slot[slot_id].utility_components
+        assert full_components is not None and ablated_components is not None
+        assert ablated_components.base_utility <= full_components.base_utility
+
+    duplicated = generate_slot_candidates(state, slot_level_deduplication=False)
+    deduplicated = generate_slot_candidates(state)
+    assert len(duplicated) == sum(len(item.affected) for item in deduplicated)
+    assert len({item.question_id for item in duplicated}) == len(duplicated)
 
 
 def test_reverse_index_and_incremental_reevaluation_touch_only_affected_proof() -> None:

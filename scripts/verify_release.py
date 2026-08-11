@@ -29,6 +29,10 @@ from backend.app.evaluation.annotations import (  # noqa: E402
     adjudicate_annotations,
     load_jsonl,
 )
+from backend.app.evaluation.performance_evidence import (  # noqa: E402
+    ReleasePerformanceEvidence,
+    performance_acceptance_metrics,
+)
 from backend.app.infrastructure.snapshot_loader import (  # noqa: E402
     SnapshotIntegrityError,
     load_verified_snapshot,
@@ -61,10 +65,16 @@ REQUIRED_FILES = (
     "scripts/cleanup_expired.py",
     "scripts/estimate_cost.py",
     "scripts/generate_benchmark.py",
+    "scripts/materialize_retrieval_runs.py",
+    "scripts/measure_snapshot_performance.py",
     "scripts/paraphrase_benchmark.py",
     "scripts/prepare_annotations.py",
+    "scripts/prepare_b5_policy.py",
+    "scripts/prepare_proof_baselines.py",
+    "scripts/prepare_retrieval_evidence.py",
     "scripts/submit_gemini_batch.py",
     "scripts/validate_annotations.py",
+    "scripts/validate_performance_evidence.py",
     "scripts/validate_snapshot.py",
     "scripts/verify_release.py",
     "scripts/package_submission.py",
@@ -78,6 +88,8 @@ REQUIRED_PROMPTS = (
     "question_renderer_v1.md",
     "report_renderer_v1.md",
     "synthetic_paraphrase_v1.md",
+    "proof_baseline_v1.md",
+    "direct_question_policy_v1.md",
 )
 EXPECTED_MODELS = {
     "primary": "gemini-3.6-flash",
@@ -585,6 +597,106 @@ class Verifier:
             annotation_integrity = True
         except (OSError, ValueError, TypeError, KeyError) as exc:
             annotation_detail = str(exc)
+        suite_integrity = False
+        suite_detail = ""
+        try:
+            suite_documents = {
+                name: json.loads(
+                    (REPOSITORY_ROOT / f"artifacts/eval/latest/suites/{name}.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                for name in ("retrieval", "criterion", "interactive", "ablation")
+            }
+            if not all(
+                document["metrics"].get("acceptance_eligible") is True
+                for document in suite_documents.values()
+            ):
+                raise ValueError("EVALUATION_SUITE_NOT_ACCEPTANCE_ELIGIBLE")
+            suite_git_shas = {
+                document["metadata"]["git_sha"] for document in suite_documents.values()
+            }
+            suite_config_hashes = {
+                document["metadata"]["config_hash"] for document in suite_documents.values()
+            }
+            suite_seeds = {
+                document["metadata"]["random_seed"] for document in suite_documents.values()
+            }
+            if len(suite_git_shas) != 1 or len(suite_config_hashes) != 1 or len(suite_seeds) != 1:
+                raise ValueError("EVALUATION_SUITE_PROVENANCE_MISMATCH")
+            expected_run_ids = {
+                name: document["metadata"]["run_id"] for name, document in suite_documents.items()
+            }
+            if metrics.get("run_ids") != expected_run_ids:
+                raise ValueError("EVALUATION_REPORT_RUN_ID_MISMATCH")
+            criterion_suite = suite_documents["criterion"]["metrics"]
+            retrieval_suite = suite_documents["retrieval"]["metrics"]
+            interactive_suite = suite_documents["interactive"]["metrics"]
+            ablation_suite = suite_documents["ablation"]["metrics"]
+            proof_baselines = criterion_suite.get("proof_baselines", {})
+            if not (
+                proof_baselines.get("P0", {}).get("status") == "BATCH_COMPLETED"
+                and proof_baselines.get("P1", {}).get("status") == "BATCH_COMPLETED"
+                and proof_baselines.get("P2", {}).get("status") == "COMPLETED"
+                and proof_baselines.get("P3", {}).get("status") == "COMPLETED"
+            ):
+                raise ValueError("EVALUATION_PROOF_BASELINES_INCOMPLETE")
+            if set(interactive_suite.get("policies", {})) != {
+                "B0",
+                "B1",
+                "B2",
+                "B3",
+                "B4",
+                "B5",
+                "B6",
+            } or any(
+                "status" in interactive_suite["policies"][policy]
+                for policy in ("B0", "B1", "B2", "B3", "B4", "B5", "B6")
+            ):
+                raise ValueError("EVALUATION_QUESTION_BASELINES_INCOMPLETE")
+            if set(ablation_suite.get("ablations", {})) != {f"A{index}" for index in range(1, 9)}:
+                raise ValueError("EVALUATION_ABLATIONS_INCOMPLETE")
+            performance_path = REPOSITORY_ROOT / "artifacts/eval/performance/evidence.json"
+            performance = ReleasePerformanceEvidence.model_validate(
+                orjson.loads(performance_path.read_bytes())
+            )
+            if performance.source_git_sha != next(iter(suite_git_shas)):
+                raise ValueError("EVALUATION_PERFORMANCE_GIT_SHA_MISMATCH")
+            b3 = interactive_suite["policies"]["B3"]
+            b6 = interactive_suite["policies"]["B6"]
+            expected_values = {
+                "criterion_macro_f1": criterion_suite["criterion_metrics"]["macro_f1"],
+                "hard_fail_recall": criterion_suite["hard_fail_recall"],
+                "false_pre_screen_pass_rate": criterion_suite["false_pre_screen_pass_rate"],
+                "evidence_precision": criterion_suite["evidence_precision"],
+                "retrieval_recall_at_20": retrieval_suite["baselines"]["full_three_source_rrf"][
+                    "recall_at_20"
+                ],
+                "bm25_recall_at_20": retrieval_suite["baselines"]["bm25_only"]["recall_at_20"],
+                "exact_condition_irrelevance_exclusion_count": retrieval_suite[
+                    "exact_condition_irrelevance_exclusion_count"
+                ],
+                **criterion_suite["safety_metrics"],
+                **criterion_suite["protocol_metrics"],
+                "median_questions_to_stable_top3_40_realistic": b6[
+                    "median_questions_to_stable_top3"
+                ],
+                "b3_median_questions_40_realistic": b3["median_questions_to_stable_top3"],
+                "decision_accuracy_after_3": interactive_suite["decision_accuracy_after_3"],
+                "b3_decision_accuracy_after_3": interactive_suite["b3_decision_accuracy_after_3"],
+                "question_count_statistically_tied_with_b3": interactive_suite[
+                    "question_count_statistical_test"
+                ]["statistically_tied"],
+                "max_policy_questions": interactive_suite["max_policy_questions"],
+                "hard_question_budget": interactive_suite["hard_question_budget"],
+                "repeat_seed_identical": interactive_suite["repeat_seed_identical"],
+                **performance_acceptance_metrics(performance),
+            }
+            if metrics.get("acceptance_metrics") != expected_values:
+                raise ValueError("EVALUATION_REPORT_METRIC_RECOMPUTE_MISMATCH")
+            suite_integrity = True
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            suite_detail = str(exc)
         matching_keys = {
             "criterion_macro_f1",
             "hard_fail_recall",
@@ -772,6 +884,7 @@ class Verifier:
         )
         groups = {
             "annotations": annotation_ok,
+            "baselines": suite_integrity,
             "matching": matching_ok,
             "safety": safety_ok,
             "protocol": protocol_ok,
@@ -789,7 +902,13 @@ class Verifier:
                 f"evaluation.{name}",
                 passed,
                 summary,
-                annotation_detail if name == "annotations" else "",
+                (
+                    annotation_detail
+                    if name == "annotations"
+                    else suite_detail
+                    if name == "baselines"
+                    else ""
+                ),
             )
         passed = metrics.get("acceptance_eligible") is True and all(groups.values())
         all_missing = sorted(

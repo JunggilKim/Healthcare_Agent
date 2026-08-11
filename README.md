@@ -124,10 +124,22 @@ The reviewed Dataset A handoff uses `scripts/prepare_annotations.py` and
 incomplete or non-independent adjudication. See `docs/ANNOTATION_GUIDE.md` for the versioned
 world-generation, two-pass paraphrase validation, and review-row commands.
 
+Release evaluation additionally uses these non-imputable evidence stages:
+
+- `scripts/prepare_retrieval_evidence.py` creates blinded held-out qrel assignments and freezes
+  reviewer labels together with recorded system runs produced by
+  `scripts/materialize_retrieval_runs.py`;
+- `scripts/prepare_b5_policy.py` runs the sequential B5 direct-question batch against the exact
+  candidate list at each oracle step;
+- `scripts/prepare_proof_baselines.py` prepares and freezes paid P0/P1 batch predictions;
+- `scripts/measure_snapshot_performance.py` measures at least 20 local HTTP runs, while
+  `scripts/validate_performance_evidence.py` validates the combined commit-bound Snapshot/Live
+  evidence. The renderer refuses release status without every suite and performance artifact.
+
 Committed Phase-6 numbers are explicitly `acceptance_eligible=false`: they are a one-trial S004
 structured engineering smoke, not Dataset A, stable-top-3 evidence, or clinical validation. The
-mandatory 24–36-trial reviewed corpus, 200-pair annotation subset, and paid B5/P0/P1 baselines are
-pending. No missing result is imputed.
+mandatory 24–36-trial reviewed corpus, complete-world annotation subset of at least 200 pairs, and
+paid B5/P0/P1 baselines are pending. No missing result is imputed.
 
 ## GCP deployment summary
 

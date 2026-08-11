@@ -8,6 +8,10 @@ import pytest
 from backend.app.application.vertical_slice import load_vertical_slice
 from backend.app.domain.canonical import canonical_json_bytes
 from backend.app.evaluation.corpus import build_release_corpus
+from backend.app.evaluation.release_metrics import (
+    evaluate_release_invariants,
+    evaluate_safety_ablation_controls,
+)
 from backend.app.evaluation.retrieval_evidence import (
     CuratedRetrievalEvidence,
     CuratedRetrievalQuery,
@@ -83,6 +87,26 @@ def test_curated_retrieval_evidence_covers_every_held_out_world() -> None:
     assert result["query_count"] == len(worlds)
     assert result["baselines"]["full_three_source_rrf"]["recall_at_20"] == 1.0
     assert result["exact_condition_irrelevance_exclusion_count"] == 0
+
+    invariants = evaluate_release_invariants(
+        benchmark=benchmark,
+        corpus=corpus,
+        retrieval_evidence=evidence,
+        max_questions=5,
+    )
+    assert invariants["safety_metrics"]["unsupported_hard_decision_rate"] == 0.0
+    assert invariants["safety_metrics"]["proof_replay_success_rate"] == 1.0
+    assert invariants["safety_metrics"]["explanation_verdict_consistency"] == 1.0
+    assert invariants["protocol_metrics"]["boundary_test_pass_rate"] == 1.0
+
+    controls = evaluate_safety_ablation_controls(
+        benchmark=benchmark,
+        corpus=corpus,
+        max_questions=5,
+    )
+    assert controls["A1"]["counterfactual_hard_decision_allowed"] is False
+    assert controls["A2"]["counterfactual_hard_decision_allowed"] is True
+    assert controls["A3"]["counterfactual_hard_decision_allowed"] is True
 
 
 def test_curated_retrieval_rejects_exact_match_excluded_as_irrelevant() -> None:

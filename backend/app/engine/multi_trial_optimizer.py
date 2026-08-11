@@ -74,6 +74,14 @@ class CandidatePolicyStatistics:
     mean_verified_trial_eliminations: float
 
 
+@dataclass(frozen=True)
+class OptimizerScoringFlags:
+    minimum_branch_utility: bool = True
+    burden_penalty: bool = True
+    branch_discrimination: bool = True
+    slot_level_deduplication: bool = True
+
+
 def rank_discount(rank: int) -> float:
     return 1.0 / math.log2(rank + 1)
 
@@ -111,7 +119,9 @@ def compute_topk_risk(state: FullOptimizationState) -> float:
     return numerator / denominator
 
 
-def generate_slot_candidates(state: FullOptimizationState) -> list[QuestionCandidate]:
+def generate_slot_candidates(
+    state: FullOptimizationState, *, slot_level_deduplication: bool = True
+) -> list[QuestionCandidate]:
     aggregate = state.aggregate
     rank_by_trial = {nct_id: rank for rank, nct_id in enumerate(aggregate.ranked_nct_ids, start=1)}
     affected_by_slot: dict[str, list[AffectedCriterion]] = {}
@@ -144,14 +154,23 @@ def generate_slot_candidates(state: FullOptimizationState) -> list[QuestionCandi
 
     candidates: list[QuestionCandidate] = []
     unavailable = set(aggregate.unavailable_slot_ids) | set(aggregate.asked_slot_ids)
-    for slot_id, affected in sorted(affected_by_slot.items()):
+    candidate_groups = [
+        (slot_id, affected, slot_id) for slot_id, affected in sorted(affected_by_slot.items())
+    ]
+    if not slot_level_deduplication:
+        candidate_groups = [
+            (slot_id, [item], f"{slot_id}:{item.nct_id}:{item.criterion_id}")
+            for slot_id, affected in sorted(affected_by_slot.items())
+            for item in affected
+        ]
+    for slot_id, affected, question_identity in candidate_groups:
         if slot_id in unavailable:
             continue
         slot = state.slots.get(slot_id)
         if slot is None:
             continue
         question_id = deterministic_question_id(
-            aggregate.session_id, aggregate.patient_state_version, slot_id
+            aggregate.session_id, aggregate.patient_state_version, question_identity
         )
         criteria = [
             aggregate.compiled_trials[item.nct_id].criteria[
@@ -366,7 +385,9 @@ def _simulate_candidate(
     return _SimulatedCandidate(candidate, metrics, outcomes, raw_coverage)
 
 
-def candidate_policy_statistics(state: FullOptimizationState) -> list[CandidatePolicyStatistics]:
+def candidate_policy_statistics(
+    state: FullOptimizationState, *, slot_level_deduplication: bool = True
+) -> list[CandidatePolicyStatistics]:
     """Evaluate candidates with the same branch simulator used by the live B6 policy."""
 
     before_risk = compute_topk_risk(state)
@@ -375,7 +396,9 @@ def candidate_policy_statistics(state: FullOptimizationState) -> list[CandidateP
         for nct_id, evaluation in state.aggregate.trial_evaluations.items()
     }
     statistics: list[CandidatePolicyStatistics] = []
-    for candidate in generate_slot_candidates(state):
+    for candidate in generate_slot_candidates(
+        state, slot_level_deduplication=slot_level_deduplication
+    ):
         simulated = _simulate_candidate(state, candidate, before_risk)
         eliminations = [
             sum(
@@ -397,23 +420,29 @@ def candidate_policy_statistics(state: FullOptimizationState) -> list[CandidateP
     return statistics
 
 
-def _score(simulated: _SimulatedCandidate, coverage: float) -> QuestionCandidate:
+def _score(
+    simulated: _SimulatedCandidate,
+    coverage: float,
+    flags: OptimizerScoringFlags,
+) -> QuestionCandidate:
     metrics = simulated.metrics
     candidate = simulated.candidate
     mean_risk = sum(item.risk_reduction for item in metrics) / len(metrics)
     minimum_risk = min(item.risk_reduction for item in metrics)
     mean_resolution = sum(item.decision_resolution for item in metrics) / len(metrics)
-    discrimination = branch_discrimination(
-        simulated.outcomes, [branch.weight for branch in candidate.branches]
+    discrimination = (
+        branch_discrimination(simulated.outcomes, [branch.weight for branch in candidate.branches])
+        if flags.branch_discrimination
+        else 0.0
     )
     base = (
         0.45 * mean_risk
-        + 0.20 * minimum_risk
+        + 0.20 * minimum_risk * flags.minimum_branch_utility
         + 0.15 * mean_resolution
         + 0.10 * discrimination
         + 0.10 * coverage
     )
-    final = base - candidate.burden_penalty - candidate.sensitivity_penalty
+    final = base - candidate.burden_penalty * flags.burden_penalty - candidate.sensitivity_penalty
     return candidate.model_copy(
         update={
             "utility_components": UtilityComponents(
@@ -482,7 +511,12 @@ def _stop(reason: str, candidates: list[QuestionCandidate]) -> QuestionSelection
     )
 
 
-def select_next_action(state: FullOptimizationState) -> QuestionSelection:
+def select_next_action(
+    state: FullOptimizationState,
+    *,
+    scoring_flags: OptimizerScoringFlags | None = None,
+) -> QuestionSelection:
+    flags = scoring_flags or OptimizerScoringFlags()
     aggregate = state.aggregate
     if not aggregate.ranked_nct_ids:
         return _stop("NO_RELEVANT_TRIALS", [])
@@ -490,7 +524,9 @@ def select_next_action(state: FullOptimizationState) -> QuestionSelection:
         return _stop(state.dependency_stop_reason, [])
     if aggregate.question_count >= aggregate.config.max_questions:
         return _stop("MAX_QUESTION_BUDGET", [])
-    candidates = generate_slot_candidates(state)
+    candidates = generate_slot_candidates(
+        state, slot_level_deduplication=flags.slot_level_deduplication
+    )
     if not candidates:
         return _stop("NO_ACTIONABLE_MISSING_SLOT", [])
 
@@ -498,7 +534,11 @@ def select_next_action(state: FullOptimizationState) -> QuestionSelection:
     simulated = [_simulate_candidate(state, candidate, before_risk) for candidate in candidates]
     maximum_coverage = max(item.raw_coverage for item in simulated)
     scored = [
-        _score(item, item.raw_coverage / maximum_coverage if maximum_coverage else 0.0)
+        _score(
+            item,
+            item.raw_coverage / maximum_coverage if maximum_coverage else 0.0,
+            flags,
+        )
         for item in simulated
     ]
     ordered = _select_with_ties(scored)

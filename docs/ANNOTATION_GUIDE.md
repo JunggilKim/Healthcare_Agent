@@ -103,6 +103,35 @@ reviewer identities. Publishing is allowed only for a complete review and binds 
 paths and hashes into the root manifest consumed by the strict verifier. `--allow-incomplete` may
 produce an explicitly pending progress manifest; it cannot produce `status=ADJUDICATED`.
 
+The release selector treats 200 as a minimum and keeps every selected patient-world criterion set
+complete. This is required to calculate the specified trial-level false pre-screen pass rate; the
+metric is never approximated from isolated criterion PASS errors.
+
+## Retrieval and paid baseline handoff
+
+Run `scripts/prepare_retrieval_evidence.py prepare-review` to produce rank-blinded relevance
+assignments for every held-out world against the frozen corpus. After review, materialize the five
+retrieval baselines from recorded `RetrievalResult` objects with
+`scripts/materialize_retrieval_runs.py`, then use `prepare_retrieval_evidence.py finalize` to bind
+qrels, system orders, exact-condition flags, the snapshot manifest, and the run commit.
+
+P0/P1 use `scripts/prepare_proof_baselines.py prepare` and `finalize`. B5 is sequential: repeat
+`scripts/prepare_b5_policy.py prepare-step`, submit its JSONL through the explicitly gated
+`scripts/submit_gemini_batch.py`, and run `apply-step` until all observations stop or reach the
+question budget; then run `finalize`. Every recorded B5 choice is replayed against the actual
+candidate list and rejected if the model invented a slot.
+
+Local Snapshot timing is collected with:
+
+```bash
+uv run python scripts/measure_snapshot_performance.py --runs 20 \
+  --output artifacts/eval/performance/snapshot.json
+```
+
+Combine it only with actual controlled Live, fallback, log-scan, and Cloud Run startup samples in
+the `trial-opt-performance-v1` schema. Validate that final evidence with
+`scripts/validate_performance_evidence.py`; do not copy local timings into Live fields.
+
 ## Quality control
 
 Record raw independent labels, disagreement reason, final adjudicated label, adjudicator ID alias,

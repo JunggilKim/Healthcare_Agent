@@ -157,6 +157,7 @@ def evaluate_adjudicated_subset(
                 "world_id": assignment.world_id,
                 "nct_id": assignment.nct_id,
                 "criterion_id": assignment.criterion_id,
+                "criticality": assignment.criticality,
                 "split": assignment.split,
                 "included_in_matching_metrics": included,
                 "gold_verdict": annotation.verdict.value,
@@ -170,29 +171,58 @@ def evaluate_adjudicated_subset(
         )
     metrics = classification_metrics(truth, predictions, _MATCHING_LABELS)
     fail_metrics = metrics["per_class"][CriterionVerdict.FAIL.value]
-    unresolved_gold = {
-        CriterionVerdict.FAIL.value,
-        CriterionVerdict.UNKNOWN.value,
-        CriterionVerdict.CONFLICT.value,
-    }
-    false_pass = [
-        row
-        for row in rows
-        if row["included_in_matching_metrics"]
-        and row["gold_verdict"] in unresolved_gold
-        and row["system_verdict"] == CriterionVerdict.PASS.value
-    ]
     included_rows = [row for row in rows if row["included_in_matching_metrics"]]
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault((str(row["world_id"]), str(row["nct_id"])), []).append(row)
+    complete_groups: list[list[dict[str, Any]]] = []
+    incomplete_groups: list[str] = []
+    for (world_id, nct_id), group_rows in sorted(grouped.items()):
+        expected = {
+            criterion.criterion_id for criterion in trials[nct_id].criteria if not criterion.opaque
+        }
+        actual = {str(row["criterion_id"]) for row in group_rows}
+        if actual != expected:
+            incomplete_groups.append(f"{world_id}:{nct_id}")
+        else:
+            complete_groups.append(group_rows)
+
+    def trial_decision(group_rows: list[dict[str, Any]], label_key: str) -> str:
+        nct_id = str(group_rows[0]["nct_id"])
+        if any(
+            criterion.criticality == "CRITICAL" and criterion.opaque
+            for criterion in trials[nct_id].criteria
+        ):
+            return "UNRESOLVED"
+        critical = [row for row in group_rows if row["criticality"] == "CRITICAL"]
+        labels = {str(row[label_key]) for row in critical}
+        if CriterionVerdict.FAIL.value in labels:
+            return "INELIGIBLE"
+        if labels & {
+            CriterionVerdict.UNKNOWN.value,
+            CriterionVerdict.CONFLICT.value,
+            AnnotationVerdict.OPAQUE.value,
+        }:
+            return "UNRESOLVED"
+        return "PRE_SCREEN_PASS"
+
+    false_pre_screen_passes = sum(
+        trial_decision(group_rows, "system_verdict") == "PRE_SCREEN_PASS"
+        and trial_decision(group_rows, "gold_verdict") != "PRE_SCREEN_PASS"
+        for group_rows in complete_groups
+    )
     return {
         "scope": "DATASET_A_MANUALLY_ADJUDICATED_CRITERION_SUBSET",
-        "acceptance_eligible": len(included_rows) >= 200,
+        "acceptance_eligible": len(included_rows) >= 200 and not incomplete_groups,
         "reviewed_count": len(gold),
         "matching_count": len(included_rows),
         "excluded_opaque_or_unsafe": excluded,
         "criterion_metrics": metrics,
         "hard_fail_recall": float(fail_metrics["recall"]),
-        "false_pre_screen_pass_rate": len(false_pass) / len(included_rows)
-        if included_rows
+        "complete_trial_world_groups": len(complete_groups),
+        "incomplete_trial_world_groups": incomplete_groups,
+        "false_pre_screen_pass_rate": false_pre_screen_passes / len(complete_groups)
+        if complete_groups
         else 1.0,
         "evidence_precision": evidence_correct / evidence_predicted
         if evidence_predicted

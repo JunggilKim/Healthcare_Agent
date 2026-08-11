@@ -9,9 +9,10 @@ import orjson
 from pydantic import Field, model_validator
 
 from backend.app.domain.base import StrictModel
+from backend.app.domain.canonical import canonical_json_bytes
 from backend.app.evaluation.corpus import ReleaseCorpus
 from backend.app.evaluation.metrics import mean, retrieval_metrics
-from backend.app.evaluation.models import BenchmarkArtifact
+from backend.app.evaluation.models import BenchmarkArtifact, WorldFact
 
 RETRIEVAL_BASELINES = {
     "ctgov_rank_only",
@@ -20,6 +21,56 @@ RETRIEVAL_BASELINES = {
     "ctgov_bm25_rrf",
     "full_three_source_rrf",
 }
+
+
+class RetrievalRelevanceAssignment(StrictModel):
+    schema_version: Literal["trial-opt-retrieval-review-assignment-v1"] = (
+        "trial-opt-retrieval-review-assignment-v1"
+    )
+    record_id: str
+    query_id: str
+    world_id: str
+    patient_narrative: str
+    patient_facts: list[WorldFact]
+    candidate_nct_id: str
+    candidate_title: str
+    candidate_conditions: list[str]
+    candidate_summary: str | None
+    assignment_hash: str
+
+    @model_validator(mode="after")
+    def assignment_is_hash_bound(self) -> RetrievalRelevanceAssignment:
+        if self.assignment_hash != retrieval_assignment_hash(self):
+            raise ValueError("RETRIEVAL_REVIEW_ASSIGNMENT_HASH_MISMATCH")
+        return self
+
+
+class RetrievalRelevanceReview(StrictModel):
+    schema_version: Literal["trial-opt-retrieval-review-v1"] = "trial-opt-retrieval-review-v1"
+    record_id: str
+    assignment_hash: str
+    reviewer_label: str = Field(min_length=1)
+    relevance: int = Field(ge=0, le=2)
+    rationale: str = Field(min_length=1)
+    reviewed_at: datetime
+    blinded_to_system_rank: Literal[True]
+
+
+class RetrievalSystemRun(StrictModel):
+    query_id: str
+    world_id: str
+    baseline_orders: dict[str, list[str]]
+    full_rrf_scores: dict[str, float]
+    exact_condition_matches: dict[str, bool]
+    compiled_condition_slot_matches: dict[str, bool]
+    irrelevance_decisions: dict[str, bool]
+    detailed_nct_ids: list[str]
+
+
+def retrieval_assignment_hash(assignment: RetrievalRelevanceAssignment) -> str:
+    return hashlib.sha256(
+        canonical_json_bytes(assignment.model_dump(mode="json", exclude={"assignment_hash"}))
+    ).hexdigest()
 
 
 class CuratedRetrievalQuery(StrictModel):

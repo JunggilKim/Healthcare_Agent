@@ -49,7 +49,7 @@ class DirectLLMPolicyEvidence(StrictModel):
     thinking_level: Literal["MEDIUM"] = "MEDIUM"
     prompt_version: str
     random_seed: int
-    batch_job_name: str
+    batch_job_names: list[str] = Field(min_length=1)
     completed_at: datetime
     runs: list[DirectLLMObservationRun] = Field(min_length=1)
 
@@ -60,7 +60,11 @@ class DirectLLMPolicyEvidence(StrictModel):
         observation_ids = [item.observation_id for item in self.runs]
         if len(set(observation_ids)) != len(observation_ids):
             raise ValueError("B5_OBSERVATION_DUPLICATE")
-        if not self.batch_job_name.strip() or not self.prompt_version.strip():
+        if (
+            any(not item.strip() for item in self.batch_job_names)
+            or len(set(self.batch_job_names)) != len(self.batch_job_names)
+            or not self.prompt_version.strip()
+        ):
             raise ValueError("B5_PROVENANCE_LABEL_MISSING")
         return self
 

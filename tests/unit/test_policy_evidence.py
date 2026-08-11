@@ -21,7 +21,7 @@ def _evidence() -> DirectLLMPolicyEvidence:
         model_id="gemini-3.6-flash",
         prompt_version="direct-question-policy-v1",
         random_seed=20260811,
-        batch_job_name="projects/test/locations/global/batchPredictionJobs/1",
+        batch_job_names=["projects/test/locations/global/batchPredictionJobs/1"],
         completed_at=datetime(2026, 8, 12, tzinfo=UTC),
         runs=[
             DirectLLMObservationRun(

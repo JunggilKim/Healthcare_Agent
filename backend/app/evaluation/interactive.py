@@ -15,12 +15,14 @@ from backend.app.engine.incremental import reevaluate_for_answered_slot
 from backend.app.engine.multi_trial_optimizer import (
     CandidatePolicyStatistics,
     FullOptimizationState,
+    OptimizerScoringFlags,
     candidate_policy_statistics,
     select_next_action,
 )
 from backend.app.engine.proof_verifier import build_verified_proof
 from backend.app.engine.ranker import rank_trials
 from backend.app.engine.trial_aggregator import aggregate_trial, is_trial_irrelevant
+from backend.app.evaluation.ablation import EvaluationAblationConfig, ablation_config
 from backend.app.evaluation.corpus import ReleaseCorpus
 from backend.app.evaluation.execution import (
     benchmark_fact_source_texts,
@@ -273,7 +275,7 @@ def _choose_baseline_candidate(
     raise ValueError(f"UNSUPPORTED_BASELINE_POLICY:{policy}")
 
 
-def _apply_oracle_answer(
+def apply_benchmark_oracle_answer(
     state: FullOptimizationState,
     candidate: QuestionCandidate,
     *,
@@ -346,6 +348,7 @@ def run_question_policy(
     seed: int,
     max_questions: int,
     direct_llm_steps: list[DirectLLMChoiceStep] | None = None,
+    ablation_config: EvaluationAblationConfig | None = None,
 ) -> dict[str, Any]:
     run_key = f"{observation.observation_id}:{policy}:{seed}"
     state = build_optimization_state(
@@ -392,8 +395,26 @@ def run_question_policy(
             )
             break
 
-        if policy == "B6":
-            selection = select_next_action(state)
+        if policy == "B6" and not (
+            ablation_config is not None and ablation_config.policy == "max_coverage"
+        ):
+            flags = OptimizerScoringFlags(
+                minimum_branch_utility=(
+                    ablation_config.minimum_branch_utility if ablation_config is not None else True
+                ),
+                burden_penalty=(
+                    ablation_config.burden_penalty if ablation_config is not None else True
+                ),
+                branch_discrimination=(
+                    ablation_config.branch_discrimination if ablation_config is not None else True
+                ),
+                slot_level_deduplication=(
+                    ablation_config.slot_level_deduplication
+                    if ablation_config is not None
+                    else True
+                ),
+            )
+            selection = select_next_action(state, scoring_flags=flags)
             candidate = selection.selected
             if candidate is None:
                 stop_reason = selection.stop_reason
@@ -401,7 +422,14 @@ def run_question_policy(
                     stable_at = question_index
                 break
         else:
-            statistics_rows = candidate_policy_statistics(state)
+            deduplicate = not (
+                policy == "B6"
+                and ablation_config is not None
+                and not ablation_config.slot_level_deduplication
+            )
+            statistics_rows = candidate_policy_statistics(
+                state, slot_level_deduplication=deduplicate
+            )
             direct_slot = (
                 direct_llm_steps[question_index].selected_slot_id
                 if direct_llm_steps is not None and question_index < len(direct_llm_steps)
@@ -416,7 +444,7 @@ def run_question_policy(
                 ):
                     raise ValueError("B5_RECORDED_CANDIDATE_LIST_MISMATCH")
             candidate = _choose_baseline_candidate(
-                policy,
+                "B3" if policy == "B6" else policy,
                 statistics_rows,
                 rng=rng,
                 direct_llm_slot=direct_slot,
@@ -429,7 +457,7 @@ def run_question_policy(
         asked_slots.append(candidate.slot_id)
         burden_costs.append(candidate.burden_penalty + candidate.sensitivity_penalty)
         resolved_counts.append(
-            _apply_oracle_answer(
+            apply_benchmark_oracle_answer(
                 state,
                 candidate,
                 world=world,
@@ -664,5 +692,59 @@ def evaluate_interactive_benchmark(
             for summary in summaries.values()
             if "max_questions_observed" in summary
         ),
+        "predictions": predictions,
+    }
+
+
+def evaluate_ablation_benchmark(
+    *,
+    benchmark: BenchmarkArtifact,
+    corpus: ReleaseCorpus,
+    retrieval_evidence: CuratedRetrievalEvidence,
+    seed: int,
+    max_questions: int,
+    safety_controls: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    selected = [
+        item
+        for item in benchmark.observations
+        if item.split == "test" and item.rate == 0.4 and item.pattern == "REALISTIC"
+    ]
+    if not selected:
+        raise ValueError("BENCHMARK_ABLATION_TEST_OBSERVATIONS_MISSING")
+    worlds = {item.world_id: item for item in benchmark.worlds}
+    retrieval_by_world = {item.world_id: item for item in retrieval_evidence.queries}
+    results: dict[str, Any] = {}
+    predictions: list[dict[str, Any]] = []
+    for ablation_id in [f"A{index}" for index in range(1, 9)]:
+        config = ablation_config(ablation_id, app_env="eval")
+        rows = []
+        for observation in selected:
+            retrieval = retrieval_by_world[observation.world_id]
+            row = run_question_policy(
+                policy="B6",
+                world=worlds[observation.world_id],
+                observation=observation,
+                corpus=corpus,
+                retrieval_scores=retrieval.full_rrf_scores,
+                exact_condition_matches=retrieval.exact_condition_matches,
+                detailed_nct_ids=retrieval.detailed_nct_ids,
+                seed=seed,
+                max_questions=max_questions,
+                ablation_config=config,
+            )
+            rows.append(row)
+            predictions.append({"suite": "ablation", "ablation": ablation_id, **row})
+        results[ablation_id] = {
+            **summarize_question_policy(ablation_id, rows, max_questions),
+            "configuration": config.model_dump(mode="json"),
+            "safety_control": safety_controls.get(ablation_id),
+        }
+    if set(safety_controls) != {"A1", "A2", "A3"}:
+        raise ValueError("BENCHMARK_SAFETY_ABLATION_CONTROLS_INCOMPLETE")
+    return {
+        "scope": "DATASET_A_CONFIG_DRIVEN_ABLATIONS",
+        "acceptance_eligible": True,
+        "ablations": results,
         "predictions": predictions,
     }

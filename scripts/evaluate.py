@@ -36,7 +36,10 @@ from backend.app.evaluation.execution import (  # noqa: E402
     evaluate_adjudicated_subset,
     evaluate_world,
 )
-from backend.app.evaluation.interactive import evaluate_interactive_benchmark  # noqa: E402
+from backend.app.evaluation.interactive import (  # noqa: E402
+    evaluate_ablation_benchmark,
+    evaluate_interactive_benchmark,
+)
 from backend.app.evaluation.metrics import (  # noqa: E402
     classification_metrics,
     mean,
@@ -51,6 +54,15 @@ from backend.app.evaluation.models import (  # noqa: E402
 from backend.app.evaluation.policy_evidence import (  # noqa: E402
     load_direct_llm_policy_evidence,
     validate_direct_llm_policy_evidence,
+)
+from backend.app.evaluation.proof_baselines import (  # noqa: E402
+    ProofBaselineEvidence,
+    evaluate_proof_baselines,
+    validate_proof_baseline_evidence,
+)
+from backend.app.evaluation.release_metrics import (  # noqa: E402
+    evaluate_release_invariants,
+    evaluate_safety_ablation_controls,
 )
 from backend.app.evaluation.retrieval_evidence import (  # noqa: E402
     evaluate_curated_retrieval,
@@ -83,6 +95,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--annotation-manifest", type=Path)
     parser.add_argument("--retrieval-evidence", type=Path)
     parser.add_argument("--b5-policy-evidence", type=Path)
+    parser.add_argument("--proof-baseline-evidence", type=Path)
     parser.add_argument("--policies", default="all")
     parser.add_argument("--seed", type=int, default=20260811)
     parser.add_argument("--all", action="store_true", dest="all_ablations")
@@ -620,6 +633,80 @@ def main() -> None:
                     args.annotation_manifest,
                     args.compiled_trials,
                 )
+                if release_corpus is not None and retrieval_evidence is not None:
+                    invariant_metrics = evaluate_release_invariants(
+                        benchmark=benchmark,
+                        corpus=release_corpus,
+                        retrieval_evidence=retrieval_evidence,
+                        max_questions=int(config["max_questions"]),
+                    )
+                    payload = {
+                        **payload,
+                        "acceptance_eligible": (
+                            payload["acceptance_eligible"]
+                            and invariant_metrics["acceptance_eligible"]
+                        ),
+                        "safety_metrics": invariant_metrics["safety_metrics"],
+                        "protocol_metrics": invariant_metrics["protocol_metrics"],
+                    }
+                else:
+                    payload = {
+                        **payload,
+                        "acceptance_eligible": False,
+                        "limitations": [
+                            "Release safety/protocol invariants require curated retrieval evidence "
+                            "and the hash-bound raw/compiled/review corpus."
+                        ],
+                    }
+                if args.proof_baseline_evidence is not None and "safety_metrics" in payload:
+                    manifest_bytes = args.annotation_manifest.read_bytes()
+                    annotation_manifest = orjson.loads(manifest_bytes)
+                    assignment_path = _repository_artifact(
+                        annotation_manifest.get("assignment_jsonl_path")
+                    )
+                    gold_path = _repository_artifact(
+                        annotation_manifest.get("adjudicated_jsonl_path")
+                    )
+                    assignments = [
+                        AnnotationAssignment.model_validate(item.model_dump(mode="json"))
+                        for item in load_jsonl(assignment_path, AnnotationAssignment)
+                    ]
+                    gold = [
+                        AdjudicatedAnnotation.model_validate(item.model_dump(mode="json"))
+                        for item in load_jsonl(gold_path, AdjudicatedAnnotation)
+                    ]
+                    proof_evidence = ProofBaselineEvidence.model_validate(
+                        orjson.loads(args.proof_baseline_evidence.read_bytes())
+                    )
+                    validate_proof_baseline_evidence(
+                        proof_evidence,
+                        annotation_manifest_bytes=manifest_bytes,
+                        assignment_jsonl_bytes=assignment_path.read_bytes(),
+                        assignments=assignments,
+                    )
+                    payload["proof_baselines"] = evaluate_proof_baselines(
+                        proof_evidence,
+                        assignments=assignments,
+                        gold=gold,
+                        p2_p3_criterion_metrics=payload["criterion_metrics"],
+                        p3_unsupported_hard_decision_rate=payload["safety_metrics"][
+                            "unsupported_hard_decision_rate"
+                        ],
+                        p3_proof_replay_success_rate=payload["safety_metrics"][
+                            "proof_replay_success_rate"
+                        ],
+                    )
+                else:
+                    payload = {
+                        **payload,
+                        "acceptance_eligible": False,
+                        "proof_baselines": {
+                            "P0": {"status": "NOT_RUN_REQUIRES_PAID_LLM_BASELINE"},
+                            "P1": {"status": "NOT_RUN_REQUIRES_PAID_LLM_BASELINE"},
+                            "P2": {"status": "COMPLETED"},
+                            "P3": {"status": "COMPLETED"},
+                        },
+                    }
             else:
                 payload = _criterion_suite(benchmark)
         elif suite == "interactive":
@@ -640,10 +727,25 @@ def main() -> None:
                 )
             )
         else:
-            payload = _ablation_suite(
-                benchmark,
-                seed=args.seed,
-                max_questions=int(config["max_questions"]),
+            payload = (
+                evaluate_ablation_benchmark(
+                    benchmark=benchmark,
+                    corpus=release_corpus,
+                    retrieval_evidence=retrieval_evidence,
+                    seed=args.seed,
+                    max_questions=int(config["max_questions"]),
+                    safety_controls=evaluate_safety_ablation_controls(
+                        benchmark=benchmark,
+                        corpus=release_corpus,
+                        max_questions=int(config["max_questions"]),
+                    ),
+                )
+                if retrieval_evidence is not None and release_corpus is not None
+                else _ablation_suite(
+                    benchmark,
+                    seed=args.seed,
+                    max_questions=int(config["max_questions"]),
+                )
             )
         ended = datetime.now(UTC)
         metadata = _metadata(

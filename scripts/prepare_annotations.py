@@ -42,6 +42,7 @@ def main() -> None:
         seed=args.seed,
         sample_size=args.sample_size,
         dual_review_size=args.dual_review_size,
+        complete_world_bundles=True,
     )
     assignment_path = output / "assignments.jsonl"
     write_jsonl(assignment_path, assignments)
@@ -57,6 +58,7 @@ def main() -> None:
         "assignment_jsonl_sha256": hashlib.sha256(assignment_path.read_bytes()).hexdigest(),
         "seed": args.seed,
         "assignment_count": len(assignments),
+        "selection_contract": "complete patient-world criterion bundles; target size is a minimum",
         "dual_review_count": sum(item.dual_review_required for item in assignments),
         "split_nct_ids": {
             split: sorted({item.nct_id for item in assignments if item.split == split})

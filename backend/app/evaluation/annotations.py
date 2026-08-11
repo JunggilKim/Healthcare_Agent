@@ -136,6 +136,7 @@ def build_annotation_assignments(
     seed: int,
     sample_size: int,
     dual_review_size: int,
+    complete_world_bundles: bool = False,
 ) -> list[AnnotationAssignment]:
     if benchmark.seed != seed:
         raise ValueError("ANNOTATION_SEED_MUST_MATCH_BENCHMARK")
@@ -175,7 +176,20 @@ def build_annotation_assignments(
             f"ANNOTATION_SAMPLE_UNDERSIZED:available={len(candidates)} required={sample_size}"
         )
     candidates.sort(key=lambda item: _sample_key(seed, item[0]))
-    selected = candidates[:sample_size]
+    if complete_world_bundles:
+        by_world: dict[str, list[tuple[str, PatientWorld, CompiledCriterion]]] = {}
+        for item in candidates:
+            by_world.setdefault(item[1].world_id, []).append(item)
+        selected = []
+        for world_id in sorted(
+            by_world,
+            key=lambda value: _sample_key(seed, f"world:{value}"),
+        ):
+            selected.extend(by_world[world_id])
+            if len(selected) >= sample_size:
+                break
+    else:
+        selected = candidates[:sample_size]
     dual_ids = {
         item[0]
         for item in sorted(selected, key=lambda item: _sample_key(seed + 1, item[0]))[

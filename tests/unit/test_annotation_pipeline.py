@@ -72,6 +72,29 @@ def test_assignment_generation_is_deterministic_blinded_and_hash_bound() -> None
         AnnotationAssignment.model_validate(tampered)
 
 
+def test_release_annotation_selection_keeps_complete_world_bundles() -> None:
+    fixture = load_vertical_slice()
+    assignments = build_annotation_assignments(
+        _benchmark(),
+        [fixture.compiled_trial],
+        seed=20260811,
+        sample_size=8,
+        dual_review_size=2,
+        complete_world_bundles=True,
+    )
+    expected = {
+        criterion.criterion_id
+        for criterion in fixture.compiled_trial.criteria
+        if not criterion.opaque
+    }
+    by_world: dict[str, set[str]] = {}
+    for assignment in assignments:
+        by_world.setdefault(assignment.world_id, set()).add(assignment.criterion_id)
+
+    assert len(assignments) >= 8
+    assert all(criterion_ids == expected for criterion_ids in by_world.values())
+
+
 def test_dual_review_disagreement_requires_independent_adjudication() -> None:
     fixture = load_vertical_slice()
     assignments = build_annotation_assignments(
