@@ -12,9 +12,10 @@ import orjson
 from backend.app.domain.sessions import SessionState
 from backend.app.infrastructure.gcp_store import GcpSessionStore
 from backend.app.infrastructure.local_store import LocalSessionStore
+from backend.app.infrastructure.resilient_gcp_store import PersistenceResilientStore
 from backend.app.infrastructure.snapshot_loader import SnapshotManifest, load_verified_snapshot
 
-SessionStore = LocalSessionStore | GcpSessionStore
+SessionStore = LocalSessionStore | GcpSessionStore | PersistenceResilientStore
 
 
 class SnapshotReplayService:
@@ -247,7 +248,7 @@ class SnapshotReplayService:
 
     async def export_report(self, session_id: str) -> dict[str, object] | None:
         payload = await self.store.read_session(session_id)
-        if payload is None:
+        if payload is None or payload.get("export_available") is False:
             return None
         case_root = self.root / payload["snapshot_case_root"]
         reports = self._load(case_root / "reports.json")

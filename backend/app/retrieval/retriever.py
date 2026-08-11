@@ -36,10 +36,12 @@ class HybridRetriever:
         ctgov: ClinicalTrialsGovClient,
         embeddings: EmbeddingProvider,
         snapshot_root: Path,
+        snapshot_embeddings: EmbeddingProvider | None = None,
         tokenizer: RegexMedicalTokenizer | None = None,
     ) -> None:
         self.ctgov = ctgov
         self.embeddings = embeddings
+        self.snapshot_embeddings = snapshot_embeddings
         self.snapshot_root = snapshot_root
         self.tokenizer = tokenizer or RegexMedicalTokenizer()
 
@@ -176,9 +178,15 @@ class HybridRetriever:
         embedding_ranks: dict[str, int] | None = None
         full_scores: dict[str, float] | None = None
         try:
-            query_vector = await self.embeddings.embed_query(query.dense_query)
+            embedding_provider = (
+                self.snapshot_embeddings
+                if result_mode in {"snapshot", "hybrid_degraded"}
+                and self.snapshot_embeddings is not None
+                else self.embeddings
+            )
+            query_vector = await embedding_provider.embed_query(query.dense_query)
             documents = [build_trial_document(item.trial) for item in stage_a]
-            vectors = await self.embeddings.embed_documents(documents)
+            vectors = await embedding_provider.embed_documents(documents)
             if len(vectors) != len(stage_a):
                 raise EmbeddingUnavailableError("incomplete dense document set")
             embedding_ranks = cosine_ranks(

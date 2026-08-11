@@ -1,0 +1,22 @@
+schema_version: trial-opt-manual-review-v1
+status: PENDING_EXTERNAL_REVIEW
+review_policy: exact_hash_case_review
+cases:
+  - case_id: S004
+    approved: false
+    reviewer_alias: null
+    reviewed_at: null
+    compiled_trials_sha256: null
+    proofs_sha256: null
+  - case_id: S008
+    approved: false
+    reviewer_alias: null
+    reviewed_at: null
+    compiled_trials_sha256: null
+    proofs_sha256: null
+  - case_id: S001
+    approved: false
+    reviewer_alias: null
+    reviewed_at: null
+    compiled_trials_sha256: null
+    proofs_sha256: null

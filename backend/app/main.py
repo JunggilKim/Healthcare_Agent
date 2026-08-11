@@ -24,6 +24,7 @@ from backend.app.infrastructure.rate_limiter import (
     FirestoreFixedWindowRateLimiter,
     FixedWindowRateLimiter,
 )
+from backend.app.infrastructure.resilient_gcp_store import PersistenceResilientStore
 from backend.app.main_constants import DISCLAIMER
 from backend.app.settings import get_settings
 
@@ -31,7 +32,7 @@ from backend.app.settings import get_settings
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    for logger_name in ("trial_opt.request", "trial_opt.model"):
+    for logger_name in ("trial_opt.request", "trial_opt.model", "trial_opt.persistence"):
         audit_logger = logging.getLogger(logger_name)
         audit_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
         audit_logger.propagate = False
@@ -40,11 +41,13 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             handler.setFormatter(logging.Formatter("%(message)s"))
             audit_logger.addHandler(handler)
     store = (
-        GcpSessionStore(
-            project=settings.google_cloud_project,
-            database=settings.firestore_database,
-            bucket_name=settings.gcs_bucket,
-            hmac_salt=settings.session_token_hmac_salt,
+        PersistenceResilientStore(
+            GcpSessionStore(
+                project=settings.google_cloud_project,
+                database=settings.firestore_database,
+                bucket_name=settings.gcs_bucket,
+                hmac_salt=settings.session_token_hmac_salt,
+            )
         )
         if settings.store_backend == "gcp"
         else LocalSessionStore(
@@ -56,7 +59,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     application.state.session_service = RoutedSessionService(store, settings)
     application.state.rate_limiter = (
         FirestoreFixedWindowRateLimiter(store.firestore, salt=settings.ip_hash_salt)
-        if isinstance(store, GcpSessionStore)
+        if isinstance(store, PersistenceResilientStore)
         else FixedWindowRateLimiter(
             salt=settings.ip_hash_salt or "local-development-only-change-me"
         )

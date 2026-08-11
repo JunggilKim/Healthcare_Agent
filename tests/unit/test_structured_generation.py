@@ -5,9 +5,14 @@ from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from backend.app.domain.base import StrictModel
 from backend.app.infrastructure.cache import LocalModelResultCache, model_cache_key
-from backend.app.infrastructure.structured_generation import StructuredGenerator
+from backend.app.infrastructure.structured_generation import (
+    StructuredGenerationUnavailable,
+    StructuredGenerator,
+)
 from backend.app.infrastructure.usage_guard import InMemoryUsageGuard, default_pricing_estimator
 
 
@@ -46,6 +51,19 @@ class _FallbackModels:
         self.calls.append(model)
         text = '{"value":"fallback"}' if model == "gemini-3.5-flash-lite" else "invalid"
         return SimpleNamespace(text=text, usage_metadata=None)
+
+
+class _FailureModels:
+    def __init__(self, failure: str) -> None:
+        self.failure = failure
+        self.calls = 0
+
+    async def generate_content(self, *, model, contents, config):
+        del model, contents, config
+        self.calls += 1
+        if self.failure == "timeout":
+            raise TimeoutError("recorded Gemini timeout")
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
 
 
 async def _no_sleep(_delay: float) -> None:
@@ -155,6 +173,35 @@ async def test_primary_schema_exhaustion_uses_single_lite_fallback(tmp_path: Pat
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
     ]
+
+
+@pytest.mark.parametrize("failure", ["timeout", "429"])
+async def test_gemini_timeout_and_429_exhaust_bounded_retries(tmp_path: Path, failure: str) -> None:
+    client = _FakeClient()
+    models = _FailureModels(failure)
+    client.aio.models = models
+    generator = StructuredGenerator(
+        client=client,
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+        sleep=_no_sleep,
+        jitter=lambda _low, _high: 0,
+    )
+    with pytest.raises(StructuredGenerationUnavailable):
+        await generator.generate(
+            model_id="gemini-3.6-flash",
+            task_name="fault-test",
+            prompt="return json",
+            prompt_version="1.0.0",
+            output_schema_version="test-v1",
+            slot_catalog_version="slot-catalog-v1",
+            normalized_input={"x": 1},
+            output_model=_Output,
+            thinking_level="MEDIUM",
+            max_output_tokens=100,
+            max_attempts=3,
+        )
+    assert models.calls == 3
 
 
 def test_pricing_estimator_uses_configured_prices() -> None:

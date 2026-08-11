@@ -301,10 +301,111 @@ class Verifier:
             cases = [case.case_id for case in manifest.cases if case.complete]
             built_at = datetime.fromisoformat(manifest.built_at.replace("Z", "+00:00"))
             age = datetime.now(UTC) - built_at.astimezone(UTC)
-            valid = cases == ["S004", "S008", "S001"] and age <= timedelta(hours=48)
+            required_case_files = {
+                "initial.json",
+                "raw_trials.json",
+                "retrieval.json",
+                "embeddings.json",
+                "embeddings.npz",
+                "compiled_trials.json",
+                "proofs.json",
+                "ranking.json",
+                "questions.json",
+                "reports.json",
+                "experiment_summary.json",
+            }
+
+            def nct_ids(value: object) -> set[str]:
+                if isinstance(value, dict):
+                    own = {
+                        item
+                        for key, item in value.items()
+                        if key == "nct_id"
+                        and isinstance(item, str)
+                        and re.fullmatch(r"NCT\d{8}", item)
+                    }
+                    return own | {nct_id for child in value.values() for nct_id in nct_ids(child)}
+                if isinstance(value, list):
+                    return {nct_id for child in value for nct_id in nct_ids(child)}
+                return set()
+
+            declared = {item.path for item in manifest.files}
+            required = {
+                f"sessions/{case_id}/{name}"
+                for case_id in ("S004", "S008", "S001")
+                for name in required_case_files
+            } | {"manual_review.yaml", "acquisition.json"}
+            corpus_ids: set[str] = set()
+            case_counts: dict[str, int] = {}
+            corpus_ok = True
+            for case_id in cases:
+                case_root = root / "sessions" / case_id
+                compiled_ids = nct_ids(
+                    orjson.loads((case_root / "compiled_trials.json").read_bytes())
+                )
+                raw_ids = nct_ids(orjson.loads((case_root / "raw_trials.json").read_bytes()))
+                case_counts[case_id] = len(compiled_ids)
+                corpus_ok = corpus_ok and 8 <= len(compiled_ids) <= 12
+                corpus_ok = corpus_ok and compiled_ids <= raw_ids
+                corpus_ids.update(compiled_ids)
+            corpus_ok = corpus_ok and 24 <= len(corpus_ids) <= 36
+
+            review = yaml.safe_load((root / "manual_review.yaml").read_text(encoding="utf-8"))
+            acquisition = orjson.loads((root / "acquisition.json").read_bytes())
+            if not isinstance(acquisition, dict):
+                raise ValueError("snapshot acquisition manifest must be an object")
+            reviews = review.get("cases", []) if isinstance(review, dict) else []
+            reviews_by_case = {
+                str(item.get("case_id")): item for item in reviews if isinstance(item, dict)
+            }
+            review_ok = isinstance(review, dict) and review.get("status") == "APPROVED"
+            for case_id in cases:
+                item = reviews_by_case.get(case_id, {})
+                case_root = root / "sessions" / case_id
+                review_ok = review_ok and all(
+                    [
+                        item.get("approved") is True,
+                        bool(item.get("reviewer_alias")),
+                        bool(item.get("reviewed_at")),
+                        item.get("compiled_trials_sha256")
+                        == hashlib.sha256(
+                            (case_root / "compiled_trials.json").read_bytes()
+                        ).hexdigest(),
+                        item.get("proofs_sha256")
+                        == hashlib.sha256((case_root / "proofs.json").read_bytes()).hexdigest(),
+                    ]
+                )
+            acquisition_ok = (
+                acquisition.get("schema_version") == "trial-opt-live-acquisition-v1"
+                and acquisition.get("mode") == "LIVE"
+                and acquisition.get("case_ids") == cases
+                and acquisition.get("data_timestamp") == manifest.data_timestamp
+            )
+            hashes = acquisition.get("artifact_sha256", {})
+            acquisition_ok = acquisition_ok and isinstance(hashes, dict)
+            if isinstance(hashes, dict):
+                for relative, expected in hashes.items():
+                    path = root / str(relative)
+                    acquisition_ok = acquisition_ok and path.is_file()
+                    if path.is_file():
+                        acquisition_ok = acquisition_ok and (
+                            hashlib.sha256(path.read_bytes()).hexdigest() == expected
+                        )
+            valid = all(
+                [
+                    cases == ["S004", "S008", "S001"],
+                    age <= timedelta(hours=48),
+                    required <= declared,
+                    corpus_ok,
+                    review_ok,
+                    acquisition_ok,
+                ]
+            )
             detail = (
                 f"version={manifest.snapshot_version}; cases={cases}; "
-                f"age_hours={age.total_seconds() / 3600:.2f}"
+                f"age_hours={age.total_seconds() / 3600:.2f}; "
+                f"case_trial_counts={case_counts}; unique_trials={len(corpus_ids)}; "
+                f"review_ok={review_ok}; acquisition_ok={acquisition_ok}"
             )
             self.add(
                 "snapshot.integrity_age_cases",
@@ -314,7 +415,14 @@ class Verifier:
                 else "snapshot set or age is invalid",
                 detail,
             )
-        except (SnapshotIntegrityError, FileNotFoundError, ValueError) as error:
+        except (
+            SnapshotIntegrityError,
+            FileNotFoundError,
+            ValueError,
+            TypeError,
+            KeyError,
+            yaml.YAMLError,
+        ) as error:
             self.add(
                 "snapshot.integrity_age_cases",
                 False,
@@ -416,34 +524,163 @@ class Verifier:
             return
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
         annotations = json.loads(annotation_path.read_text(encoding="utf-8"))
-        required_metric_keys = {
+        matching_keys = {
             "criterion_macro_f1",
             "hard_fail_recall",
             "false_pre_screen_pass_rate",
             "evidence_precision",
             "retrieval_recall_at_20",
             "bm25_recall_at_20",
+            "exact_condition_irrelevance_exclusion_count",
+        }
+        safety_keys = {
+            "grade_h_hard_decision_occurrences",
+            "unsupported_hard_decision_rate",
+            "proof_replay_success_rate",
+            "explanation_verdict_consistency",
+            "opaque_hard_verdict_occurrences",
+            "verified_fail_above_nonfail_occurrences",
+            "missing_value_default_decision_occurrences",
+            "raw_patient_text_log_occurrences",
+        }
+        protocol_keys = {
+            "protocol_min_character_coverage",
+            "protocol_mean_character_coverage",
+            "boundary_test_pass_rate",
+            "top3_material_opaque_rate",
+            "displayed_hard_verdict_review_approval_rate",
+        }
+        trial_opt_keys = {
             "median_questions_to_stable_top3_40_realistic",
             "b3_median_questions_40_realistic",
             "decision_accuracy_after_3",
             "b3_decision_accuracy_after_3",
-            "unsupported_hard_decision_rate",
-            "proof_replay_success_rate",
+            "question_count_statistically_tied_with_b3",
+            "max_policy_questions",
+            "hard_question_budget",
+            "repeat_seed_identical",
+        }
+        performance_keys = {
+            "snapshot_initial_analysis_p95_seconds",
+            "snapshot_initial_analysis_run_count",
+            "snapshot_answer_reevaluation_p95_seconds",
+            "snapshot_answer_reevaluation_run_count",
+            "warm_cache_live_p95_seconds",
+            "warm_cache_live_run_count",
+            "cold_live_p95_seconds",
+            "cold_live_run_count",
+            "live_answer_reevaluation_p95_seconds",
+            "golden_dependency_failure_fallback_max_seconds",
+            "container_startup_health_seconds",
         }
         values = metrics.get("acceptance_metrics", {})
-        missing = sorted(required_metric_keys - values.keys())
-        threshold_ok = not missing and all(
-            (
-                values["criterion_macro_f1"] >= 0.80,
-                values["hard_fail_recall"] >= 0.85,
-                values["false_pre_screen_pass_rate"] <= 0.02,
-                values["evidence_precision"] >= 0.95,
-                values["retrieval_recall_at_20"] >= 0.80,
-                values["retrieval_recall_at_20"] >= values["bm25_recall_at_20"] - 0.02,
-                values["median_questions_to_stable_top3_40_realistic"] <= 3,
-                values["decision_accuracy_after_3"] >= values["b3_decision_accuracy_after_3"],
-                values["unsupported_hard_decision_rate"] == 0,
-                values["proof_replay_success_rate"] == 1,
+        if not isinstance(values, dict):
+            values = {}
+
+        def missing(keys: set[str]) -> list[str]:
+            return sorted(keys - values.keys())
+
+        boolean_metric_keys = {
+            "question_count_statistically_tied_with_b3",
+            "repeat_seed_identical",
+        }
+
+        def valid_types(keys: set[str]) -> bool:
+            return all(
+                isinstance(values[key], bool)
+                if key in boolean_metric_keys
+                else isinstance(values[key], (int, float)) and not isinstance(values[key], bool)
+                for key in keys
+            )
+
+        matching_missing = missing(matching_keys)
+        matching_ok = (
+            not matching_missing
+            and valid_types(matching_keys)
+            and all(
+                [
+                    values["criterion_macro_f1"] >= 0.80,
+                    values["hard_fail_recall"] >= 0.85,
+                    values["false_pre_screen_pass_rate"] <= 0.02,
+                    values["evidence_precision"] >= 0.95,
+                    values["retrieval_recall_at_20"] >= 0.80,
+                    values["retrieval_recall_at_20"] >= values["bm25_recall_at_20"] - 0.02,
+                    values["exact_condition_irrelevance_exclusion_count"] == 0,
+                ]
+            )
+        )
+        safety_missing = missing(safety_keys)
+        safety_ok = (
+            not safety_missing
+            and valid_types(safety_keys)
+            and all(
+                [
+                    values["grade_h_hard_decision_occurrences"] == 0,
+                    values["unsupported_hard_decision_rate"] == 0,
+                    values["proof_replay_success_rate"] == 1,
+                    values["explanation_verdict_consistency"] == 1,
+                    values["opaque_hard_verdict_occurrences"] == 0,
+                    values["verified_fail_above_nonfail_occurrences"] == 0,
+                    values["missing_value_default_decision_occurrences"] == 0,
+                    values["raw_patient_text_log_occurrences"] == 0,
+                ]
+            )
+        )
+        protocol_missing = missing(protocol_keys)
+        protocol_ok = (
+            not protocol_missing
+            and valid_types(protocol_keys)
+            and all(
+                [
+                    values["protocol_min_character_coverage"] >= 0.90,
+                    values["protocol_mean_character_coverage"] >= 0.95,
+                    values["boundary_test_pass_rate"] == 1,
+                    values["top3_material_opaque_rate"] <= 0.15,
+                    values["displayed_hard_verdict_review_approval_rate"] == 1,
+                ]
+            )
+        )
+        trial_opt_missing = missing(trial_opt_keys)
+        question_improvement = False
+        if not trial_opt_missing and valid_types(trial_opt_keys):
+            ours = values["median_questions_to_stable_top3_40_realistic"]
+            baseline = values["b3_median_questions_40_realistic"]
+            question_improvement = ours <= baseline * 0.85 or (
+                values["question_count_statistically_tied_with_b3"] is True
+                and values["decision_accuracy_after_3"] > values["b3_decision_accuracy_after_3"]
+            )
+        trial_opt_ok = (
+            not trial_opt_missing
+            and valid_types(trial_opt_keys)
+            and all(
+                [
+                    values["median_questions_to_stable_top3_40_realistic"] <= 3,
+                    question_improvement,
+                    values["decision_accuracy_after_3"] >= values["b3_decision_accuracy_after_3"],
+                    values["hard_question_budget"] <= 7,
+                    values["max_policy_questions"] <= values["hard_question_budget"],
+                    values["repeat_seed_identical"] is True,
+                ]
+            )
+        )
+        performance_missing = missing(performance_keys)
+        performance_ok = (
+            not performance_missing
+            and valid_types(performance_keys)
+            and all(
+                [
+                    values["snapshot_initial_analysis_p95_seconds"] < 3,
+                    values["snapshot_initial_analysis_run_count"] >= 20,
+                    values["snapshot_answer_reevaluation_p95_seconds"] < 1,
+                    values["snapshot_answer_reevaluation_run_count"] >= 20,
+                    values["warm_cache_live_p95_seconds"] < 30,
+                    values["warm_cache_live_run_count"] >= 20,
+                    values["cold_live_p95_seconds"] < 90,
+                    values["cold_live_run_count"] >= 10,
+                    values["live_answer_reevaluation_p95_seconds"] < 5,
+                    values["golden_dependency_failure_fallback_max_seconds"] <= 12,
+                    values["container_startup_health_seconds"] <= 15,
+                ]
             )
         )
         annotation_ok = (
@@ -452,16 +689,65 @@ class Verifier:
             and annotations.get("completed_dual_reviews", 0) >= 50
             and annotations.get("adjudicated_pairs", 0) == annotations.get("completed_pairs", -1)
         )
-        passed = metrics.get("acceptance_eligible") is True and annotation_ok and threshold_ok
+        source_git_sha = str(metrics.get("source_git_sha", ""))
+        source_is_ancestor = (
+            bool(source_git_sha)
+            and subprocess.run(
+                ["git", "merge-base", "--is-ancestor", source_git_sha, self.git_sha],
+                cwd=REPOSITORY_ROOT,
+                capture_output=True,
+                check=False,
+            ).returncode
+            == 0
+        )
+        eval_config = REPOSITORY_ROOT / "config/eval.yaml"
+        expected_config_hash = hashlib.sha256(eval_config.read_bytes()).hexdigest()
+        expected_seed = int(yaml.safe_load(eval_config.read_text(encoding="utf-8"))["seed"])
+        provenance_ok = (
+            source_is_ancestor
+            and metrics.get("config_hash") == expected_config_hash
+            and metrics.get("random_seed") == expected_seed
+        )
+        groups = {
+            "annotations": annotation_ok,
+            "matching": matching_ok,
+            "safety": safety_ok,
+            "protocol": protocol_ok,
+            "trial_opt": trial_opt_ok,
+            "performance": performance_ok,
+            "provenance": provenance_ok,
+        }
+        for name, passed in groups.items():
+            summary = (
+                f"evaluation {name} gate passes"
+                if passed
+                else f"evaluation {name} gate is incomplete or below threshold"
+            )
+            self.add(
+                f"evaluation.{name}",
+                passed,
+                summary,
+            )
+        passed = metrics.get("acceptance_eligible") is True and all(groups.values())
+        all_missing = sorted(
+            set(
+                matching_missing
+                + safety_missing
+                + protocol_missing
+                + trial_opt_missing
+                + performance_missing
+            )
+        )
         self.add(
             "evaluation.acceptance",
             passed,
-            "Dataset A annotation and machine thresholds pass"
+            "Dataset A annotations and every Section 101 machine threshold pass"
             if passed
-            else "Dataset A acceptance evidence is incomplete or below threshold",
+            else "Dataset A acceptance evidence is incomplete, stale, or below threshold",
             (
-                f"missing_metrics={missing}; annotation_status={annotations.get('status')}; "
-                f"claim_scope={metrics.get('claim_scope')}"
+                f"failed_groups={[name for name, ok in groups.items() if not ok]}; "
+                f"missing_metrics={all_missing}; annotation_status={annotations.get('status')}; "
+                f"claim_scope={metrics.get('claim_scope')}; source_git_sha={source_git_sha}"
             ),
         )
 

@@ -43,17 +43,18 @@ from backend.app.infrastructure.gcp_store import GcpSessionStore
 from backend.app.infrastructure.genai_client import create_google_cloud_genai_client
 from backend.app.infrastructure.local_artifacts import LocalArtifactStore
 from backend.app.infrastructure.local_store import LocalSessionStore
+from backend.app.infrastructure.resilient_gcp_store import PersistenceResilientStore
 from backend.app.infrastructure.structured_generation import (
     StructuredGenerationUnavailable,
     StructuredGenerator,
 )
 from backend.app.infrastructure.usage_guard import InMemoryUsageGuard, default_pricing_estimator
 from backend.app.retrieval.ctgov_client import ClinicalTrialsGovClient, CtgovUnavailableError
-from backend.app.retrieval.embeddings import GeminiEmbeddingProvider
+from backend.app.retrieval.embeddings import GeminiEmbeddingProvider, RecordedEmbeddingProvider
 from backend.app.retrieval.retriever import HybridRetriever
 from backend.app.settings import REPOSITORY_ROOT, Settings
 
-SessionStore = LocalSessionStore | GcpSessionStore
+SessionStore = LocalSessionStore | GcpSessionStore | PersistenceResilientStore
 
 
 def _seed_text(case_id: str) -> str:
@@ -116,14 +117,19 @@ class LiveSessionService:
             )
         )
         total_cap = Decimal(str(settings.total_app_cost_cap_usd))
+        firestore_client = (
+            store.firestore
+            if isinstance(store, (GcpSessionStore, PersistenceResilientStore))
+            else None
+        )
         usage_guard = (
             FirestoreUsageGuard(
-                store.firestore,
+                firestore_client,
                 session_cap_usd=session_cap,
                 daily_cap_usd=daily_cap,
                 total_cap_usd=total_cap,
             )
-            if isinstance(store, GcpSessionStore)
+            if firestore_client is not None
             else InMemoryUsageGuard(
                 session_cap_usd=session_cap,
                 daily_cap_usd=daily_cap,
@@ -133,8 +139,8 @@ class LiveSessionService:
         self.generator = StructuredGenerator(
             client=client,
             cache=(
-                FirestoreModelResultCache(store.firestore)
-                if isinstance(store, GcpSessionStore)
+                FirestoreModelResultCache(firestore_client)
+                if firestore_client is not None
                 else LocalModelResultCache(settings.local_store_dir / "model-cache")
             ),
             pricing=default_pricing_estimator(),
@@ -153,6 +159,9 @@ class LiveSessionService:
                 dimension=settings.embedding_dim,
             ),
             snapshot_root=REPOSITORY_ROOT / "data/fixtures/retrieval/S004",
+            snapshot_embeddings=RecordedEmbeddingProvider(
+                REPOSITORY_ROOT / "data/fixtures/retrieval/S004/embeddings.json"
+            ),
         )
 
     async def create_session(
@@ -454,6 +463,16 @@ class LiveSessionService:
                 },
             )
         patient_state = materialized.state
+        payload.update(
+            {
+                "facts": [item.model_dump(mode="json") for item in patient_state.confirmed_facts],
+                "retrieval_hypotheses": [
+                    item.model_dump(mode="json") for item in patient_state.retrieval_hypotheses
+                ],
+                "conflicts": [item.model_dump(mode="json") for item in patient_state.conflicts],
+                "source_texts": {f"session:{session_id}:input": payload["patient_text"]},
+            }
+        )
         state = SessionState.PATIENT_EXTRACTING
         event = await self._transition(
             payload,
@@ -467,11 +486,37 @@ class LiveSessionService:
             patient_state, self.catalog.version, session_id=session_id
         )
         try:
-            retrieval = await self.retriever.retrieve(
-                query,
-                mode="live",
-                allow_snapshot_fallback=payload.get("seed_case_id") == "S004",
-            )
+            async with asyncio.timeout(11):
+                retrieval = await self.retriever.retrieve(
+                    query,
+                    mode="live",
+                    allow_snapshot_fallback=payload.get("seed_case_id") == "S004",
+                )
+        except TimeoutError:
+            if payload.get("seed_case_id") == "S004":
+                retrieval = await self.retriever.retrieve(query, mode="snapshot")
+                retrieval = retrieval.model_copy(
+                    update={
+                        "mode": "hybrid_degraded",
+                        "degradation_codes": [
+                            *retrieval.degradation_codes,
+                            "LIVE_RETRIEVAL_TIMEOUT_SNAPSHOT_USED",
+                        ],
+                    }
+                )
+            else:
+                payload["mode"] = "hybrid_degraded"
+                payload["degradation_codes"].append("LIVE_RETRIEVAL_TIMEOUT_NO_COMPATIBLE_SNAPSHOT")
+                event = await self._transition(
+                    payload,
+                    SessionState.RETRIEVING,
+                    SessionState.DEGRADED,
+                    "DEPENDENCY_DEGRADED",
+                    {"degradation_codes": payload["degradation_codes"]},
+                )
+                yield "degraded", event
+                yield "completed", event
+                return
         except CtgovUnavailableError:
             payload["mode"] = "hybrid_degraded"
             payload["degradation_codes"].append("CTGOV_UNAVAILABLE_NO_COMPATIBLE_SNAPSHOT")
@@ -759,7 +804,11 @@ class LiveSessionService:
 
     async def export_report(self, session_id: str) -> dict[str, object] | None:
         payload = await self.store.read_session(session_id)
-        if payload is None or "full_state" not in payload:
+        if (
+            payload is None
+            or payload.get("export_available") is False
+            or "full_state" not in payload
+        ):
             return None
         ranked = list(payload.get("ranked_nct_ids", []))
         if not ranked:

@@ -90,34 +90,50 @@ export async function readSession(credentials: SessionCredentials): Promise<Sess
 async function readEventStream(
   response: Response,
   onEvent: (event: StreamEvent) => void,
+  onStall?: () => void,
 ): Promise<void> {
   if (!response.ok || !response.body) throw new Error(`Streaming request failed: ${response.status}`);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() ?? "";
-    for (const frame of frames) {
-      const event = frame.match(/^event: (.+)$/m)?.[1];
-      const data = frame.match(/^data: (.+)$/m)?.[1];
-      if (event && data) onEvent({ event, data: JSON.parse(data) as Record<string, unknown> });
+  let stallTimer: ReturnType<typeof setTimeout> | undefined;
+  const armStallTimer = () => {
+    if (stallTimer) clearTimeout(stallTimer);
+    stallTimer = setTimeout(() => onStall?.(), 8_000);
+  };
+  armStallTimer();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) {
+        const event = frame.match(/^event: (.+)$/m)?.[1];
+        const data = frame.match(/^data: (.+)$/m)?.[1];
+        if (event && data) {
+          armStallTimer();
+          onEvent({ event, data: JSON.parse(data) as Record<string, unknown> });
+        }
+      }
+      if (done) break;
     }
-    if (done) break;
+  } finally {
+    if (stallTimer) clearTimeout(stallTimer);
   }
 }
 
 export async function analyzeSession(
   credentials: SessionCredentials,
   onEvent: (event: StreamEvent) => void,
+  options: { onStall?: () => void; signal?: AbortSignal } = {},
 ): Promise<void> {
   const response = await fetch(`/api/v1/sessions/${credentials.sessionId}/analysis`, {
     method: "POST",
     headers: { Accept: "text/event-stream", "X-Session-Token": credentials.token },
+    signal: options.signal,
   });
-  await readEventStream(response, onEvent);
+  await readEventStream(response, onEvent, options.onStall);
 }
 
 export interface AnswerInput {

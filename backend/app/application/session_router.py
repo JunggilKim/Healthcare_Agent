@@ -10,9 +10,10 @@ from backend.app.application.snapshot_replay_service import SnapshotReplayServic
 from backend.app.domain.sessions import SessionState
 from backend.app.infrastructure.gcp_store import GcpSessionStore
 from backend.app.infrastructure.local_store import LocalSessionStore
+from backend.app.infrastructure.resilient_gcp_store import PersistenceResilientStore
 from backend.app.settings import Settings
 
-SessionStore = LocalSessionStore | GcpSessionStore
+SessionStore = LocalSessionStore | GcpSessionStore | PersistenceResilientStore
 
 
 class SessionService(Protocol):

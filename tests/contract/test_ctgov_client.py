@@ -137,6 +137,37 @@ async def test_non_json_response_is_rejected_without_retry(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["timeout", "429", "500"])
+async def test_timeout_429_and_500_each_exhaust_bounded_retries(
+    tmp_path: Path, failure: str
+) -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if failure == "timeout":
+            raise httpx.ReadTimeout("recorded timeout", request=request)
+        return httpx.Response(
+            int(failure), request=request, headers={"content-type": "application/json"}
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://clinicaltrials.gov/api/v2",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        client = ClinicalTrialsGovClient(
+            LocalArtifactStore(tmp_path),
+            client=http_client,
+            sleep=_no_sleep,
+            jitter=lambda _low, _high: 0.0,
+        )
+        with pytest.raises(CtgovUnavailableError):
+            await client.version()
+    assert calls == 3
+
+
+@pytest.mark.asyncio
 async def test_schema_invalid_study_page_is_rejected_and_not_cached(tmp_path: Path) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/version"):

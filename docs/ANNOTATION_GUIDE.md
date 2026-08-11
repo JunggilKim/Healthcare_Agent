@@ -51,3 +51,13 @@ label until re-reviewed. Never overwrite prior decisions; append a revision with
 Export schema-valid JSONL plus a manifest containing counts, split NCT IDs, hashes, seed, annotator
 aliases, agreement metrics, adjudication completion, and limitations. `verify_release.py --strict`
 must reject Dataset A evidence without this manifest and without complete adjudication.
+
+The final `artifacts/eval/latest/metrics.json` is distinct from the committed fixture-smoke report.
+It must set `acceptance_eligible=true`, bind `source_git_sha` to an ancestor of the release commit,
+and bind `config_hash` and `random_seed` to `config/eval.yaml`. Its `acceptance_metrics` object must
+contain every machine value consumed by `scripts/verify_release.py`: matching/retrieval thresholds;
+all eight Section 101.2 safety invariants; protocol minimum/mean coverage, boundary-test pass rate,
+top-3 material opaque rate, and semantic-review approval rate; B6/B3 question and accuracy values,
+the statistical-tie flag, observed maximum question count, hard budget, and repeat-seed identity;
+and the measured Snapshot, Live, dependency-fallback, and container startup performance values with
+the required run counts. Missing values are failures, not permission to copy fixture-smoke numbers.

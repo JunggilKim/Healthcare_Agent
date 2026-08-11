@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
+import aiosqlite
 import pytest
 
 from backend.app.infrastructure.local_store import LocalSessionStore
@@ -38,3 +39,23 @@ async def test_local_session_token_hash_survives_store_reconstruction(tmp_path) 
     await second.initialize()
     assert await second.authenticate("session-1", "secret-token")
     assert not await second.authenticate("session-1", "wrong-token")
+
+
+@pytest.mark.asyncio
+async def test_stale_orchestration_lease_can_be_reacquired(tmp_path) -> None:
+    store = LocalSessionStore(tmp_path / "store", hmac_salt="test-salt")
+    await store.initialize()
+    await store.create_session(
+        "session-1",
+        "token",
+        {"expires_at": "2026-08-19T00:00:00+00:00", "mode": "snapshot"},
+    )
+    assert await store.acquire_lease("session-1", "owner-stale", duration=timedelta(minutes=6))
+    async with aiosqlite.connect(store.database_path) as database:
+        await database.execute(
+            "UPDATE orchestration_leases SET expires_at = ? WHERE session_id = ?",
+            ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(), "session-1"),
+        )
+        await database.commit()
+
+    assert await store.acquire_lease("session-1", "owner-recovery", duration=timedelta(minutes=6))

@@ -11,7 +11,7 @@ from backend.app.agents.report_renderer import (
 from backend.app.application.catalog import load_slot_catalog
 from backend.app.application.interactive_loop import InteractiveTrialOptLoop
 from backend.app.application.vertical_slice import load_vertical_slice
-from backend.app.domain.enums import AcquisitionAction, TrialDecision
+from backend.app.domain.enums import AcquisitionAction, CriterionVerdict, TrialDecision
 from backend.app.domain.evidence import EligibilityContext, PatientFact
 from backend.app.domain.questions import OptimizerRuntimeConfig
 from backend.app.domain.rendering import QuestionRenderProposal, TrialReportProposal
@@ -25,7 +25,11 @@ from backend.app.engine.multi_trial_optimizer import (
     generate_slot_candidates,
     select_next_action,
 )
-from backend.app.engine.proof_verifier import build_post_render_proof, build_verified_proof
+from backend.app.engine.proof_verifier import (
+    build_post_render_proof,
+    build_verified_proof,
+    replay_packet_matches,
+)
 from backend.app.engine.trial_aggregator import aggregate_trial
 
 NOW = datetime(2026, 8, 11, 9, 0, tzinfo=UTC)
@@ -247,6 +251,25 @@ def test_report_renderer_rejects_changed_status() -> None:
     assert report.source == "DETERMINISTIC_TEMPLATE"
     assert report.report.status is evaluation.decision
     assert report.rejection_code == "REPORT_STATUS_OR_TRIAL_MISMATCH"
+
+
+def test_proof_replay_detects_a_tampered_verdict() -> None:
+    state = _full_state()
+    packet = state.proofs_by_trial["NCT05239624"][0]
+    tampered = packet.model_copy(update={"provisional_verdict": CriterionVerdict.FAIL})
+    criterion = next(
+        item
+        for item in state.aggregate.compiled_trials["NCT05239624"].criteria
+        if item.criterion_id == packet.criterion_id
+    )
+    assert not replay_packet_matches(
+        tampered,
+        criterion,
+        EligibilityContext(
+            facts=state.aggregate.facts,
+            conflicts=state.aggregate.conflicts,
+        ),
+    )
 
 
 def test_interactive_loop_never_recompiles_and_enforces_five_question_budget() -> None:

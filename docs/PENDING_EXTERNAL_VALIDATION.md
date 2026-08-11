@@ -21,9 +21,13 @@ local infrastructure state. They are not represented as completed.
   full-corpus S004/S008/S001 first-question golden assertions cannot yet be represented as passed;
   only the frozen S004 vertical-slice question contract and credential-independent S001/S008
   evidence-firewall/domain-path tests are confirmed.
-- Snapshot consequence: `scripts/build_demo_snapshot.py --mode live` intentionally refuses to
-  fabricate the missing reviewed artifacts. Phase 5's complete three-case snapshot exit criterion
-  and Phase 6's final experiment tab evidence remain pending until those exact-hash artifacts exist.
+- Snapshot consequence: `scripts/build_demo_snapshot.py --mode live` is implemented, but requires
+  `data/demo/prepared/acquisition.json`, 8–12 hash-bound raw/compiled trials per case (24–36 unique),
+  embeddings, complete first branches plus an S004 second branch, and an `APPROVED` exact-hash
+  `data/demo/manual_review.yaml`. The committed review manifest remains
+  `PENDING_EXTERNAL_REVIEW`, so the command refuses to freeze incomplete or unreviewed artifacts.
+  Phase 5's complete three-case snapshot exit criterion and Phase 6's final experiment evidence
+  remain pending until those inputs exist.
 
 ## Docker Desktop
 
@@ -66,7 +70,8 @@ Perform these only after approving the named billing/project and Docker cleanup 
 2. Supply the approved Free Trial GCP project/billing account, run `scripts/bootstrap_gcp.sh`, and
    execute the one-call model-access smoke for all three frozen model IDs.
 3. Acquire, manually review, and exact-hash freeze the S004/S008/S001 24–36-trial snapshot within
-   48 hours of release.
+   48 hours of release. Populate the live acquisition manifest and replace only the pending fields
+   in `data/demo/manual_review.yaml`, then run the exact Section 33 build command.
 4. Complete the Dataset A 200-pair/50-dual-review adjudication and rerun all evaluation suites.
 5. Deploy the verified commit, run `scripts/smoke_test_deployment.sh --live` exactly once, record
    three rehearsals including the network-disabled container, and rerun

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import {
@@ -97,6 +97,9 @@ export function App() {
   const [tab, setTab] = useState<"patient" | "research" | "experiment">("patient");
   const [stages, setStages] = useState<Record<string, StageState>>(initialStages);
   const [degradationCodes, setDegradationCodes] = useState<string[]>([]);
+  const [liveStalled, setLiveStalled] = useState(false);
+  const analysisAbort = useRef<AbortController | null>(null);
+  const cancelledForFallback = useRef(false);
   const casesQuery = useQuery({ queryKey: ["demo-cases"], queryFn: readDemoCases });
   const configQuery = useQuery({ queryKey: ["public-config"], queryFn: readPublicConfig });
 
@@ -133,6 +136,7 @@ export function App() {
     void readSession(credentials)
       .then((restored) => {
         setSession(restored);
+        setDegradationCodes(restored.degradation_codes);
         const parsed = retrievalSchema.safeParse(restored.retrieval);
         if (parsed.success) setRetrieval(parsed.data);
         else if (restored.top_trial?.nct_id === "NCT05239624") {
@@ -160,6 +164,8 @@ export function App() {
     if (!canStart) return;
     setBusy(true);
     setError(null);
+    setLiveStalled(false);
+    setDegradationCodes([]);
     setStages({ ...initialStages(), "Patient Evidence": "running" });
     setStatusText("역할별 에이전트 파이프라인 실행 중…");
     try {
@@ -177,12 +183,36 @@ export function App() {
       if (mode === "snapshot" && selectedCase === "S004") {
         setRetrieval(await readS004Retrieval());
       }
-      await analyzeSession(nextCredentials, ({ event }) => {
-        updateStage(event);
-        setStatusText(`Pipeline event · ${event}`);
-      });
+      const controller = new AbortController();
+      analysisAbort.current = controller;
+      await analyzeSession(
+        nextCredentials,
+        ({ event, data }) => {
+          updateStage(event);
+          setLiveStalled(false);
+          if (Array.isArray(data.degradation_codes)) {
+            setDegradationCodes(
+              data.degradation_codes.filter(
+                (item): item is string => typeof item === "string",
+              ),
+            );
+          }
+          setStatusText(`Pipeline event · ${event}`);
+        },
+        {
+          signal: controller.signal,
+          onStall: () => {
+            if (mode === "live") {
+              setLiveStalled(true);
+              setStatusText("Live 외부 단계에서 8초 동안 새 이벤트가 없습니다.");
+            }
+          },
+        },
+      );
+      analysisAbort.current = null;
       const nextSession = await readSession(nextCredentials);
       setSession(nextSession);
+      setDegradationCodes(nextSession.degradation_codes);
       const parsedRetrieval = retrievalSchema.safeParse(nextSession.retrieval);
       if (parsedRetrieval.success) setRetrieval(parsedRetrieval.data);
       setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
@@ -191,11 +221,38 @@ export function App() {
         `/session/${nextCredentials.sessionId}${showDemoTools ? "?demo-tools=1" : ""}`,
       );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "분석을 완료하지 못했습니다.");
-      setStages((previous) => ({ ...previous, "Patient Evidence": "failed" }));
+      if (
+        !(
+          caught instanceof DOMException &&
+          caught.name === "AbortError" &&
+          cancelledForFallback.current
+        )
+      ) {
+        setError(caught instanceof Error ? caught.message : "분석을 완료하지 못했습니다.");
+        setStages((previous) => ({ ...previous, "Patient Evidence": "failed" }));
+      }
     } finally {
+      analysisAbort.current = null;
+      cancelledForFallback.current = false;
       setBusy(false);
     }
+  }
+
+  function prepareSnapshotFallback() {
+    if (analysisAbort.current) {
+      cancelledForFallback.current = true;
+      analysisAbort.current.abort();
+    }
+    setLiveStalled(false);
+    setSession(null);
+    setCredentials(null);
+    setRetrieval(null);
+    setDegradationCodes([]);
+    setMode("snapshot");
+    setInputMode("seed");
+    setSelectedCase("S004");
+    setStatusText("검증된 S004 Snapshot을 별도 세션으로 시작할 수 있습니다.");
+    void navigate("/");
   }
 
   async function answer(input: {
@@ -217,7 +274,9 @@ export function App() {
           setStatusText(`Reevaluation · ${event}`);
         },
       );
-      setSession(await readSession(credentials));
+      const updatedSession = await readSession(credentials);
+      setSession(updatedSession);
+      setDegradationCodes(updatedSession.degradation_codes);
       setStatusText(
         input.unknown || input.declined
           ? `${session.current_question.selected.slot_id} unavailable · 동일 질문을 다시 묻지 않음`
@@ -364,16 +423,17 @@ export function App() {
                 <button className="primary-button self-end" disabled={!canStart} onClick={() => void start()}>{busy ? "분석 중…" : mode === "live" ? "Live 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} Snapshot 분석 시작` : "Full snapshot 준비 중"}</button>
               </div>
               <p aria-live="polite" className="mt-3 text-center text-xs text-slate-500">{statusText}</p>
+              {liveStalled || (mode === "live" && busy && degradationCodes.length) ? <div role="status" className="mt-3 rounded-xl border border-amber-300/40 bg-amber-100/10 p-3 text-sm text-amber-100"><p>{liveStalled ? "Live 단계가 지연되고 있습니다." : "Live 의존성 강등 이벤트를 받았습니다."} 임의 입력은 Snapshot에 자동 매핑하지 않습니다.</p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>현재 요청을 중단하고 별도 S004 Snapshot 준비</button></div> : null}
               {error ? <p role="alert" className="mt-3 text-sm text-rose-300">{error}</p> : null}
             </section>
           </div>
         </section>
       ) : (
         <div className="mx-auto max-w-[1500px] px-5 py-3">
-          {degradationCodes.length ? <div role="status" className="mb-4 rounded-xl border border-amber-300/40 bg-amber-100/10 px-4 py-3 text-sm text-amber-100">Partial results preserved · {degradationCodes.join(" · ")} · Snapshot/template fallback active</div> : null}
+          {degradationCodes.length ? <div role="status" className="mb-4 rounded-xl border border-amber-300/40 bg-amber-100/10 px-4 py-3 text-sm text-amber-100"><p>Partial results preserved · {degradationCodes.join(" · ")} · Snapshot/template fallback active</p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>별도 S004 Snapshot 시작</button></div> : null}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-2">
             <p className="text-sm text-slate-300">{statusText}</p>
-            <div className="flex flex-wrap gap-2"><button className="secondary-button py-2" onClick={() => void replay()}>Replay Proof</button><button className="secondary-button py-2" onClick={() => credentials && void exportReport(credentials)}>Export report</button><button className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>Reset session</button><button className="secondary-button py-2 text-rose-200" disabled={busy} onClick={() => void deleteCurrentSession()}>Delete session</button></div>
+            <div className="flex flex-wrap gap-2"><button className="secondary-button py-2" onClick={() => void replay()}>Replay Proof</button><button className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : "Persistence degraded; durable export is unavailable."} onClick={() => credentials && void exportReport(credentials)}>Export report</button><button className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>Reset session</button><button className="secondary-button py-2 text-rose-200" disabled={busy} onClick={() => void deleteCurrentSession()}>Delete session</button></div>
           </div>
           {replayStatus ? <p aria-live="polite" className="mb-4 rounded-xl bg-emerald-300/10 p-3 text-sm text-emerald-200">{replayStatus}</p> : null}
           {showDemoTools ? <section className="mb-4 rounded-xl border border-dashed border-fuchsia-300/40 bg-fuchsia-300/5 p-3" aria-label="Failure simulation controls"><p className="text-xs font-bold text-fuchsia-200">REHEARSAL ONLY · FAILURE SIMULATION</p><div className="mt-2 flex flex-wrap gap-2">{["GEMINI_UNAVAILABLE", "CTGOV_UNAVAILABLE", "EMBEDDING_UNAVAILABLE"].map((code) => <button key={code} className="secondary-button px-3 py-2 text-xs" onClick={() => toggleFailure(code)}>{degradationCodes.includes(code) ? "✓ " : ""}{code}</button>)}</div></section> : null}

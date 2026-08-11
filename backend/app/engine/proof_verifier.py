@@ -330,7 +330,16 @@ def replay_packet_matches(
 ) -> bool:
     result = evaluate_criterion(criterion, context, packet.evaluation_date)
     payload = canonical_replay_payload(criterion.criterion_id, packet.patient_state_version, result)
-    return canonical_sha256(payload) == packet.canonical_replay_hash
+    return bool(
+        canonical_sha256(payload) == packet.canonical_replay_hash
+        and packet.criterion_id == criterion.criterion_id
+        and packet.provisional_verdict is result.verdict
+        and sorted(packet.evidence_fact_ids) == sorted(result.evidence_fact_ids)
+        and sorted(packet.missing_slot_ids) == sorted(result.missing_slot_ids)
+        and sorted(packet.conflict_ids) == sorted(result.conflict_ids)
+        and [step.model_dump(mode="json") for step in packet.derivation_steps]
+        == [step.model_dump(mode="json") for step in result.derivation_steps]
+    )
 
 
 def build_post_render_proof(

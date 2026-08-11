@@ -20,12 +20,15 @@ from backend.app.engine.question_optimizer import OptimizationState, select_next
 from backend.app.engine.trial_aggregator import aggregate_trial
 from backend.app.infrastructure.gcp_store import GcpSessionStore
 from backend.app.infrastructure.local_store import LocalSessionStore
+from backend.app.infrastructure.resilient_gcp_store import PersistenceResilientStore
 
 
 class SnapshotSessionService:
     """Frozen Phase-1 orchestrator for the S004/NCT05239624 path only."""
 
-    def __init__(self, store: LocalSessionStore | GcpSessionStore) -> None:
+    def __init__(
+        self, store: LocalSessionStore | GcpSessionStore | PersistenceResilientStore
+    ) -> None:
         self.store = store
         self.fixture = load_vertical_slice()
         self.catalog = load_slot_catalog()
@@ -514,7 +517,11 @@ class SnapshotSessionService:
 
     async def export_report(self, session_id: str) -> dict[str, Any] | None:
         payload = await self.store.read_session(session_id)
-        if payload is None or payload.get("trial_evaluation") is None:
+        if (
+            payload is None
+            or payload.get("export_available") is False
+            or payload.get("trial_evaluation") is None
+        ):
             return None
         evaluation = TrialEvaluation.model_validate(payload["trial_evaluation"])
         proofs = [ProofPacket.model_validate(item) for item in payload["proofs"]]

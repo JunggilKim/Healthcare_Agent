@@ -23,6 +23,7 @@ from backend.app.api.dependencies import (
 from backend.app.api.errors import ApiProblem
 from backend.app.application.session_router import SessionService
 from backend.app.domain.base import StrictModel
+from backend.app.infrastructure.resilient_gcp_store import PersistenceUnavailableError
 from backend.app.security.pii_detector import detect_identifier_ranges
 
 router = APIRouter(tags=["sessions"])
@@ -325,7 +326,25 @@ async def export_report(
     _: str = Depends(require_session_token),
     service: SessionService = Depends(get_session_service),
 ) -> dict[str, object]:
-    payload = await service.export_report(session_id)
+    session = await service.read_session(session_id)
+    if session is not None and session.get("export_available") is False:
+        raise ApiProblem(
+            503,
+            "EXPORT_UNAVAILABLE_PERSISTENCE_DEGRADED",
+            "Export unavailable",
+            "Persistence failed during this request; the volatile result is not durable.",
+            retryable=False,
+        )
+    try:
+        payload = await service.export_report(session_id)
+    except PersistenceUnavailableError as error:
+        raise ApiProblem(
+            503,
+            "EXPORT_UNAVAILABLE_PERSISTENCE_DEGRADED",
+            "Export unavailable",
+            "Persistence failed during export; no durable artifact was created.",
+            retryable=False,
+        ) from error
     if payload is None:
         raise ApiProblem(
             404,
@@ -342,7 +361,25 @@ async def printable_report(
     _: str = Depends(require_session_token),
     service: SessionService = Depends(get_session_service),
 ) -> HTMLResponse:
-    payload = await service.export_report(session_id)
+    session = await service.read_session(session_id)
+    if session is not None and session.get("export_available") is False:
+        raise ApiProblem(
+            503,
+            "EXPORT_UNAVAILABLE_PERSISTENCE_DEGRADED",
+            "Printable report unavailable",
+            "Persistence failed during this request; the volatile result is not durable.",
+            retryable=False,
+        )
+    try:
+        payload = await service.export_report(session_id)
+    except PersistenceUnavailableError as error:
+        raise ApiProblem(
+            503,
+            "EXPORT_UNAVAILABLE_PERSISTENCE_DEGRADED",
+            "Printable report unavailable",
+            "Persistence failed during report creation.",
+            retryable=False,
+        ) from error
     if payload is None:
         raise ApiProblem(404, "SESSION_NOT_FOUND", "Report not found", "Report unavailable.")
     encoded = escape(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
@@ -362,6 +399,15 @@ async def reset_session(
     _: str = Depends(require_session_token),
     service: SessionService = Depends(get_session_service),
 ) -> dict[str, object]:
+    session = await service.read_session(session_id)
+    if session is not None and session.get("durable_replay") is False:
+        raise ApiProblem(
+            503,
+            "RESET_UNAVAILABLE_PERSISTENCE_DEGRADED",
+            "Reset unavailable",
+            "The volatile session cannot create a durable replay chain.",
+            retryable=False,
+        )
     try:
         return await service.reset_session(session_id)
     except KeyError as error:
@@ -376,7 +422,17 @@ async def delete_session(
     _: str = Depends(require_session_token),
     service: SessionService = Depends(get_session_service),
 ) -> dict[str, object]:
-    if not await service.delete_session(session_id):
+    try:
+        deleted = await service.delete_session(session_id)
+    except PersistenceUnavailableError as error:
+        raise ApiProblem(
+            503,
+            "DELETE_UNAVAILABLE_PERSISTENCE_DEGRADED",
+            "Deletion unavailable",
+            "Durable deletion could not be confirmed while persistence is degraded.",
+            retryable=True,
+        ) from error
+    if not deleted:
         raise ApiProblem(
             404, "SESSION_NOT_FOUND", "Session not found", "The session does not exist."
         )

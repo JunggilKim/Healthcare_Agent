@@ -35,6 +35,7 @@ def _retriever(
     tmp_path: Path,
     *,
     embeddings: RecordedEmbeddingProvider | DisabledEmbeddingProvider,
+    snapshot_embeddings: RecordedEmbeddingProvider | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> HybridRetriever:
     return HybridRetriever(
@@ -46,6 +47,7 @@ def _retriever(
         ),
         embeddings=embeddings,
         snapshot_root=FIXTURE_ROOT,
+        snapshot_embeddings=snapshot_embeddings,
     )
 
 
@@ -96,12 +98,15 @@ async def test_ctgov_blocked_uses_hash_verified_snapshot_within_bound(tmp_path: 
     ) as http_client:
         result = await _retriever(
             tmp_path,
-            embeddings=RecordedEmbeddingProvider(FIXTURE_ROOT / "embeddings.json"),
+            embeddings=DisabledEmbeddingProvider(),
+            snapshot_embeddings=RecordedEmbeddingProvider(FIXTURE_ROOT / "embeddings.json"),
             client=http_client,
         ).retrieve(_query(), mode="live")
 
     assert result.mode == "hybrid_degraded"
     assert "CTGOV_UNAVAILABLE_SNAPSHOT_USED" in result.degradation_codes
+    assert "EMBEDDING_UNAVAILABLE_LEXICAL_FALLBACK" not in result.degradation_codes
+    assert result.dense_source_used is True
     assert len(result.ranked_candidates) == 20
 
 
