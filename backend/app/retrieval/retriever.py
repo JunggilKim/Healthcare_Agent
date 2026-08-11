@@ -83,6 +83,7 @@ class HybridRetriever:
         query: RetrievalQuery,
         *,
         mode: str = "live",
+        allow_snapshot_fallback: bool = True,
     ) -> RetrievalResult:
         merged: dict[str, RegistryCandidate] = {}
         degradation_codes: list[str] = []
@@ -133,6 +134,8 @@ class HybridRetriever:
                             retrieved_at=response.retrieved_at,
                         )
             except CtgovUnavailableError:
+                if not allow_snapshot_fallback:
+                    raise
                 manifest, content = load_retrieval_snapshot(self.snapshot_root)
                 result_mode = "hybrid_degraded"
                 degradation_codes.append("CTGOV_UNAVAILABLE_SNAPSHOT_USED")

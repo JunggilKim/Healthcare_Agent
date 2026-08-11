@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     allow_live_model_calls: bool = False
     allow_live_ctgov_calls: bool = False
     session_cost_cap_usd: float = Field(default=1.25, gt=0)
+    daily_dev_cost_cap_usd: float = Field(default=10, gt=0)
+    daily_demo_cost_cap_usd: float = Field(default=25, gt=0)
+    total_app_cost_cap_usd: float = Field(default=180, gt=0)
+    session_token_hmac_salt: str = "local-development-only-change-me"
     ip_hash_salt: str = "local-development-only-change-me"
 
 

@@ -6,6 +6,8 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
+from pydantic import TypeAdapter, ValidationError
+
 from backend.app.agents.patient_evidence import (
     MaterializedPatientExtraction,
     PatientExtractionValidationError,
@@ -24,6 +26,8 @@ from backend.app.domain.values import (
     StringValue,
     TypedValue,
 )
+
+_TYPED_VALUE_ADAPTER: TypeAdapter[TypedValue] = TypeAdapter(TypedValue)
 
 _DECLINED = (
     "decline",
@@ -44,6 +48,53 @@ class InterpretedAnswer:
     declined: bool
     source: Literal["MODEL_VALIDATED", "DETERMINISTIC_FALLBACK"]
     rejection_code: str | None = None
+
+
+def proposal_from_structured_answer(
+    *,
+    candidate: QuestionCandidate,
+    structured_value: dict[str, object],
+    slot_catalog: SlotCatalog,
+) -> tuple[str, AnswerInterpretationProposal]:
+    """Validate an API typed value and turn it into a span-verifiable answer proposal."""
+
+    try:
+        typed_value = _TYPED_VALUE_ADAPTER.validate_python(structured_value)
+    except ValidationError as error:
+        raise ValueError("STRUCTURED_VALUE_INVALID") from error
+    allowed_types: dict[str, tuple[type[TypedValue], ...]] = {
+        "boolean": (BooleanValue,),
+        "number": (NumberValue,),
+        "categorical": (CategoricalValue,),
+        "categorical_free_string": (CategoricalValue, StringValue),
+        "date": (DateValue,),
+        "duration": (DurationValue,),
+    }
+    if not isinstance(typed_value, allowed_types[candidate.answer_type]):
+        raise ValueError("STRUCTURED_VALUE_TYPE_MISMATCH")
+    slot = slot_catalog.by_id()[candidate.slot_id]
+    if slot.value_type == "categorical" and isinstance(typed_value, CategoricalValue):
+        if slot.canonical_values and typed_value.value not in slot.canonical_values:
+            raise ValueError("STRUCTURED_VALUE_NOT_IN_SLOT_CATALOG")
+    if isinstance(typed_value, NumberValue) and slot.allowed_units:
+        if typed_value.unit not in slot.allowed_units:
+            raise ValueError("STRUCTURED_VALUE_UNIT_NOT_ALLOWED")
+    answer_text = typed_value.model_dump_json()
+    return (
+        answer_text,
+        AnswerInterpretationProposal(
+            facts=[
+                PatientFactProposal(
+                    slot_id=candidate.slot_id,
+                    value=typed_value,
+                    start=0,
+                    end=len(answer_text),
+                    quote=answer_text,
+                    confidence=1.0,
+                )
+            ]
+        ),
+    )
 
 
 def _find(text: str, pattern: str) -> re.Match[str] | None:

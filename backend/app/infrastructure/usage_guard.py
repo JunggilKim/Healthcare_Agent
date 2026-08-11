@@ -221,3 +221,12 @@ class InMemoryUsageGuard:
                 daily_reconciled_usd=self._daily_reconciled.get(now.date(), Decimal(0)),
                 total_reconciled_usd=self._total_reconciled,
             )
+
+    async def reserve_async(self, *, session_id: str, amount_usd: Decimal) -> CostReservation:
+        return self.reserve(session_id=session_id, amount_usd=amount_usd)
+
+    async def reconcile_async(self, reservation_id: str, *, actual_usd: Decimal) -> None:
+        self.reconcile(reservation_id, actual_usd=actual_usd)
+
+    async def release_async(self, reservation_id: str) -> None:
+        self.release(reservation_id)

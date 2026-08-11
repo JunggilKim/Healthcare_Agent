@@ -15,7 +15,13 @@ class RetrievalQueryAgent:
     def __init__(self, generator: StructuredGenerator) -> None:
         self.generator = generator
 
-    async def generate(self, state: PatientState, slot_catalog_version: str) -> RetrievalQuery:
+    async def generate(
+        self,
+        state: PatientState,
+        slot_catalog_version: str,
+        *,
+        session_id: str = "unscoped",
+    ) -> RetrievalQuery:
         payload = state.model_dump(mode="json")
         prompt = render_prompt(
             "retrieval_query_v1.md",
@@ -34,6 +40,7 @@ class RetrievalQueryAgent:
                 thinking_level="LOW",
                 max_output_tokens=800,
                 max_attempts=2,
+                session_id=session_id,
             )
             return query
         except StructuredGenerationUnavailable:

@@ -15,6 +15,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 matplotlib.use("Agg")
+matplotlib.rcParams["svg.hashsalt"] = "trial-opt-20260811"
 import matplotlib.pyplot as plt  # noqa: E402
 
 from backend.app.domain.canonical import canonical_json_bytes  # noqa: E402
@@ -58,7 +59,8 @@ def _write_charts(interactive: dict[str, Any]) -> list[str]:
     paths = []
     for extension in ("png", "svg"):
         path = chart_root / f"accuracy-vs-questions.{extension}"
-        plt.savefig(path, dpi=160)
+        metadata = {"Date": None, "Creator": "TRIAL-OPT"} if extension == "svg" else None
+        plt.savefig(path, dpi=160, metadata=metadata)
         paths.append(str(path))
     plt.close()
     return paths
@@ -144,12 +146,31 @@ def main() -> None:
         writer.writerow(["metric", "value", "acceptance_eligible", "scope"])
         for name, value in summary["metrics"].items():
             writer.writerow([name, value, False, summary["claim_scope"]])
+    markdown = [
+        "# TRIAL-OPT Evaluation Summary",
+        "",
+        "**Status: PROVISIONAL ENGINEERING SMOKE — NOT ACCEPTANCE ELIGIBLE**",
+        "",
+        f"Claim scope: `{summary['claim_scope']}`. This is not clinical validation.",
+        "",
+        "## Generated metrics",
+        "",
+        "| Metric | Value |",
+        "|---|---:|",
+    ]
+    for name, value in summary["metrics"].items():
+        markdown.append(f"| `{name}` | {value} |")
+    markdown.extend(["", "## Blocking reasons", ""])
+    markdown.extend(f"- {reason}" for reason in summary["blocking_reasons"])
+    markdown.extend(["", "Run IDs are recorded in `metrics.json`.", ""])
+    (LATEST_ROOT / "summary.md").write_text("\n".join(markdown), encoding="utf-8")
     FRONTEND_SUMMARY.parent.mkdir(parents=True, exist_ok=True)
     FRONTEND_SUMMARY.write_bytes(canonical_json_bytes(summary))
     print(
         orjson.dumps(
             {
                 "metrics": str(LATEST_ROOT / "metrics.json"),
+                "summary": str(LATEST_ROOT / "summary.md"),
                 "charts": charts,
                 "frontend": str(FRONTEND_SUMMARY),
                 "acceptance_eligible": False,

@@ -23,6 +23,17 @@ export const questionCandidateSchema = z
     slot_id: z.string(),
     action: z.string(),
     affected: z.array(z.object({ criterion_id: z.string(), nct_id: z.string() }).passthrough()),
+    branches: z
+      .array(
+        z
+          .object({
+            branch_id: z.string(),
+            label: z.string(),
+            response_kind: z.string(),
+          })
+          .passthrough(),
+      )
+      .default([]),
     utility_components: z
       .object({ mean_risk_reduction: z.number(), final_utility: z.number() })
       .passthrough()
@@ -69,6 +80,16 @@ export const sessionSchema = z
       })
       .passthrough()
       .nullable(),
+    top_trial: z
+      .object({
+        nct_id: z.string(),
+        title: z.string(),
+        overall_status: z.string(),
+        data_timestamp: z.string().nullable(),
+      })
+      .nullable()
+      .optional(),
+    retrieval: z.unknown().optional(),
     current_question: questionSelectionSchema.nullable(),
   })
   .passthrough();

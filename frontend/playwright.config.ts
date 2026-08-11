@@ -21,7 +21,7 @@ export default defineConfig({
     command:
       "cd .. && APP_ENV=test STORE_BACKEND=local LOCAL_STORE_DIR=.local_store/e2e " +
       "DEFAULT_RUNTIME_MODE=snapshot uv run uvicorn backend.app.main:app " +
-      "--host 127.0.0.1 --port 8091",
+      "--host 127.0.0.1 --port 8091 --no-access-log",
     url: "http://127.0.0.1:8091/api/v1/health",
     reuseExistingServer: false,
     timeout: 30_000,

@@ -1,0 +1,802 @@
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+import urllib.request
+from dataclasses import asdict, dataclass
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import orjson
+import yaml
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from backend.app.infrastructure.snapshot_loader import (  # noqa: E402
+    SnapshotIntegrityError,
+    load_verified_snapshot,
+)
+
+REQUIRED_FILES = (
+    "README.md",
+    "DATA_SOURCES.md",
+    "MODEL_AND_COST_CARD.md",
+    "SAFETY_AND_LIMITATIONS.md",
+    "THIRD_PARTY_NOTICES.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".env.example",
+    "uv.lock",
+    "package-lock.json",
+    "Dockerfile",
+    "config/app.yaml",
+    "config/models.yaml",
+    "config/pricing.yaml",
+    "config/eval.yaml",
+    "docs/ANNOTATION_GUIDE.md",
+    "docs/DEMO_RUNBOOK.md",
+    "presentation/demo_script.md",
+    "presentation/submission_checklist.md",
+    "scripts/bootstrap_gcp.sh",
+    "scripts/deploy.sh",
+    "scripts/smoke_test_deployment.sh",
+    "scripts/cleanup_expired.py",
+    "scripts/estimate_cost.py",
+    "scripts/validate_snapshot.py",
+    "scripts/verify_release.py",
+    "scripts/package_submission.py",
+)
+REQUIRED_PROMPTS = (
+    "patient_extraction_v1.md",
+    "retrieval_query_v1.md",
+    "protocol_compiler_v1.md",
+    "protocol_reviewer_v1.md",
+    "answer_interpreter_v1.md",
+    "question_renderer_v1.md",
+    "report_renderer_v1.md",
+)
+EXPECTED_MODELS = {
+    "primary": "gemini-3.6-flash",
+    "lite": "gemini-3.5-flash-lite",
+    "embedding": "gemini-embedding-001",
+}
+DISCLAIMER_TERMS = ("does not diagnose", "medical advice", "final eligibility", "synthetic")
+
+
+@dataclass(frozen=True)
+class Check:
+    check_id: str
+    required: bool
+    passed: bool
+    summary: str
+    detail: str = ""
+
+
+class Verifier:
+    def __init__(self, *, strict: bool) -> None:
+        self.strict = strict
+        self.checks: list[Check] = []
+        self.git_sha = self._git("rev-parse", "HEAD") or "unknown"
+        self.started_at = datetime.now(UTC)
+
+    @staticmethod
+    def _git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=REPOSITORY_ROOT, text=True, capture_output=True, check=False
+        )
+        return result.stdout.strip() if result.returncode == 0 else ""
+
+    def add(
+        self, check_id: str, passed: bool, summary: str, detail: str = "", *, required: bool = True
+    ) -> None:
+        self.checks.append(Check(check_id, required, passed, summary, detail[:4000]))
+
+    def command(self, check_id: str, command: list[str], *, timeout: int = 900) -> None:
+        started = time.monotonic()
+        try:
+            result = subprocess.run(
+                command,
+                cwd=REPOSITORY_ROOT,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+                env={
+                    **os.environ,
+                    "ALLOW_LIVE_MODEL_CALLS": "false",
+                    "ALLOW_LIVE_CTGOV_CALLS": "false",
+                },
+            )
+            output = "\n".join((result.stdout + "\n" + result.stderr).splitlines()[-30:])
+            self.add(
+                check_id,
+                result.returncode == 0,
+                (
+                    f"{'passed' if result.returncode == 0 else 'failed'} in "
+                    f"{time.monotonic() - started:.2f}s"
+                ),
+                output,
+            )
+        except (subprocess.TimeoutExpired, OSError) as error:
+            self.add(check_id, False, "command did not complete", str(error))
+
+    def check_repository(self) -> None:
+        status = self._git("status", "--porcelain", "--untracked-files=all")
+        self.add(
+            "repository.clean",
+            not status,
+            "worktree is clean" if not status else "worktree is dirty",
+            status,
+        )
+        self.add("repository.sha", self.git_sha != "unknown", f"git SHA {self.git_sha}")
+        missing = [item for item in REQUIRED_FILES if not (REPOSITORY_ROOT / item).is_file()]
+        self.add(
+            "repository.required_files",
+            not missing,
+            "all required files are present" if not missing else "required files are missing",
+            ", ".join(missing),
+        )
+        prompt_missing = [
+            name for name in REQUIRED_PROMPTS if not (REPOSITORY_ROOT / "prompts" / name).is_file()
+        ]
+        self.add(
+            "prompts.required",
+            not prompt_missing,
+            "all critical prompts are present"
+            if not prompt_missing
+            else "critical prompts are missing",
+            ", ".join(prompt_missing),
+        )
+
+    def check_readme_and_safety(self) -> None:
+        readme = (REPOSITORY_ROOT / "README.md").read_text(encoding="utf-8").lower()
+        headings = [
+            "# trial-opt",
+            "## research contribution",
+            "## architecture",
+            "## snapshot demo quick start",
+            "## optional live mode setup",
+            "## environment variables",
+            "## test commands",
+            "## benchmark and evaluation",
+            "## gcp deployment summary",
+            "## data sources and terms",
+            "## models and cost assumptions",
+            "## known limitations",
+            "## references",
+            "## release artifact identifiers",
+        ]
+        positions = [readme.find(heading) for heading in headings]
+        ordered = all(position >= 0 for position in positions) and positions == sorted(positions)
+        self.add(
+            "docs.readme_contract",
+            ordered,
+            "README sections are present in contract order",
+            str(dict(zip(headings, positions, strict=True))),
+        )
+        combined = "\n".join(
+            (REPOSITORY_ROOT / path).read_text(encoding="utf-8").lower()
+            for path in ("README.md", "SAFETY_AND_LIMITATIONS.md")
+        )
+        missing = [term for term in DISCLAIMER_TERMS if term not in combined]
+        self.add(
+            "safety.disclaimer",
+            not missing,
+            "medical/data disclaimer is present",
+            ", ".join(missing),
+        )
+        data_doc = (REPOSITORY_ROOT / "DATA_SOURCES.md").read_text(encoding="utf-8")
+        notices = (REPOSITORY_ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        data_ok = all(
+            term in data_doc
+            for term in (
+                "ClinicalTrials.gov",
+                "Terms",
+                "TREC",
+                "clinical validation",
+                "SHA-256",
+            )
+        ) and "not relicensed" in (data_doc + notices)
+        self.add(
+            "docs.data_terms", data_ok, "data provenance and source-specific terms are documented"
+        )
+
+    def check_models_and_prompts(self) -> None:
+        models = yaml.safe_load(
+            (REPOSITORY_ROOT / "config/models.yaml").read_text(encoding="utf-8")
+        )
+        ids = {key: value["id"] for key, value in models["models"].items()}
+        forbidden = [
+            pattern
+            for pattern in models["forbidden_patterns"]
+            if any(pattern.lower() in value.lower() for value in ids.values())
+        ]
+        self.add(
+            "models.frozen_ids",
+            ids == EXPECTED_MODELS and not forbidden,
+            f"effective model IDs: {ids}",
+            f"forbidden matches: {forbidden}",
+        )
+        self.add(
+            "models.first_party",
+            models.get("provider") == "google_cloud_first_party"
+            and models.get("consumption", {}).get("priority_paygo_allowed") is False,
+            "first-party Standard PayGo routing is fixed and Priority PayGo is disabled",
+        )
+
+        prompt_details: list[str] = []
+        prompt_ok = True
+        prompt_hashes: dict[str, str] = {}
+        for name in REQUIRED_PROMPTS:
+            path = REPOSITORY_ROOT / "prompts" / name
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            lower = text.lower()
+            prompt_hashes[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+            required = ("prompt_id", "version", "schema", "untrusted", "json")
+            missing = [clause for clause in required if clause not in lower]
+            if missing:
+                prompt_ok = False
+                prompt_details.append(f"{name}: missing {','.join(missing)}")
+        self.add(
+            "prompts.contracts",
+            prompt_ok and len(prompt_hashes) == len(REQUIRED_PROMPTS),
+            "critical prompt clauses and hashes are available",
+            "; ".join(prompt_details),
+        )
+
+        pricing = yaml.safe_load(
+            (REPOSITORY_ROOT / "config/pricing.yaml").read_text(encoding="utf-8")
+        )
+        effective = date.fromisoformat(str(pricing["effective_date"]))
+        age = (date.today() - effective).days
+        acknowledged = False
+        ack_path = REPOSITORY_ROOT / "artifacts/release/pricing_acknowledgement.json"
+        if ack_path.is_file():
+            ack = json.loads(ack_path.read_text(encoding="utf-8"))
+            acknowledged = (
+                bool(ack.get("acknowledged"))
+                and ack.get("effective_date") == effective.isoformat()
+                and date.fromisoformat(ack["checked_at"]) >= date.today() - timedelta(days=14)
+            )
+        self.add(
+            "pricing.freshness",
+            age <= 14 or acknowledged,
+            f"pricing effective date {effective.isoformat()} is {age} days old",
+            "A dated acknowledgement is mandatory after 14 days.",
+        )
+        lifecycle = REPOSITORY_ROOT / "artifacts/release/model_access_validation.json"
+        lifecycle_ok = False
+        if lifecycle.is_file():
+            record = json.loads(lifecycle.read_text(encoding="utf-8"))
+            lifecycle_ok = (
+                record.get("git_sha") == self.git_sha
+                and record.get("models") == list(EXPECTED_MODELS.values())
+                and record.get("passed") is True
+            )
+        self.add(
+            "models.release_access",
+            lifecycle_ok,
+            "release model lifecycle/access validation is bound to this commit"
+            if lifecycle_ok
+            else "release model lifecycle/access validation is missing",
+        )
+
+    def check_snapshot(self) -> None:
+        root = REPOSITORY_ROOT / "data/demo/current"
+        try:
+            manifest = load_verified_snapshot(root, require_complete=True)
+            cases = [case.case_id for case in manifest.cases if case.complete]
+            built_at = datetime.fromisoformat(manifest.built_at.replace("Z", "+00:00"))
+            age = datetime.now(UTC) - built_at.astimezone(UTC)
+            valid = cases == ["S004", "S008", "S001"] and age <= timedelta(hours=48)
+            detail = (
+                f"version={manifest.snapshot_version}; cases={cases}; "
+                f"age_hours={age.total_seconds() / 3600:.2f}"
+            )
+            self.add(
+                "snapshot.integrity_age_cases",
+                valid,
+                "complete three-case snapshot hashes and age pass"
+                if valid
+                else "snapshot set or age is invalid",
+                detail,
+            )
+        except (SnapshotIntegrityError, FileNotFoundError, ValueError) as error:
+            self.add(
+                "snapshot.integrity_age_cases",
+                False,
+                "complete release snapshot is unavailable",
+                str(error),
+            )
+
+    def check_json_invariants(self) -> None:
+        failures: list[str] = []
+        paths = [Path(item) for item in self._git("ls-files", "*.json").splitlines()]
+
+        def walk(value: Any, path: Path) -> None:
+            if isinstance(value, dict):
+                proof_id = value.get("proof_id")
+                if isinstance(proof_id, str) and not re.search(r":r\d+$", proof_id):
+                    failures.append(f"{path}: invalid proof_id {proof_id}")
+                if value.get("protocol_verified") is True:
+                    compiler = str(value.get("compiler_model_id", ""))
+                    reviewer = str(value.get("reviewer_model_id", value.get("model_id", "")))
+                    if (
+                        "flash-lite" in compiler
+                        and "flash-lite" in reviewer
+                        and not value.get("exact_hash_approved")
+                    ):
+                        failures.append(
+                            f"{path}: live verified protocol used dual Flash-Lite "
+                            "without exact-hash approval"
+                        )
+                for child in value.values():
+                    walk(child, path)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child, path)
+
+        for relative in paths:
+            path = REPOSITORY_ROOT / relative
+            try:
+                walk(orjson.loads(path.read_bytes()), relative)
+            except (orjson.JSONDecodeError, OSError):
+                continue
+        source = "\n".join(
+            path.read_text(encoding="utf-8", errors="ignore")
+            for path in (REPOSITORY_ROOT / "backend").rglob("*.py")
+        )
+        pipe_filter = bool(re.search(r"overallStatus[^\n]{0,100}[A-Z_]+\|[A-Z_]+", source))
+        if pipe_filter:
+            failures.append("pipe-delimited ClinicalTrials.gov status filter found")
+        self.add(
+            "invariants.release_static",
+            not failures,
+            "proof IDs, protocol trust, and CTGov status filters pass static release rules",
+            "\n".join(failures),
+        )
+
+    def check_security(self) -> None:
+        tracked = [Path(item) for item in self._git("ls-files").splitlines()]
+        secret_patterns = {
+            "private_key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
+            "google_api_key": re.compile(r"AIza[0-9A-Za-z_-]{30,}"),
+            "service_account_key": re.compile(r'"private_key_id"\s*:\s*"[0-9a-f]{20,}"'),
+            "github_token": re.compile(r"gh[pousr]_[A-Za-z0-9_]{30,}"),
+        }
+        hits: list[str] = []
+        for relative in tracked:
+            path = REPOSITORY_ROOT / relative
+            if not path.is_file() or path.stat().st_size > 5_000_000:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for label, pattern in secret_patterns.items():
+                if pattern.search(text):
+                    hits.append(f"{relative}:{label}")
+        self.add(
+            "security.secret_scan", not hits, "tracked-file secret scan is clean", ", ".join(hits)
+        )
+
+        pii_hits: list[str] = []
+        for relative in tracked:
+            if not str(relative).startswith(("data/", "tests/")):
+                continue
+            if str(relative).startswith(("data/seeds/", "data/fixtures/retrieval/")):
+                continue
+            path = REPOSITORY_ROOT / relative
+            if path.is_file() and path.suffix in {".json", ".txt", ".jsonl"}:
+                text = path.read_text(encoding="utf-8", errors="ignore")
+                if re.search(r"\b\d{6}-[1-4]\d{6}\b|\b01[016789]-?\d{3,4}-?\d{4}\b", text):
+                    pii_hits.append(str(relative))
+        self.add(
+            "security.raw_pii_fixtures",
+            not pii_hits,
+            "no obvious raw identifier fixture was found outside allowed public/synthetic sources",
+            ", ".join(pii_hits),
+        )
+
+    def check_evaluation(self) -> None:
+        metrics_path = REPOSITORY_ROOT / "artifacts/eval/latest/metrics.json"
+        annotation_path = REPOSITORY_ROOT / "data/eval/annotations/manifest.json"
+        if not metrics_path.is_file() or not annotation_path.is_file():
+            self.add("evaluation.acceptance", False, "evaluation or annotation manifest is missing")
+            return
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        annotations = json.loads(annotation_path.read_text(encoding="utf-8"))
+        required_metric_keys = {
+            "criterion_macro_f1",
+            "hard_fail_recall",
+            "false_pre_screen_pass_rate",
+            "evidence_precision",
+            "retrieval_recall_at_20",
+            "bm25_recall_at_20",
+            "median_questions_to_stable_top3_40_realistic",
+            "b3_median_questions_40_realistic",
+            "decision_accuracy_after_3",
+            "b3_decision_accuracy_after_3",
+            "unsupported_hard_decision_rate",
+            "proof_replay_success_rate",
+        }
+        values = metrics.get("acceptance_metrics", {})
+        missing = sorted(required_metric_keys - values.keys())
+        threshold_ok = not missing and all(
+            (
+                values["criterion_macro_f1"] >= 0.80,
+                values["hard_fail_recall"] >= 0.85,
+                values["false_pre_screen_pass_rate"] <= 0.02,
+                values["evidence_precision"] >= 0.95,
+                values["retrieval_recall_at_20"] >= 0.80,
+                values["retrieval_recall_at_20"] >= values["bm25_recall_at_20"] - 0.02,
+                values["median_questions_to_stable_top3_40_realistic"] <= 3,
+                values["decision_accuracy_after_3"] >= values["b3_decision_accuracy_after_3"],
+                values["unsupported_hard_decision_rate"] == 0,
+                values["proof_replay_success_rate"] == 1,
+            )
+        )
+        annotation_ok = (
+            annotations.get("status") == "ADJUDICATED"
+            and annotations.get("completed_pairs", 0) >= 200
+            and annotations.get("completed_dual_reviews", 0) >= 50
+            and annotations.get("adjudicated_pairs", 0) == annotations.get("completed_pairs", -1)
+        )
+        passed = metrics.get("acceptance_eligible") is True and annotation_ok and threshold_ok
+        self.add(
+            "evaluation.acceptance",
+            passed,
+            "Dataset A annotation and machine thresholds pass"
+            if passed
+            else "Dataset A acceptance evidence is incomplete or below threshold",
+            (
+                f"missing_metrics={missing}; annotation_status={annotations.get('status')}; "
+                f"claim_scope={metrics.get('claim_scope')}"
+            ),
+        )
+
+    def check_release_evidence(self) -> None:
+        release = REPOSITORY_ROOT / "artifacts/release"
+        image = (
+            (release / "IMAGE_DIGEST.txt").read_text(encoding="utf-8").strip()
+            if (release / "IMAGE_DIGEST.txt").is_file()
+            else ""
+        )
+        self.add(
+            "release.image_digest",
+            bool(re.fullmatch(r"sha256:[0-9a-f]{64}", image)),
+            "container image digest is recorded" if image else "container image digest is missing",
+            image,
+        )
+        tags = self._git("tag", "--points-at", "HEAD").splitlines()
+        self.add(
+            "release.tag",
+            "v1.0.0-challenge" in tags,
+            "v1.0.0-challenge points at HEAD"
+            if "v1.0.0-challenge" in tags
+            else "v1.0.0-challenge does not point at HEAD",
+        )
+        validation_path = release / "external_validation.json"
+        valid = False
+        if validation_path.is_file():
+            record = json.loads(validation_path.read_text(encoding="utf-8"))
+            valid = (
+                record.get("git_sha") == self.git_sha
+                and record.get("production_smoke_passed") is True
+                and record.get("live_smoke_sessions") == 1
+                and record.get("priority_paygo_allowed") is False
+                and str(record.get("production_url", "")).startswith("https://")
+            )
+        self.add(
+            "release.production_validation",
+            valid,
+            "production and exactly-one-live-session smoke are commit-bound"
+            if valid
+            else "production/live smoke evidence is missing",
+        )
+        rehearsals_path = release / "demo_rehearsals.json"
+        rehearsals_ok = False
+        if rehearsals_path.is_file():
+            rehearsals = json.loads(rehearsals_path.read_text(encoding="utf-8")).get("runs", [])
+            rehearsals_ok = (
+                len(rehearsals) >= 3
+                and any(
+                    run.get("network_disabled") is True and run.get("passed") is True
+                    for run in rehearsals
+                )
+                and all(
+                    run.get("git_sha") == self.git_sha and run.get("passed") is True
+                    for run in rehearsals[:3]
+                )
+            )
+        self.add(
+            "release.demo_rehearsals",
+            rehearsals_ok,
+            "three commit-bound rehearsals include network-disabled"
+            if rehearsals_ok
+            else "required release rehearsals are missing",
+        )
+
+    def check_demo_health(self) -> None:
+        process: subprocess.Popen[str] | None = None
+        started = time.monotonic()
+        try:
+            process = subprocess.Popen(
+                ["make", "demo-offline"],
+                cwd=REPOSITORY_ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                env={
+                    **os.environ,
+                    "ALLOW_LIVE_MODEL_CALLS": "false",
+                    "ALLOW_LIVE_CTGOV_CALLS": "false",
+                },
+            )
+            deadline = time.monotonic() + 15
+            payload: dict[str, Any] | None = None
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    break
+                try:
+                    with urllib.request.urlopen(
+                        "http://127.0.0.1:8080/api/v1/health", timeout=1
+                    ) as response:
+                        payload = json.load(response)
+                    break
+                except OSError:
+                    time.sleep(0.25)
+            elapsed = time.monotonic() - started
+            self.add(
+                "runtime.demo_health",
+                payload is not None
+                and payload.get("status") in {"ok", "degraded"}
+                and elapsed < 15,
+                f"offline demo health {'passed' if payload else 'failed'} in {elapsed:.2f}s",
+                json.dumps(payload) if payload else "No health response",
+            )
+        except OSError as error:
+            self.add("runtime.demo_health", False, "offline demo could not launch", str(error))
+        finally:
+            if process is not None and process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+
+    def check_docker_offline_demo(self) -> None:
+        name = f"trial-opt-release-check-{os.getpid()}"
+        container_id = ""
+        probe = r"""
+import json
+import time
+import urllib.request
+
+base = "http://127.0.0.1:8080/api/v1"
+for _ in range(60):
+    try:
+        with urllib.request.urlopen(base + "/health", timeout=1) as response:
+            assert response.status == 200
+        break
+    except OSError:
+        time.sleep(0.25)
+else:
+    raise SystemExit("health timeout")
+
+def request(path, method="GET", payload=None, token=None, accept=None):
+    headers = {}
+    body = None
+    if payload is not None:
+        body = json.dumps(payload).encode()
+        headers["Content-Type"] = "application/json"
+    if token:
+        headers["X-Session-Token"] = token
+    if accept:
+        headers["Accept"] = accept
+    req = urllib.request.Request(base + path, data=body, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=20) as response:
+        return response.read()
+
+created = json.loads(request("/sessions", "POST", {
+    "mode": "snapshot", "seed_case_id": "S004", "evaluation_date": "2026-08-11",
+    "language": "en", "confirm_synthetic_public": False,
+    "identifier_warning_acknowledged": False,
+}))
+session_id = created["session_id"]
+token = created["session_token"]
+analysis = request(
+    f"/sessions/{session_id}/analysis", "POST", token=token, accept="text/event-stream"
+)
+assert b"event: completed" in analysis
+session = json.loads(request(f"/sessions/{session_id}", token=token))
+question_id = session["current_question"]["selected"]["question_id"]
+proof = json.loads(request(f"/sessions/{session_id}/trials/NCT05239624/proof", token=token))
+assert len(proof["proof_packets"]) == 7
+answer = request(f"/sessions/{session_id}/answers", "POST", {
+    "question_id": question_id, "answer_text": None, "structured_value": None,
+    "unknown": True, "declined": False,
+}, token=token, accept="text/event-stream")
+assert b"event: completed" in answer
+exported = json.loads(request(f"/sessions/{session_id}/export.json", token=token))
+assert exported["artifact_sha256"]
+print("offline container flow passed")
+"""
+        try:
+            started = subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--detach",
+                    "--network",
+                    "none",
+                    "--name",
+                    name,
+                    "-e",
+                    "APP_ENV=local",
+                    "-e",
+                    "STORE_BACKEND=local",
+                    "-e",
+                    "ALLOW_LIVE_MODEL_CALLS=false",
+                    "-e",
+                    "ALLOW_LIVE_CTGOV_CALLS=false",
+                    "trial-opt:release-check",
+                ],
+                cwd=REPOSITORY_ROOT,
+                text=True,
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            container_id = started.stdout.strip()
+            if started.returncode != 0:
+                self.add(
+                    "runtime.docker_offline_demo",
+                    False,
+                    "offline container did not start",
+                    started.stderr,
+                )
+                return
+            result = subprocess.run(
+                ["docker", "exec", name, "python", "-c", probe],
+                cwd=REPOSITORY_ROOT,
+                text=True,
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+            self.add(
+                "runtime.docker_offline_demo",
+                result.returncode == 0,
+                (
+                    "network-disabled container full demo passed"
+                    if result.returncode == 0
+                    else "network-disabled container demo failed"
+                ),
+                (result.stdout + "\n" + result.stderr)[-4000:],
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            self.add(
+                "runtime.docker_offline_demo",
+                False,
+                "offline container verification did not complete",
+                str(error),
+            )
+        finally:
+            if container_id:
+                subprocess.run(
+                    ["docker", "stop", "--time", "5", name],
+                    text=True,
+                    capture_output=True,
+                    timeout=15,
+                    check=False,
+                )
+
+    def run(self) -> bool:
+        self.check_repository()
+        self.check_readme_and_safety()
+        self.check_models_and_prompts()
+        self.check_snapshot()
+        self.check_json_invariants()
+        self.check_security()
+        self.check_evaluation()
+        self.command(
+            "runtime.python_lint",
+            ["uv", "run", "ruff", "check", "backend", "tests", "scripts"],
+            timeout=300,
+        )
+        self.command(
+            "runtime.python_format",
+            ["uv", "run", "ruff", "format", "--check", "backend", "tests", "scripts"],
+            timeout=300,
+        )
+        self.command("runtime.python_types", ["uv", "run", "mypy"], timeout=300)
+        self.command("runtime.python_tests", ["uv", "run", "pytest"], timeout=900)
+        self.command("runtime.frontend_lint", ["npm", "run", "lint"], timeout=300)
+        self.command("runtime.frontend_types", ["npm", "run", "typecheck"], timeout=300)
+        self.command("runtime.frontend_tests", ["npm", "test", "--", "--run"], timeout=600)
+        self.command("runtime.frontend_build", ["npm", "run", "build"], timeout=600)
+        self.command("runtime.playwright_offline", ["npm", "run", "e2e"], timeout=900)
+        self.check_demo_health()
+        self.command(
+            "runtime.docker_build",
+            ["docker", "build", "-t", "trial-opt:release-check", "."],
+            timeout=1200,
+        )
+        self.check_docker_offline_demo()
+        self.check_release_evidence()
+        return not any(check.required and not check.passed for check in self.checks)
+
+    def write(self, passed: bool) -> None:
+        output = REPOSITORY_ROOT / "artifacts/release"
+        output.mkdir(parents=True, exist_ok=True)
+        finished = datetime.now(UTC)
+        payload = {
+            "schema_version": "trial-opt-release-verification-v1",
+            "strict": self.strict,
+            "passed": passed,
+            "git_sha": self.git_sha,
+            "started_at": self.started_at.isoformat(),
+            "finished_at": finished.isoformat(),
+            "required_failures": [
+                check.check_id for check in self.checks if check.required and not check.passed
+            ],
+            "checks": [asdict(check) for check in self.checks],
+        }
+        (output / "verification.json").write_bytes(
+            orjson.dumps(payload, option=orjson.OPT_SORT_KEYS | orjson.OPT_INDENT_2)
+        )
+        lines = [
+            "# TRIAL-OPT Release Verification",
+            "",
+            f"- Result: **{'PASS' if passed else 'FAIL'}**",
+            f"- Git SHA: `{self.git_sha}`",
+            f"- Finished: `{finished.isoformat()}`",
+            "",
+            "| Gate | Required | Result | Summary |",
+            "|---|---:|---:|---|",
+        ]
+        for check in self.checks:
+            summary = check.summary.replace("|", "\\|").replace("\n", " ")
+            lines.append(
+                f"| `{check.check_id}` | {'yes' if check.required else 'no'} | "
+                f"{'PASS' if check.passed else 'FAIL'} | {summary} |"
+            )
+        failures = [check for check in self.checks if check.required and not check.passed]
+        if failures:
+            lines.extend(["", "## Required failures", ""])
+            for check in failures:
+                lines.append(f"- `{check.check_id}`: {check.summary}")
+        (output / "verification.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Verify every TRIAL-OPT release MUST gate")
+    parser.add_argument(
+        "--strict", action="store_true", help="exit nonzero on any required failure"
+    )
+    args = parser.parse_args()
+    verifier = Verifier(strict=args.strict)
+    passed = verifier.run()
+    verifier.write(passed)
+    print(f"release verification: {'PASS' if passed else 'FAIL'}")
+    for check in verifier.checks:
+        print(f"[{'PASS' if check.passed else 'FAIL'}] {check.check_id}: {check.summary}")
+    if args.strict and not passed:
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

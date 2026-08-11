@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from backend.app.domain.base import StrictModel
 from backend.app.infrastructure.cache import LocalModelResultCache, model_cache_key
 from backend.app.infrastructure.structured_generation import StructuredGenerator
-from backend.app.infrastructure.usage_guard import default_pricing_estimator
+from backend.app.infrastructure.usage_guard import InMemoryUsageGuard, default_pricing_estimator
 
 
 class _Output(StrictModel):
@@ -88,10 +88,12 @@ async def test_schema_failure_retries_then_exact_cache_prevents_second_dispatch(
     tmp_path: Path,
 ) -> None:
     client = _FakeClient()
+    usage_guard = InMemoryUsageGuard()
     generator = StructuredGenerator(
         client=client,
         cache=LocalModelResultCache(tmp_path),
         pricing=default_pricing_estimator(),
+        usage_guard=usage_guard,
         sleep=_no_sleep,
         jitter=lambda _low, _high: 0,
     )
@@ -115,6 +117,9 @@ async def test_schema_failure_retries_then_exact_cache_prevents_second_dispatch(
     assert first_record.usage.cache_hit is False
     assert second_record.usage.cache_hit is True
     assert first_record.usage.estimated_cost_usd > 0
+    usage = usage_guard.snapshot("unscoped")
+    assert usage.session_reserved_usd == 0
+    assert usage.session_reconciled_usd > 0
 
 
 async def test_primary_schema_exhaustion_uses_single_lite_fallback(tmp_path: Path) -> None:

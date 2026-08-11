@@ -10,8 +10,10 @@ local infrastructure state. They are not represented as completed.
   explicit authorization to make paid model calls was supplied in the current implementation run.
 - Completed independently: first-party `google-genai==2.17.0` enterprise client construction,
   API v1 selection, fixed model routing, structured schemas, retry/circuit/fallback behavior,
-  application cache, usage metadata parsing, price estimation, trusted proposal validation, and
-  opaque safety fallback.
+  local and Firestore shared model caches, usage metadata parsing, transactional session/day/total
+  cost reservations, Firestore fixed-window rate limits, price estimation, trusted proposal
+  validation, GCS offload for session state above 750 KiB, and opaque safety fallback. The full
+  first-party Live orchestrator is wired but has not dispatched a paid request in this run.
 - Required external proof later: model-access smoke test for `gemini-3.6-flash`,
   `gemini-3.5-flash-lite`, and `gemini-embedding-001`; paid compilation/review of the final curated
   corpus; quota and cost-guard validation. The current S004 top-8 compiled cache is deliberately
@@ -54,3 +56,18 @@ local infrastructure state. They are not represented as completed.
 - Blocker: `ir_datasets` and the licensed/local frozen 2021 ClinicalTrials.gov corpus were not
   supplied. `artifacts/eval/trec2022/not_run.json` records the exact dataset identifier and
   acquisition instructions; no TREC score is imputed.
+
+## Minimal external completion checklist
+
+Perform these only after approving the named billing/project and Docker cleanup scope:
+
+1. Recover enough Docker Desktop internal storage, then run the strict verifier's Docker/offline
+   container gates and record the immutable image digest.
+2. Supply the approved Free Trial GCP project/billing account, run `scripts/bootstrap_gcp.sh`, and
+   execute the one-call model-access smoke for all three frozen model IDs.
+3. Acquire, manually review, and exact-hash freeze the S004/S008/S001 24–36-trial snapshot within
+   48 hours of release.
+4. Complete the Dataset A 200-pair/50-dual-review adjudication and rerun all evaluation suites.
+5. Deploy the verified commit, run `scripts/smoke_test_deployment.sh --live` exactly once, record
+   three rehearsals including the network-disabled container, and rerun
+   `uv run python scripts/verify_release.py --strict` from a clean worktree.

@@ -63,6 +63,7 @@ class ProtocolCompilationService:
         trial: RawTrialRecord,
         *,
         repair_issues: object | None = None,
+        session_id: str = "unscoped",
     ) -> tuple[CompiledTrialProposal, bool]:
         prompt = self._compiler_prompt(trial, repair_issues)
         proposal, record = await self.generator.generate_primary_with_lite_fallback(
@@ -82,10 +83,13 @@ class ProtocolCompilationService:
             fallback_thinking_level="HIGH",
             primary_max_output_tokens=4000 if repair_issues is None else 2500,
             fallback_max_output_tokens=2500,
+            session_id=session_id,
         )
         return proposal, record.used_fallback
 
-    async def _review(self, compilation: TrustedCompilation) -> tuple[ProtocolReviewProposal, bool]:
+    async def _review(
+        self, compilation: TrustedCompilation, *, session_id: str = "unscoped"
+    ) -> tuple[ProtocolReviewProposal, bool]:
         compiled = compilation.compiled_trial
         prompt = render_prompt(
             "protocol_reviewer_v1.md",
@@ -105,6 +109,7 @@ class ProtocolCompilationService:
             fallback_thinking_level="HIGH",
             primary_max_output_tokens=1500,
             fallback_max_output_tokens=1500,
+            session_id=session_id,
         )
         return proposal, record.used_fallback
 
@@ -114,11 +119,14 @@ class ProtocolCompilationService:
         trial: RawTrialRecord,
         evaluation_date: date,
         now: datetime,
+        session_id: str = "unscoped",
     ) -> CompilationWorkflowResult:
         repair_attempted = False
         degradation_codes: list[str] = []
         try:
-            proposal, compiler_fallback = await self._generate_compilation(trial)
+            proposal, compiler_fallback = await self._generate_compilation(
+                trial, session_id=session_id
+            )
             compilation = construct_trusted_compilation(
                 trial=trial,
                 proposal=proposal,
@@ -130,12 +138,13 @@ class ProtocolCompilationService:
                 created_at=now,
                 evaluation_date=evaluation_date,
             )
-            review, reviewer_fallback = await self._review(compilation)
+            review, reviewer_fallback = await self._review(compilation, session_id=session_id)
             if not review.approved or any(issue.severity == "BLOCKING" for issue in review.issues):
                 repair_attempted = True
                 proposal, compiler_fallback = await self._generate_compilation(
                     trial,
                     repair_issues=[issue.model_dump(mode="json") for issue in review.issues],
+                    session_id=session_id,
                 )
                 compilation = construct_trusted_compilation(
                     trial=trial,
@@ -148,7 +157,7 @@ class ProtocolCompilationService:
                     created_at=now,
                     evaluation_date=evaluation_date,
                 )
-                review, reviewer_fallback = await self._review(compilation)
+                review, reviewer_fallback = await self._review(compilation, session_id=session_id)
                 if not review.approved or any(
                     issue.severity == "BLOCKING" for issue in review.issues
                 ):

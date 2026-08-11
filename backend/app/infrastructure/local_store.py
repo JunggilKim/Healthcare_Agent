@@ -4,7 +4,8 @@ import hashlib
 import hmac
 import os
 import secrets
-from datetime import UTC, datetime
+import shutil
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -20,11 +21,13 @@ from backend.app.domain.sessions import SessionState
 class LocalSessionStore:
     """SQLite metadata/event adapter with content-addressed local JSON objects."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, hmac_salt: str | None = None) -> None:
         self.root = root
         self.database_path = root / "trial_opt.db"
         self.object_dir = root / "objects"
-        self._process_hmac_key = secrets.token_bytes(32)
+        self._process_hmac_key = (
+            hmac_salt.encode("utf-8") if hmac_salt is not None else secrets.token_bytes(32)
+        )
 
     async def initialize(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -54,6 +57,20 @@ class LocalSessionStore:
                 );
                 CREATE INDEX IF NOT EXISTS events_session_sequence
                 ON events(session_id, sequence);
+                CREATE TABLE IF NOT EXISTS orchestration_leases (
+                    session_id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS answer_idempotency (
+                    session_id TEXT NOT NULL,
+                    key_hash TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    response_json BLOB,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (session_id, key_hash)
+                );
                 """
             )
             await database.commit()
@@ -256,3 +273,164 @@ class LocalSessionStore:
             temporary.write_bytes(content)
             temporary.replace(target)
         return str(target), digest
+
+    async def delete_session(self, session_id: str) -> bool:
+        """Soft-delete atomically so authentication and normal reads stop immediately."""
+
+        now = datetime.now(UTC)
+        async with aiosqlite.connect(self.database_path, isolation_level=None) as database:
+            await database.execute("BEGIN IMMEDIATE")
+            cursor = await database.execute(
+                "SELECT deleted FROM sessions WHERE session_id = ?", (session_id,)
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await database.rollback()
+                return False
+            if int(row[0]) == 1:
+                await database.commit()
+                return True
+            cursor = await database.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 FROM events WHERE session_id = ?",
+                (session_id,),
+            )
+            sequence_row = await cursor.fetchone()
+            assert sequence_row is not None
+            sequence = int(sequence_row[0])
+            await database.execute(
+                """
+                INSERT INTO events(
+                    session_id, sequence, event_id, event_type, payload_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    sequence,
+                    f"evt_{uuid4()}",
+                    "SESSION_DELETED",
+                    canonical_json_bytes({"cleanup_queued": True}),
+                    now.isoformat(),
+                ),
+            )
+            await database.execute(
+                "UPDATE sessions SET deleted = 1, updated_at = ? WHERE session_id = ?",
+                (now.isoformat(), session_id),
+            )
+            await database.commit()
+        session_objects = (self.object_dir / "sessions" / session_id).resolve()
+        if self.object_dir.resolve() in session_objects.parents and session_objects.is_dir():
+            shutil.rmtree(session_objects)
+        return True
+
+    async def acquire_lease(self, session_id: str, owner_id: str, *, duration: timedelta) -> bool:
+        now = datetime.now(UTC)
+        expires_at = now + duration
+        async with aiosqlite.connect(self.database_path, isolation_level=None) as database:
+            await database.execute("BEGIN IMMEDIATE")
+            cursor = await database.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ? AND deleted = 0", (session_id,)
+            )
+            if await cursor.fetchone() is None:
+                await database.rollback()
+                raise KeyError(session_id)
+            cursor = await database.execute(
+                "SELECT owner_id, expires_at FROM orchestration_leases WHERE session_id = ?",
+                (session_id,),
+            )
+            row = await cursor.fetchone()
+            if row is not None and row[0] != owner_id and datetime.fromisoformat(row[1]) > now:
+                await database.rollback()
+                return False
+            await database.execute(
+                """
+                INSERT INTO orchestration_leases(session_id, owner_id, expires_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                    owner_id = excluded.owner_id,
+                    expires_at = excluded.expires_at
+                """,
+                (session_id, owner_id, expires_at.isoformat()),
+            )
+            await database.commit()
+        return True
+
+    async def renew_lease(self, session_id: str, owner_id: str, *, duration: timedelta) -> bool:
+        expires_at = datetime.now(UTC) + duration
+        async with aiosqlite.connect(self.database_path) as database:
+            cursor = await database.execute(
+                """
+                UPDATE orchestration_leases SET expires_at = ?
+                WHERE session_id = ? AND owner_id = ?
+                """,
+                (expires_at.isoformat(), session_id, owner_id),
+            )
+            await database.commit()
+        return cursor.rowcount == 1
+
+    async def release_lease(self, session_id: str, owner_id: str) -> None:
+        async with aiosqlite.connect(self.database_path) as database:
+            await database.execute(
+                "DELETE FROM orchestration_leases WHERE session_id = ? AND owner_id = ?",
+                (session_id, owner_id),
+            )
+            await database.commit()
+
+    async def begin_answer_idempotency(
+        self, session_id: str, key_hash: str
+    ) -> tuple[str, list[dict[str, Any]] | None]:
+        now = datetime.now(UTC).isoformat()
+        async with aiosqlite.connect(self.database_path, isolation_level=None) as database:
+            await database.execute("BEGIN IMMEDIATE")
+            cursor = await database.execute(
+                """
+                INSERT OR IGNORE INTO answer_idempotency(
+                    session_id, key_hash, status, response_json, created_at, updated_at
+                ) VALUES (?, ?, 'IN_PROGRESS', NULL, ?, ?)
+                """,
+                (session_id, key_hash, now, now),
+            )
+            if cursor.rowcount == 1:
+                await database.commit()
+                return "NEW", None
+            cursor = await database.execute(
+                """
+                SELECT status, response_json FROM answer_idempotency
+                WHERE session_id = ? AND key_hash = ?
+                """,
+                (session_id, key_hash),
+            )
+            row = await cursor.fetchone()
+            await database.commit()
+        assert row is not None
+        response = cast(list[dict[str, Any]] | None, orjson.loads(row[1]) if row[1] else None)
+        return str(row[0]), response
+
+    async def complete_answer_idempotency(
+        self, session_id: str, key_hash: str, response: list[dict[str, Any]]
+    ) -> None:
+        async with aiosqlite.connect(self.database_path) as database:
+            await database.execute(
+                """
+                UPDATE answer_idempotency
+                SET status = 'COMPLETED', response_json = ?, updated_at = ?
+                WHERE session_id = ? AND key_hash = ? AND status = 'IN_PROGRESS'
+                """,
+                (
+                    canonical_json_bytes(response),
+                    datetime.now(UTC).isoformat(),
+                    session_id,
+                    key_hash,
+                ),
+            )
+            await database.commit()
+
+    async def abandon_answer_idempotency(self, session_id: str, key_hash: str) -> None:
+        async with aiosqlite.connect(self.database_path) as database:
+            await database.execute(
+                """
+                DELETE FROM answer_idempotency
+                WHERE session_id = ? AND key_hash = ? AND status = 'IN_PROGRESS'
+                """,
+                (session_id, key_hash),
+            )
+            await database.commit()

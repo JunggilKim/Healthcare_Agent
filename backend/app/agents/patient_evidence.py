@@ -359,6 +359,7 @@ class PatientEvidenceAgent:
         language_hint: Literal["ko", "en", "auto"],
         evaluation_date: date,
         asserted_at: datetime,
+        session_id: str = "unscoped",
     ) -> tuple[MaterializedPatientExtraction, bool]:
         normalized_input = {
             "patient_text": patient_text,
@@ -385,6 +386,7 @@ class PatientEvidenceAgent:
                 fallback_thinking_level="HIGH",
                 primary_max_output_tokens=2000,
                 fallback_max_output_tokens=2000,
+                session_id=session_id,
             )
         except StructuredGenerationUnavailable:
             degraded = True

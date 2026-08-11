@@ -26,10 +26,10 @@ docker-build:
 	docker build -t trial-opt:local .
 
 demo-offline: frontend-build
-	APP_ENV=local STORE_BACKEND=local DEFAULT_RUNTIME_MODE=snapshot uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8080
+	APP_ENV=local STORE_BACKEND=local DEFAULT_RUNTIME_MODE=snapshot uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8080 --no-access-log
 
 live-local:
-	APP_ENV=local STORE_BACKEND=local DEFAULT_RUNTIME_MODE=live uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8080
+	APP_ENV=local STORE_BACKEND=local DEFAULT_RUNTIME_MODE=live uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8080 --no-access-log
 
 eval:
 	uv run python scripts/generate_benchmark.py --config config/eval.yaml --seed 20260811

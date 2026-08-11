@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import AsyncIterator
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -18,13 +18,14 @@ from backend.app.domain.sessions import SessionState
 from backend.app.engine.proof_verifier import build_verified_proof
 from backend.app.engine.question_optimizer import OptimizationState, select_next_action
 from backend.app.engine.trial_aggregator import aggregate_trial
+from backend.app.infrastructure.gcp_store import GcpSessionStore
 from backend.app.infrastructure.local_store import LocalSessionStore
 
 
 class SnapshotSessionService:
     """Frozen Phase-1 orchestrator for the S004/NCT05239624 path only."""
 
-    def __init__(self, store: LocalSessionStore) -> None:
+    def __init__(self, store: LocalSessionStore | GcpSessionStore) -> None:
         self.store = store
         self.fixture = load_vertical_slice()
         self.catalog = load_slot_catalog()
@@ -38,13 +39,15 @@ class SnapshotSessionService:
         evaluation_date: date,
         language: str,
     ) -> dict[str, Any]:
-        if mode != "snapshot" or seed_case_id != "S004":
+        if mode not in {"snapshot", "live"} or seed_case_id != "S004":
             raise ValueError("Phase-1 supports only the frozen Snapshot S004 path")
+        degraded_live = mode == "live"
         session_id = str(uuid4())
         token = secrets.token_urlsafe(32)
         payload: dict[str, Any] = {
             "session_id": session_id,
-            "mode": "snapshot",
+            "mode": "hybrid_degraded" if degraded_live else "snapshot",
+            "engine": "vertical_slice",
             "seed_case_id": "S004",
             "evaluation_date": evaluation_date.isoformat(),
             "language": language,
@@ -55,17 +58,26 @@ class SnapshotSessionService:
             "conflicts": [],
             "proofs": [],
             "trial_evaluation": None,
+            "top_trial": {
+                "nct_id": self.fixture.raw_trial.nct_id,
+                "title": self.fixture.raw_trial.brief_title,
+                "overall_status": self.fixture.raw_trial.overall_status,
+                "data_timestamp": "2026-08-11T09:00:06Z",
+            },
             "current_question": None,
             "asked_slot_ids": [],
             "unavailable_slot_ids": [],
             "source_texts": {"seed:S004": self.fixture.patient_text},
-            "degradation_codes": [],
+            "degradation_codes": (
+                ["LIVE_DEPENDENCIES_DISABLED_SNAPSHOT_USED"] if degraded_live else []
+            ),
+            "expires_at": (datetime.now(UTC) + timedelta(days=7)).isoformat(),
         }
         await self.store.create_session(session_id, token, payload)
         await self.store.append_event_without_transition(
             session_id=session_id,
             event_type="SESSION_CREATED",
-            payload={"mode": "snapshot", "seed_case_id": "S004"},
+            payload={"mode": payload["mode"], "seed_case_id": "S004"},
         )
         created = await self.store.read_session(session_id)
         assert created is not None
@@ -73,7 +85,7 @@ class SnapshotSessionService:
             "session_id": session_id,
             "session_token": token,
             "state": SessionState.CREATED.value,
-            "mode": "snapshot",
+            "mode": mode,
             "created_at": created["created_at"],
         }
 
@@ -168,6 +180,17 @@ class SnapshotSessionService:
         if state is not SessionState.CREATED:
             yield "completed", {"sequence": 0, "state": state.value, "already_started": True}
             return
+
+        if payload.get("degradation_codes"):
+            yield (
+                "degraded",
+                {
+                    "sequence": 0,
+                    "state": SessionState.CREATED.value,
+                    "mode": payload["mode"],
+                    "degradation_codes": payload["degradation_codes"],
+                },
+            )
 
         event = await self._transition(
             payload=payload,
@@ -315,6 +338,7 @@ class SnapshotSessionService:
         *,
         question_id: str,
         answer_text: str | None,
+        structured_value: dict[str, object] | None,
         unknown: bool,
         declined: bool,
     ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
@@ -338,6 +362,11 @@ class SnapshotSessionService:
         yield "stage_started", {**event, "stage": "Answer Interpretation"}
         current = SessionState.ANSWER_INTERPRETING
         branches = self.fixture.answers["pathology_histology"]
+        if structured_value is not None:
+            branch_value = branches["branch_a"]["fact"]["value"]
+            if structured_value != branch_value:
+                raise ValueError("SNAPSHOT_BRANCH_UNAVAILABLE")
+            answer_text = branches["branch_a"]["answer_text"]
         if (
             slot_id == "pathology.histology"
             and answer_text == branches["branch_a"]["answer_text"]
@@ -507,5 +536,7 @@ class SnapshotSessionService:
             ),
             "report": report.model_dump(mode="json"),
         }
-        _, digest = await self.store.write_json_artifact(f"exports/{session_id}", export_payload)
+        _, digest = await self.store.write_json_artifact(
+            f"sessions/{session_id}/exports", export_payload
+        )
         return {**export_payload, "artifact_sha256": digest}

@@ -16,5 +16,5 @@ jobs:
         with: {node-version: "24", cache: npm}
       - run: uv sync --frozen
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: uv run python scripts/verify_release.py --strict
-

@@ -1,23 +1,31 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
+import os
 import random
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TypeVar
 
+import orjson
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, ValidationError
 
 from backend.app.domain.generation import ModelUsage, StructuredGenerationRecord
-from backend.app.infrastructure.cache import LocalModelResultCache, model_cache_key
+from backend.app.infrastructure.cache import ModelResultCache, model_cache_key
 from backend.app.infrastructure.circuit_breaker import CircuitBreaker, CircuitOpenError
+from backend.app.infrastructure.firestore_usage_guard import FirestoreUsageGuard
 from backend.app.infrastructure.usage_guard import (
     CostGuardExceeded,
     InMemoryUsageGuard,
     PricingEstimator,
 )
+
+logger = logging.getLogger("trial_opt.model")
 
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
 
@@ -31,9 +39,9 @@ class StructuredGenerator:
         self,
         *,
         client: genai.Client,
-        cache: LocalModelResultCache,
+        cache: ModelResultCache,
         pricing: PricingEstimator,
-        usage_guard: InMemoryUsageGuard | None = None,
+        usage_guard: InMemoryUsageGuard | FirestoreUsageGuard | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         jitter: Callable[[float, float], float] = random.uniform,
     ) -> None:
@@ -84,12 +92,21 @@ class StructuredGenerator:
             normalized_input=normalized_input,
             generation_config=generation_config,
         )
-        cached = self.cache.get(cache_key)
+        cached = await self.cache.get(cache_key)
         if cached is not None:
             parsed = output_model.model_validate(cached.parsed_json)
-            return parsed, cached.model_copy(
+            cache_record = cached.model_copy(
                 update={"usage": cached.usage.model_copy(update={"cache_hit": True})}
             )
+            logger.info(
+                self._usage_log(
+                    cache_record,
+                    session_id=session_id,
+                    latency_ms=0,
+                    retry_count=0,
+                )
+            )
+            return parsed, cache_record
 
         circuit = self.circuit(model_id)
         circuit.before_call()
@@ -97,6 +114,7 @@ class StructuredGenerator:
         retry_prompt = prompt
         for attempt in range(max_attempts):
             reservation = None
+            call_started = time.monotonic()
             try:
                 if self.usage_guard is not None:
                     estimated_input_tokens = max(1, len(retry_prompt.encode()) // 4)
@@ -105,7 +123,7 @@ class StructuredGenerator:
                         estimated_input_tokens=estimated_input_tokens,
                         max_output_tokens=max_output_tokens,
                     )
-                    reservation = self.usage_guard.reserve(
+                    reservation = await self.usage_guard.reserve_async(
                         session_id=session_id, amount_usd=reserved_cost
                     )
                 response = await self.client.aio.models.generate_content(
@@ -133,7 +151,9 @@ class StructuredGenerator:
                 )
                 if reservation is not None:
                     assert self.usage_guard is not None
-                    self.usage_guard.reconcile(reservation.reservation_id, actual_usd=cost)
+                    await self.usage_guard.reconcile_async(
+                        reservation.reservation_id, actual_usd=cost
+                    )
                 usage = ModelUsage(
                     model_id=model_id,
                     task_name=task_name,
@@ -154,12 +174,22 @@ class StructuredGenerator:
                     parsed_json=parsed.model_dump(mode="json"),
                     usage=usage,
                 )
-                self.cache.put(record)
+                await self.cache.put(record)
+                logger.info(
+                    self._usage_log(
+                        record,
+                        session_id=session_id,
+                        latency_ms=(time.monotonic() - call_started) * 1000,
+                        retry_count=attempt,
+                    )
+                )
                 circuit.record_success()
                 return parsed, record
             except CostGuardExceeded as error:
                 raise StructuredGenerationUnavailable(str(error)) from error
             except Exception as error:
+                if reservation is not None and self.usage_guard is not None:
+                    await self.usage_guard.release_async(reservation.reservation_id)
                 last_error = error
                 if attempt < max_attempts - 1:
                     issue = (
@@ -172,6 +202,38 @@ class StructuredGenerator:
         raise StructuredGenerationUnavailable(
             f"structured generation failed for {task_name} after {max_attempts} attempts"
         ) from last_error
+
+    @staticmethod
+    def _usage_log(
+        record: StructuredGenerationRecord,
+        *,
+        session_id: str,
+        latency_ms: float,
+        retry_count: int,
+    ) -> str:
+        usage = record.usage
+        return orjson.dumps(
+            {
+                "timestamp": datetime.now(UTC).isoformat(),
+                "severity": "INFO",
+                "request_id": None,
+                "session_id_hash": hashlib.sha256(session_id.encode()).hexdigest(),
+                "event_type": "model_call",
+                "stage": record.task_name,
+                "mode": None,
+                "model_id": record.model_id,
+                "task_name": record.task_name,
+                "cache_hit": usage.cache_hit,
+                "input_tokens": usage.prompt_tokens,
+                "output_tokens": usage.output_tokens,
+                "estimated_cost_usd": usage.estimated_cost_usd,
+                "latency_ms": round(latency_ms, 3),
+                "retry_count": retry_count,
+                "degradation_code": None,
+                "error_code": None,
+                "git_sha": os.getenv("APP_VERSION", "dev"),
+            }
+        ).decode()
 
     async def generate_primary_with_lite_fallback(
         self,

@@ -4,13 +4,16 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import {
   analyzeSession,
-  createS004Session,
+  createSession,
+  deleteSession,
   exportReport,
   readDemoCases,
+  readPublicConfig,
   readS004Retrieval,
   readSession,
   replayProof,
-  submitPinnedAnswer,
+  resetSession,
+  submitAnswer,
   type SessionCredentials,
 } from "./api/client";
 import { AgentTimeline, type StageState } from "./components/AgentTimeline";
@@ -20,7 +23,7 @@ import { QuestionPanel } from "./components/QuestionPanel";
 import { ResearcherView } from "./components/ResearcherView";
 import { RetrievalCandidates } from "./components/RetrievalCandidates";
 import { TrialCard } from "./components/TrialCard";
-import type { RetrievalView, SessionView } from "./types/api";
+import { retrievalSchema, type RetrievalView, type SessionView } from "./types/api";
 
 const ProofGraph = lazy(() =>
   import("./components/ProofGraph").then((module) => ({ default: module.ProofGraph })),
@@ -95,6 +98,7 @@ export function App() {
   const [stages, setStages] = useState<Record<string, StageState>>(initialStages);
   const [degradationCodes, setDegradationCodes] = useState<string[]>([]);
   const casesQuery = useQuery({ queryKey: ["demo-cases"], queryFn: readDemoCases });
+  const configQuery = useQuery({ queryKey: ["public-config"], queryFn: readPublicConfig });
 
   const identifierRanges = useMemo(() => {
     const patterns = [
@@ -112,13 +116,30 @@ export function App() {
   }, [patientText]);
 
   const showDemoTools = new URLSearchParams(location.search).get("demo-tools") === "1";
+  const selectedCaseRecord = casesQuery.data?.find((item) => item.id === selectedCase);
+  const canStart =
+    !busy &&
+    Boolean(evaluationDate) &&
+    (mode === "snapshot"
+      ? inputMode === "seed" && Boolean(selectedCaseRecord?.has_full_snapshot)
+      : Boolean(configQuery.data?.live_available) &&
+        (inputMode === "seed" ||
+          (Boolean(patientText.trim()) &&
+            confirmedSynthetic &&
+            (identifierRanges.length === 0 || identifierAcknowledged))));
 
   useEffect(() => {
     if (!credentials || session) return;
     void readSession(credentials)
-      .then(setSession)
+      .then((restored) => {
+        setSession(restored);
+        const parsed = retrievalSchema.safeParse(restored.retrieval);
+        if (parsed.success) setRetrieval(parsed.data);
+        else if (restored.top_trial?.nct_id === "NCT05239624") {
+          void readS004Retrieval().then(setRetrieval).catch(() => undefined);
+        }
+      })
       .catch(() => setError("세션을 복구하지 못했습니다."));
-    void readS004Retrieval().then(setRetrieval).catch(() => undefined);
   }, [credentials, session]);
 
   function updateStage(event: string) {
@@ -136,20 +157,34 @@ export function App() {
   }
 
   async function start() {
-    if (selectedCase !== "S004" || mode !== "snapshot" || inputMode !== "seed") return;
+    if (!canStart) return;
     setBusy(true);
     setError(null);
     setStages({ ...initialStages(), "Patient Evidence": "running" });
     setStatusText("역할별 에이전트 파이프라인 실행 중…");
     try {
-      const nextCredentials = await createS004Session();
+      const nextCredentials = await createSession({
+        mode,
+        seedCaseId: inputMode === "seed" ? selectedCase : undefined,
+        patientText: inputMode === "text" ? patientText : undefined,
+        evaluationDate,
+        language: "auto",
+        confirmSyntheticPublic: inputMode === "text" && confirmedSynthetic,
+        identifierWarningAcknowledged:
+          inputMode === "text" && identifierRanges.length > 0 && identifierAcknowledged,
+      });
       setCredentials(nextCredentials);
-      setRetrieval(await readS004Retrieval());
+      if (mode === "snapshot" && selectedCase === "S004") {
+        setRetrieval(await readS004Retrieval());
+      }
       await analyzeSession(nextCredentials, ({ event }) => {
         updateStage(event);
         setStatusText(`Pipeline event · ${event}`);
       });
-      setSession(await readSession(nextCredentials));
+      const nextSession = await readSession(nextCredentials);
+      setSession(nextSession);
+      const parsedRetrieval = retrievalSchema.safeParse(nextSession.retrieval);
+      if (parsedRetrieval.success) setRetrieval(parsedRetrieval.data);
       setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
       setStatusText("첫 번째 근거 획득 행동 선택 완료");
       void navigate(
@@ -163,16 +198,20 @@ export function App() {
     }
   }
 
-  async function answer(branch: "A" | "B" | "UNKNOWN" | "DECLINED") {
+  async function answer(input: {
+    answerText?: string;
+    unknown?: boolean;
+    declined?: boolean;
+  }) {
     if (!credentials || !session?.current_question?.selected) return;
     setBusy(true);
     setReplayStatus(null);
     setStatusText("선택한 슬롯만 해석하고 증명을 다시 실행 중…");
     try {
-      await submitPinnedAnswer(
+      await submitAnswer(
         credentials,
         session.current_question.selected.question_id,
-        branch,
+        input,
         ({ event }) => {
           updateStage(event);
           setStatusText(`Reevaluation · ${event}`);
@@ -180,9 +219,9 @@ export function App() {
       );
       setSession(await readSession(credentials));
       setStatusText(
-        branch === "A"
-          ? "Histology PASS · Muscle invasion remains UNKNOWN"
-          : `${session.current_question.selected.slot_id} unavailable · 동일 질문을 다시 묻지 않음`,
+        input.unknown || input.declined
+          ? `${session.current_question.selected.slot_id} unavailable · 동일 질문을 다시 묻지 않음`
+          : `${session.current_question.selected.slot_id} 재평가 완료`,
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "재평가를 완료하지 못했습니다.");
@@ -195,11 +234,58 @@ export function App() {
     if (!credentials) return;
     const started = performance.now();
     setReplayStatus("결정론적 proof replay 실행 중…");
-    const passed = await replayProof(credentials);
+    const nctId = session?.top_trial?.nct_id ?? session?.trial_evaluation?.nct_id;
+    if (!nctId) {
+      setReplayStatus("Replay할 상위 trial proof가 없습니다.");
+      return;
+    }
+    const result = await replayProof(credentials, nctId);
     const elapsed = Math.round(performance.now() - started);
     setReplayStatus(
-      passed ? `Proof replay passed · PV-012 7/7 · ${elapsed} ms` : "Proof replay failed",
+      result.passed
+        ? `Proof replay passed · PV-012 ${result.packetCount}/${result.packetCount} · ${elapsed} ms`
+        : "Proof replay failed",
     );
+  }
+
+  async function resetCurrentSession() {
+    if (!credentials) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const nextCredentials = await resetSession(credentials);
+      setCredentials(nextCredentials);
+      setSession(null);
+      setStages({ ...initialStages(), "Patient Evidence": "running" });
+      await analyzeSession(nextCredentials, ({ event }) => updateStage(event));
+      setSession(await readSession(nextCredentials));
+      void navigate(`/session/${nextCredentials.sessionId}`);
+      setStatusText("새 세션으로 근거 상태를 초기화했습니다.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "세션을 초기화하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteCurrentSession() {
+    if (!credentials) return;
+    if (!window.confirm("현재 세션과 생성된 세션 아티팩트를 삭제할까요?")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteSession(credentials);
+      setCredentials(null);
+      setSession(null);
+      setRetrieval(null);
+      setStages(initialStages());
+      void navigate("/");
+      setStatusText("세션을 삭제했습니다.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "세션을 삭제하지 못했습니다.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function toggleFailure(code: string) {
@@ -225,7 +311,7 @@ export function App() {
             <p className="text-[0.68rem] text-slate-500">Proof-carrying active evidence acquisition</p>
           </Link>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="mode-badge">SNAPSHOT DEMO</span>
+            <span className="mode-badge">{session?.mode === "snapshot" || !session ? "SNAPSHOT DEMO" : session.mode.toUpperCase()}</span>
             <span className="mode-badge">DATA · 2026-08-11 09:00 UTC</span>
             <span className="mode-badge">MODEL · CACHED / $0.000</span>
             {degradationCodes.length ? <span className="degraded-badge">DEGRADED · {degradationCodes.length}</span> : null}
@@ -251,7 +337,7 @@ export function App() {
                   {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? "Snapshot Demo" : "Live Mode"}</button>)}
                 </div>
               </div>
-              {mode === "live" ? <p className="mt-3 rounded-xl border border-amber-300/30 bg-amber-100/5 p-3 text-sm text-amber-100">Live Mode는 Google Cloud ADC·결제·quota 외부 검증 전까지 비활성입니다. Snapshot은 계속 사용할 수 있습니다.</p> : null}
+              {mode === "live" ? <p className="mt-3 rounded-xl border border-amber-300/30 bg-amber-100/5 p-3 text-sm text-amber-100">{configQuery.data?.live_available ? "Live Mode 활성화됨 · first-party Google Cloud ADC와 비용 guard를 사용합니다." : "Live Mode는 Google Cloud ADC·결제·quota 외부 검증 전까지 비활성입니다. Snapshot은 계속 사용할 수 있습니다."}</p> : null}
               <div className="mt-5 flex gap-2 border-b border-slate-800 pb-3">
                 <button className={`tab-button ${inputMode === "seed" ? "tab-active" : ""}`} onClick={() => setInputMode("seed")}>Organizer seed</button>
                 <button className={`tab-button ${inputMode === "text" ? "tab-active" : ""}`} onClick={() => setInputMode("text")}>Free text</button>
@@ -275,7 +361,7 @@ export function App() {
               )}
               <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
                 <label className="text-xs font-bold text-slate-400">Evaluation date<input type="date" value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} className="mt-1 block w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" /></label>
-                <button className="primary-button self-end" disabled={busy || mode !== "snapshot" || inputMode !== "seed" || selectedCase !== "S004" || !evaluationDate} onClick={() => void start()}>{busy ? "분석 중…" : selectedCase === "S004" ? "S004 Snapshot 분석 시작" : "Full snapshot 준비 중"}</button>
+                <button className="primary-button self-end" disabled={!canStart} onClick={() => void start()}>{busy ? "분석 중…" : mode === "live" ? "Live 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} Snapshot 분석 시작` : "Full snapshot 준비 중"}</button>
               </div>
               <p aria-live="polite" className="mt-3 text-center text-xs text-slate-500">{statusText}</p>
               {error ? <p role="alert" className="mt-3 text-sm text-rose-300">{error}</p> : null}
@@ -287,7 +373,7 @@ export function App() {
           {degradationCodes.length ? <div role="status" className="mb-4 rounded-xl border border-amber-300/40 bg-amber-100/10 px-4 py-3 text-sm text-amber-100">Partial results preserved · {degradationCodes.join(" · ")} · Snapshot/template fallback active</div> : null}
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-2">
             <p className="text-sm text-slate-300">{statusText}</p>
-            <div className="flex gap-2"><button className="secondary-button py-2" onClick={() => void replay()}>Replay Proof</button><button className="secondary-button py-2" onClick={() => credentials && void exportReport(credentials)}>Export report</button></div>
+            <div className="flex flex-wrap gap-2"><button className="secondary-button py-2" onClick={() => void replay()}>Replay Proof</button><button className="secondary-button py-2" onClick={() => credentials && void exportReport(credentials)}>Export report</button><button className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>Reset session</button><button className="secondary-button py-2 text-rose-200" disabled={busy} onClick={() => void deleteCurrentSession()}>Delete session</button></div>
           </div>
           {replayStatus ? <p aria-live="polite" className="mb-4 rounded-xl bg-emerald-300/10 p-3 text-sm text-emerald-200">{replayStatus}</p> : null}
           {showDemoTools ? <section className="mb-4 rounded-xl border border-dashed border-fuchsia-300/40 bg-fuchsia-300/5 p-3" aria-label="Failure simulation controls"><p className="text-xs font-bold text-fuchsia-200">REHEARSAL ONLY · FAILURE SIMULATION</p><div className="mt-2 flex flex-wrap gap-2">{["GEMINI_UNAVAILABLE", "CTGOV_UNAVAILABLE", "EMBEDDING_UNAVAILABLE"].map((code) => <button key={code} className="secondary-button px-3 py-2 text-xs" onClick={() => toggleFailure(code)}>{degradationCodes.includes(code) ? "✓ " : ""}{code}</button>)}</div></section> : null}

@@ -26,17 +26,42 @@ async function jsonOrThrow(response: Response) {
   return (await response.json()) as unknown;
 }
 
-export async function createS004Session(): Promise<SessionCredentials> {
+export interface CreateSessionInput {
+  mode: "snapshot" | "live";
+  seedCaseId?: string;
+  patientText?: string;
+  evaluationDate: string;
+  language?: "ko" | "en" | "auto";
+  confirmSyntheticPublic?: boolean;
+  identifierWarningAcknowledged?: boolean;
+}
+
+export interface PublicConfig {
+  supported_modes: string[];
+  default_mode: string;
+  live_available: boolean;
+  snapshot_data_date: string;
+  snapshot_version: string;
+  disclaimer: string;
+}
+
+export async function readPublicConfig(): Promise<PublicConfig> {
+  const response = await fetch("/api/v1/config/public");
+  return (await jsonOrThrow(response)) as PublicConfig;
+}
+
+export async function createSession(input: CreateSessionInput): Promise<SessionCredentials> {
   const response = await fetch("/api/v1/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      mode: "snapshot",
-      seed_case_id: "S004",
-      evaluation_date: "2026-08-11",
-      language: "en",
-      confirm_synthetic_public: false,
-      identifier_warning_acknowledged: false,
+      mode: input.mode,
+      seed_case_id: input.seedCaseId ?? null,
+      patient_text: input.patientText ?? null,
+      evaluation_date: input.evaluationDate,
+      language: input.language ?? "auto",
+      confirm_synthetic_public: input.confirmSyntheticPublic ?? false,
+      identifier_warning_acknowledged: input.identifierWarningAcknowledged ?? false,
     }),
   });
   const payload = (await jsonOrThrow(response)) as { session_id: string; session_token: string };
@@ -95,18 +120,18 @@ export async function analyzeSession(
   await readEventStream(response, onEvent);
 }
 
-export async function submitPinnedAnswer(
+export interface AnswerInput {
+  answerText?: string;
+  unknown?: boolean;
+  declined?: boolean;
+}
+
+export async function submitAnswer(
   credentials: SessionCredentials,
   questionId: string,
-  branch: "A" | "B" | "UNKNOWN" | "DECLINED",
+  input: AnswerInput,
   onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
-  const answerText =
-    branch === "A"
-      ? "Existing pathology report confirms high-grade urothelial carcinoma."
-      : branch === "B"
-        ? "No pathology test has been performed; only the CT finding is available."
-        : null;
   const response = await fetch(`/api/v1/sessions/${credentials.sessionId}/answers`, {
     method: "POST",
     headers: {
@@ -116,26 +141,32 @@ export async function submitPinnedAnswer(
     },
     body: JSON.stringify({
       question_id: questionId,
-      answer_text: answerText,
+      answer_text: input.answerText ?? null,
       structured_value: null,
-      unknown: branch === "UNKNOWN",
-      declined: branch === "DECLINED",
+      unknown: input.unknown ?? false,
+      declined: input.declined ?? false,
     }),
   });
   await readEventStream(response, onEvent);
 }
 
-export async function replayProof(credentials: SessionCredentials): Promise<boolean> {
+export async function replayProof(
+  credentials: SessionCredentials,
+  nctId: string,
+): Promise<{ passed: boolean; packetCount: number }> {
   const response = await fetch(
-    `/api/v1/sessions/${credentials.sessionId}/trials/NCT05239624/proof`,
+    `/api/v1/sessions/${credentials.sessionId}/trials/${encodeURIComponent(nctId)}/proof`,
     { headers: { "X-Session-Token": credentials.token } },
   );
   const payload = (await jsonOrThrow(response)) as {
     proof_packets: Array<{ verifier_checks: Array<{ check_id: string; passed: boolean }> }>;
   };
-  return payload.proof_packets.every(
+  return {
+    passed: payload.proof_packets.every(
     (packet) => packet.verifier_checks.find((check) => check.check_id === "PV-012")?.passed,
-  );
+    ),
+    packetCount: payload.proof_packets.length,
+  };
 }
 
 export async function exportReport(credentials: SessionCredentials): Promise<void> {
@@ -150,4 +181,29 @@ export async function exportReport(credentials: SessionCredentials): Promise<voi
   anchor.download = `trial-opt-${credentials.sessionId}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+export async function resetSession(
+  credentials: SessionCredentials,
+): Promise<SessionCredentials> {
+  const response = await fetch(`/api/v1/sessions/${credentials.sessionId}/reset`, {
+    method: "POST",
+    headers: { "X-Session-Token": credentials.token },
+  });
+  const payload = (await jsonOrThrow(response)) as {
+    session_id: string;
+    session_token: string;
+  };
+  sessionStorage.removeItem(`trial-opt:${credentials.sessionId}`);
+  sessionStorage.setItem(`trial-opt:${payload.session_id}`, payload.session_token);
+  return { sessionId: payload.session_id, token: payload.session_token };
+}
+
+export async function deleteSession(credentials: SessionCredentials): Promise<void> {
+  const response = await fetch(`/api/v1/sessions/${credentials.sessionId}`, {
+    method: "DELETE",
+    headers: { "X-Session-Token": credentials.token },
+  });
+  await jsonOrThrow(response);
+  sessionStorage.removeItem(`trial-opt:${credentials.sessionId}`);
 }

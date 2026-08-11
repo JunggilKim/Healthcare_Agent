@@ -8,7 +8,12 @@ jobs:
   smoke:
     environment: gcp-smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PRODUCTION_URL: ${{ vars.TRIAL_OPT_PRODUCTION_URL }}
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/smoke_test_deployment.sh --live
-
+      - name: Validate protected environment
+        run: test -n "$PRODUCTION_URL"
+      - name: Run exactly one explicit Live Mode smoke
+        run: ./scripts/smoke_test_deployment.sh --base-url "$PRODUCTION_URL" --live

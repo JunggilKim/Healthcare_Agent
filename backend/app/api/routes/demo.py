@@ -6,11 +6,15 @@ import orjson
 from fastapi import APIRouter
 
 from backend.app.infrastructure.local_artifacts import LocalArtifactStore
+from backend.app.infrastructure.snapshot_loader import (
+    SnapshotIntegrityError,
+    load_verified_snapshot,
+)
 from backend.app.retrieval.ctgov_client import ClinicalTrialsGovClient
 from backend.app.retrieval.embeddings import RecordedEmbeddingProvider
 from backend.app.retrieval.models import RetrievalQuery, RetrievalResult
 from backend.app.retrieval.retriever import HybridRetriever
-from backend.app.settings import REPOSITORY_ROOT
+from backend.app.settings import REPOSITORY_ROOT, get_settings
 
 router = APIRouter(tags=["demo"])
 
@@ -19,12 +23,18 @@ router = APIRouter(tags=["demo"])
 async def demo_cases() -> dict[str, object]:
     path = REPOSITORY_ROOT / "data" / "seeds" / "synthetic-patients.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
+    complete_cases = {"S004"}
+    try:
+        manifest = load_verified_snapshot(get_settings().demo_snapshot_dir, require_complete=True)
+        complete_cases.update(case.case_id for case in manifest.cases if case.complete)
+    except (SnapshotIntegrityError, ValueError):
+        pass
     return {
         "cases": [
             {
                 "id": item["num"],
                 "text": item["title"],
-                "has_full_snapshot": item["num"] == "S004",
+                "has_full_snapshot": item["num"] in complete_cases,
             }
             for item in payload["topics"]
         ]

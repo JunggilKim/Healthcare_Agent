@@ -2,6 +2,7 @@ import type { SessionView } from "../types/api";
 
 export function TrialCard({ session }: { session: SessionView }) {
   const trial = session.trial_evaluation;
+  const top = session.top_trial;
   if (!trial) return <section className="panel">임상시험 근거를 계산하고 있습니다…</section>;
   const counts = session.proofs.reduce<Record<string, number>>((acc, proof) => {
     acc[proof.final_verdict] = (acc[proof.final_verdict] ?? 0) + 1;
@@ -12,10 +13,10 @@ export function TrialCard({ session }: { session: SessionView }) {
       <div className="flex flex-wrap items-center gap-2">
         <span className="rank-badge">#1</span>
         <span className="mode-badge">RANK Δ 0</span>
-        <span className="mode-badge">RECRUITING · PINNED 2026-08-11</span>
+        <span className="mode-badge">{top?.nct_id === "NCT05239624" ? "RECRUITING · PINNED 2026-08-11" : `${top?.overall_status ?? "STATUS UNKNOWN"} · ${top?.data_timestamp ? `DATA ${top.data_timestamp.slice(0, 10)}` : "PINNED SNAPSHOT"}`}</span>
       </div>
-      <p className="mt-3 text-sm font-semibold text-cyan-300">NCT05239624</p>
-      <h2 className="mt-1 text-xl font-bold leading-snug">Enfortumab Vedotin and Pembrolizumab in People With Bladder Cancer</h2>
+      <p className="mt-3 text-sm font-semibold text-cyan-300">{top?.nct_id ?? trial.nct_id}</p>
+      <h2 className="mt-1 text-xl font-bold leading-snug">{top?.title ?? trial.nct_id}</h2>
       <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-wider text-slate-500">현재 사전 선별 상태</p>
@@ -36,9 +37,9 @@ export function TrialCard({ session }: { session: SessionView }) {
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
         <span>Proof completeness {Math.round(trial.proof_completeness * 100)}%</span>
-        <span>Top missing · pathology.histology</span>
+        <span>Top missing · {session.current_question?.selected?.slot_id ?? "none"}</span>
         <a className="font-bold text-cyan-200 underline-offset-4 hover:underline" href="#criteria-title">Why?</a>
-        <a className="font-bold text-cyan-200 underline-offset-4 hover:underline" href="https://clinicaltrials.gov/study/NCT05239624" target="_blank" rel="noreferrer">ClinicalTrials.gov ↗</a>
+        <a className="font-bold text-cyan-200 underline-offset-4 hover:underline" href={`https://clinicaltrials.gov/study/${top?.nct_id ?? trial.nct_id}`} target="_blank" rel="noreferrer">ClinicalTrials.gov ↗</a>
       </div>
     </article>
   );

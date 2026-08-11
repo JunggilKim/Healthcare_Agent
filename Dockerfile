@@ -16,6 +16,7 @@ FROM python:3.12-slim AS runtime
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    LOCAL_STORE_DIR=/tmp/trial-opt/local-store \
     PORT=8080
 WORKDIR /app
 RUN groupadd --system trialopt && useradd --system --gid trialopt --home-dir /app trialopt
@@ -23,11 +24,9 @@ COPY --from=python-build /app/.venv /app/.venv
 COPY backend backend
 COPY --from=frontend-build /app/backend/app/static backend/app/static
 COPY config config
-COPY data/demo data/demo
-COPY data/seeds data/seeds
+COPY data data
 COPY prompts prompts
 COPY schemas schemas
 USER trialopt
 EXPOSE 8080
-CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]
-
+CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --no-access-log"]

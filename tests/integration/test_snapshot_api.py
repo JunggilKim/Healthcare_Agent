@@ -97,6 +97,27 @@ def test_arbitrary_input_identifier_warning_precedes_snapshot_unavailable(
 ) -> None:
     monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "pii-store"))
     get_settings.cache_clear()
+
+
+def test_request_validation_never_echoes_oversized_patient_text(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "validation-store"))
+    get_settings.cache_clear()
+    marker = "SENSITIVE-SYNTHETIC-MARKER"
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/sessions",
+            json={
+                "mode": "live",
+                "patient_text": marker + ("x" * 12000),
+                "evaluation_date": "2026-08-11",
+                "confirm_synthetic_public": True,
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "INPUT_TOO_LARGE"
+        assert marker not in response.text
+        assert response.headers["cache-control"] == "no-store"
+    get_settings.cache_clear()
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/sessions",
@@ -126,10 +147,152 @@ def test_arbitrary_input_identifier_warning_precedes_snapshot_unavailable(
     get_settings.cache_clear()
 
 
+def test_live_s004_degrades_to_snapshot_when_external_calls_are_disabled(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "live-degraded-store"))
+    monkeypatch.setenv("ALLOW_LIVE_MODEL_CALLS", "false")
+    monkeypatch.setenv("ALLOW_LIVE_CTGOV_CALLS", "false")
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/sessions",
+            json={
+                "mode": "live",
+                "seed_case_id": "S004",
+                "evaluation_date": "2026-08-11",
+                "language": "en",
+            },
+        )
+        assert created.status_code == 201
+        session_id = created.json()["session_id"]
+        headers = {"X-Session-Token": created.json()["session_token"]}
+        with client.stream(
+            "POST", f"/api/v1/sessions/{session_id}/analysis", headers=headers
+        ) as response:
+            stream = "".join(response.iter_text())
+        assert "event: degraded" in stream
+        session = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        assert session["mode"] == "hybrid_degraded"
+        assert session["current_question"]["selected"]["slot_id"] == "pathology.histology"
+    get_settings.cache_clear()
+
+
+def test_live_arbitrary_text_requires_explicitly_enabled_dependencies(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "live-disabled-store"))
+    monkeypatch.setenv("ALLOW_LIVE_MODEL_CALLS", "false")
+    monkeypatch.setenv("ALLOW_LIVE_CTGOV_CALLS", "false")
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/sessions",
+            json={
+                "mode": "live",
+                "patient_text": "Synthetic 60-year-old male with public fixture data.",
+                "evaluation_date": "2026-08-11",
+                "language": "en",
+                "confirm_synthetic_public": True,
+            },
+        )
+        assert response.status_code == 503
+        assert response.json()["code"] == "LIVE_DEPENDENCIES_DISABLED"
+    get_settings.cache_clear()
+
+
 def test_s004_branch_b_keeps_histology_unknown_and_never_repeats_question(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "branch-b-store"))
+    get_settings.cache_clear()
+
+
+def test_s004_accepts_contract_structured_value_answer(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "structured-answer-store"))
+    get_settings.cache_clear()
+
+
+def test_public_trial_source_report_reset_and_delete_contracts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "lifecycle-store"))
+    get_settings.cache_clear()
+
+
+def test_answer_idempotency_key_replays_original_sse(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "idempotency-store"))
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        session_id, headers, initial = _create_and_analyze(client)
+        headers = {**headers, "Idempotency-Key": "answer-turn-1"}
+        request = {
+            "question_id": initial["current_question"]["selected"]["question_id"],
+            "answer_text": None,
+            "structured_value": None,
+            "unknown": True,
+            "declined": False,
+        }
+        with client.stream(
+            "POST", f"/api/v1/sessions/{session_id}/answers", headers=headers, json=request
+        ) as response:
+            first = "".join(response.iter_text())
+        with client.stream(
+            "POST", f"/api/v1/sessions/{session_id}/answers", headers=headers, json=request
+        ) as response:
+            second = "".join(response.iter_text())
+        assert first == second
+        assert "event: question_selected" in second
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        trial = client.get("/api/v1/trials/NCT05239624")
+        assert trial.status_code == 200
+        assert trial.json()["source_json_sha256"]
+
+        session_id, headers, _ = _create_and_analyze(client)
+        exported = client.get(f"/api/v1/sessions/{session_id}/export.json", headers=headers)
+        report = client.get(f"/api/v1/sessions/{session_id}/report", headers=headers)
+        assert exported.status_code == 200
+        assert report.status_code == 200
+        assert "Research pre-screening only" in report.text
+
+        reset = client.post(f"/api/v1/sessions/{session_id}/reset", headers=headers)
+        assert reset.status_code == 201
+        assert reset.json()["parent_session_id"] == session_id
+        assert reset.json()["session_id"] != session_id
+
+        deleted = client.delete(f"/api/v1/sessions/{session_id}", headers=headers)
+        assert deleted.status_code == 202
+        assert deleted.json()["cleanup_queued"] is True
+        assert client.get(f"/api/v1/sessions/{session_id}", headers=headers).status_code == 401
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        session_id, headers, initial = _create_and_analyze(client)
+        question_id = initial["current_question"]["selected"]["question_id"]
+        with client.stream(
+            "POST",
+            f"/api/v1/sessions/{session_id}/answers",
+            headers=headers,
+            json={
+                "question_id": question_id,
+                "answer_text": None,
+                "structured_value": {
+                    "kind": "categorical",
+                    "value": "urothelial_carcinoma",
+                    "system": "trial-opt-canonical-v1",
+                },
+                "unknown": False,
+                "declined": False,
+            },
+        ) as response:
+            assert response.status_code == 200
+            stream = "".join(response.iter_text())
+        assert '"slot_id":"pathology.muscle_invasion"' in stream
+        updated = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        histology = next(
+            proof
+            for proof in updated["proofs"]
+            if proof["criterion_id"] == "NCT05239624:INCLUSION:002:5f52ab88"
+        )
+        assert histology["final_verdict"] == "PASS"
     get_settings.cache_clear()
     with TestClient(app) as client:
         session_id, headers, initial = _create_and_analyze(client)
