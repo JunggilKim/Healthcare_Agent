@@ -1,0 +1,28 @@
+{
+  "nct_id": "NCT05239624",
+  "api_version": "2.0.5",
+  "registry_data_version": "2026-08-11T09:00:06",
+  "retrieved_at": "2026-08-11T09:00:06Z",
+  "source_url": "https://clinicaltrials.gov/study/NCT05239624",
+  "capture_date": "2026-08-11",
+  "version_holder": "2026-06-04",
+  "last_update_post_date": "2026-06-04",
+  "overall_status": "RECRUITING",
+  "study_type": "INTERVENTIONAL",
+  "official_title": "Enfortumab Vedotin in Combination With Pembrolizumab for Locally Advanced and/or Node Positive Urothelial Carcinoma Prior to Surgery (EV-ECLIPSE)",
+  "brief_title": "Enfortumab Vedotin and Pembrolizumab in People With Bladder Cancer",
+  "conditions": ["Urothelial Carcinoma"],
+  "keywords": [
+    "Locally Advanced and/or Node Positive",
+    "Enfortumab vedotin",
+    "Pembrolizumab",
+    "Clinical Stage T2-T4, N1-N3, M0 OR cT1, N2-N3, M0"
+  ],
+  "minimum_age": "18 Years",
+  "sex": "ALL",
+  "healthy_volunteers": false,
+  "phases": ["PHASE2"],
+  "intervention_names": ["Enfortumab Vedotin", "Pembrolizumab"],
+  "eligibility_criteria": "Inclusion Criteria:\n\nMale/female participants who are at least 18 years of age on the day of signing informed consent with histologically confirmed diagnosis of muscle invasive bladder cancer (previously known as transitional cell) carcinoma (i.e., cancer of the bladder, renal pelvis, ureter, or urethra)\n\nClinical Stage T2-T4, N1-N3, M0 OR cT1, N2-N3, M0\n\nMuscle invasive urothelial carcinoma of the bladder histologically confirmed at the enrolling institution from TURBT.\n\nNo prior treatments for muscle invasive or metastatic urothelial carcinoma\n\nHave an Eastern Cooperative Oncology Group (ECOG) performance status of 0 to 1. Evaluation of ECOG is to be performed within 7 days prior to the first dose of study intervention.\n\nMeasured or calculated creatinine clearance (GFR can also be used in place of creatinine or CrCl) GFR or CrCl of ≥ 30 mL/min"
+}
+

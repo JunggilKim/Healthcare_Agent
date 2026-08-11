@@ -1,0 +1,26 @@
+version: phase1-s004-v1
+source:
+  nct_id: NCT05239624
+  url: https://clinicaltrials.gov/study/NCT05239624
+  api_version: 2.0.5
+  data_timestamp: 2026-08-11T09:00:06
+  capture_date: 2026-08-11
+  historical_overall_status: RECRUITING
+files:
+  NCT05239624.compact.json: af12e067678c023ad0f67a525a269ae0e4eaa28f248d6e3f8b9ddef0f1add57b
+  NCT05239624.criteria.json: cf03a02fbdca955f70d49d1ba55217b8a6cf27b74b6af7528b4a50e12e372a60
+  NCT05239624.review.json: 0e6eeae4ea7ff72be3857f7a78285625603b30b42671849189f91c5c85e2116a
+  S004.initial_evidence.json: 05bd3c5ed4d316f54ba6b0d4c70108c002380255a2766afaf7a76fe2344fc87d
+  S004.answers.json: c5a57820abe8c73dcc6a145d932fffd455ad66cd42ab74e71a1b7a89be4077d0
+  optimizer_scope.yaml: 4c105694f4f6bb964d957533abf731ef1c6458a69c6230e826e2ddf50e0ac09b
+expected_golden:
+  compiled_protocol_hash: c74f107d416f6f3b5fb30d8b2f6691023df336aa18c6c6277cf57dd95c94ffaf
+  protocol_review_hash: bb12b09f277855e1d592e08bad2676284370355e1b5ca47058c3a725fd72259c
+  initial_age_verdict: PASS
+  initial_histology_verdict: UNKNOWN
+  first_action: pathology.histology
+  branch_a_histology_verdict: PASS
+  branch_a_muscle_invasion_verdict: UNKNOWN
+  branch_a_second_action: pathology.muscle_invasion
+  branch_b_histology_verdict: UNKNOWN
+

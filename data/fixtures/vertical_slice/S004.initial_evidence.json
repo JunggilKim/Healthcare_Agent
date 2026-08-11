@@ -1,0 +1,83 @@
+{
+  "source_id": "seed:S004",
+  "source_text_sha256": "c1efaf597b5c9a5900865e4bff125932b47f0ab3e108f3a4c62c30ac4426055b",
+  "facts": [
+    {
+      "fact_id": "fact_00000000-0000-4000-8000-000000000001",
+      "slot_id": "demographics.age",
+      "value": {"kind": "number", "value": "68", "unit": "year"},
+      "grade": "A",
+      "source_spans": [{"source_id": "seed:S004", "start": 2, "end": 13, "quote": "68-year-old", "sha256": "b38272c32bdaf995aa03c503d2b5792743ce73d580b9c591f15babb494165747", "language": "en"}],
+      "derived_from_fact_ids": [],
+      "transformation_id": null,
+      "asserted_at": "2026-08-11T09:00:06Z",
+      "effective_date": "2026-08-11",
+      "admissible_for_hard_decision": true,
+      "confidence": 1.0
+    },
+    {
+      "fact_id": "fact_00000000-0000-4000-8000-000000000002",
+      "slot_id": "demographics.sex",
+      "value": {"kind": "categorical", "value": "male", "system": null},
+      "grade": "A",
+      "source_spans": [{"source_id": "seed:S004", "start": 14, "end": 17, "quote": "man", "sha256": "48b676e2b107da679512b793d5fd4cc4329f0c7c17a97cf6e0e3d1005b600b03", "language": "en"}],
+      "derived_from_fact_ids": [],
+      "transformation_id": null,
+      "asserted_at": "2026-08-11T09:00:06Z",
+      "effective_date": "2026-08-11",
+      "admissible_for_hard_decision": true,
+      "confidence": 1.0
+    },
+    {
+      "fact_id": "fact_00000000-0000-4000-8000-000000000003",
+      "slot_id": "smoking.history",
+      "value": {"kind": "categorical", "value": "unknown", "system": null},
+      "grade": "A",
+      "source_spans": [{"source_id": "seed:S004", "start": 25, "end": 45, "quote": "long smoking history", "sha256": "9f47f246480423c274c8932b47e49e2d57dfe579df8724579ee5e8f989c64bff", "language": "en"}],
+      "derived_from_fact_ids": [],
+      "transformation_id": null,
+      "asserted_at": "2026-08-11T09:00:06Z",
+      "effective_date": null,
+      "admissible_for_hard_decision": true,
+      "confidence": 1.0
+    },
+    {
+      "fact_id": "fact_00000000-0000-4000-8000-000000000004",
+      "slot_id": "symptom.gross_hematuria",
+      "value": {"kind": "boolean", "value": true},
+      "grade": "A",
+      "source_spans": [{"source_id": "seed:S004", "start": 69, "end": 84, "quote": "gross hematuria", "sha256": "b7e6206bde8bcc6809bf1440e39b60cf256c1d831ccd2ce84ad8404ad4b8e2ca", "language": "en"}],
+      "derived_from_fact_ids": [],
+      "transformation_id": null,
+      "asserted_at": "2026-08-11T09:00:06Z",
+      "effective_date": "2026-08-11",
+      "admissible_for_hard_decision": true,
+      "confidence": 1.0
+    },
+    {
+      "fact_id": "fact_00000000-0000-4000-8000-000000000005",
+      "slot_id": "imaging.bladder_wall_mass",
+      "value": {"kind": "boolean", "value": true},
+      "grade": "A",
+      "source_spans": [{"source_id": "seed:S004", "start": 109, "end": 133, "quote": "mass in the bladder wall", "sha256": "7397f12191133821ba4d54f35c287a4175880865a41b78dc049de95d493e4ae8", "language": "en"}],
+      "derived_from_fact_ids": [],
+      "transformation_id": null,
+      "asserted_at": "2026-08-11T09:00:06Z",
+      "effective_date": "2026-08-11",
+      "admissible_for_hard_decision": true,
+      "confidence": 1.0
+    }
+  ],
+  "retrieval_hypotheses": [
+    {
+      "hypothesis_id": "hyp_00000000-0000-4000-8000-000000000001",
+      "concept": "bladder neoplasm / bladder cancer",
+      "normalized_concept": "bladder cancer",
+      "source_fact_ids": ["fact_00000000-0000-4000-8000-000000000005"],
+      "rationale_code": "IMAGING_MASS_RETRIEVAL_EXPANSION",
+      "grade": "H",
+      "admissible_for_eligibility": false
+    }
+  ],
+  "conflicts": []
+}

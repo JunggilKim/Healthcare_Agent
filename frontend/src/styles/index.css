@@ -25,3 +25,53 @@ select {
   outline-offset: 3px;
 }
 
+@layer components {
+  .panel {
+    @apply rounded-2xl border border-slate-800 bg-slate-900/80 p-5 shadow-xl shadow-black/20;
+  }
+  .panel-title {
+    @apply mt-2 text-lg font-bold text-white;
+  }
+  .eyebrow {
+    @apply text-[0.68rem] font-bold tracking-[0.18em] text-cyan-300;
+  }
+  .mode-badge {
+    @apply rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-[0.65rem] font-bold tracking-wide text-slate-300;
+  }
+  .rank-badge {
+    @apply inline-flex h-9 min-w-9 items-center justify-center rounded-xl bg-cyan-300 px-2 text-sm font-black text-slate-950;
+  }
+  .primary-button {
+    @apply rounded-xl bg-cyan-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .secondary-button {
+    @apply rounded-xl border border-slate-600 bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-100 transition hover:border-cyan-300 hover:text-cyan-200 disabled:opacity-50;
+  }
+  .stage-dot {
+    @apply h-2.5 w-2.5 shrink-0 rounded-full border border-slate-600 bg-slate-800;
+  }
+  .stage-running {
+    @apply border-cyan-200 bg-cyan-300 shadow-[0_0_0_4px_rgba(103,232,249,0.12)];
+  }
+  .stage-complete {
+    @apply border-emerald-200 bg-emerald-300;
+  }
+  .verdict {
+    @apply inline-flex rounded-md border px-2 py-1 text-[0.68rem] font-black tracking-wide;
+  }
+  .verdict-pass {
+    @apply border-emerald-300/40 bg-emerald-300/10 text-emerald-200;
+  }
+  .verdict-fail {
+    @apply border-rose-300/40 bg-rose-300/10 text-rose-200;
+  }
+  .verdict-unknown {
+    @apply border-amber-300/40 bg-amber-300/10 text-amber-200;
+  }
+  .verdict-not_applicable {
+    @apply border-slate-500 bg-slate-800 text-slate-300;
+  }
+  .verdict-conflict {
+    @apply border-fuchsia-300/40 bg-fuchsia-300/10 text-fuchsia-200;
+  }
+}

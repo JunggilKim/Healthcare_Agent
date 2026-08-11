@@ -1,0 +1,22 @@
+{
+  "review_id": "review:NCT05239624:phase1-v1",
+  "nct_id": "NCT05239624",
+  "criterion_source_hashes": [
+    "443174ab849cdc980784e8f860fb76fc77e396038e079eb41d3c424de900ece0",
+    "5f52ab885571e4612fc249216687759e84a17284025d390da599d70a78373192",
+    "a7db66086a13127d0a5ba33b51413e54546b1c150dcffa59b841e33ccf388532",
+    "2b0a94f94951434bbff7b191f923944600f9bebe57f71b44d684298f15f3a256",
+    "dac9ad4957dbfc5a7eb5e8296a3b2fc32701522d1030f1c1fbe615b4bf7a849a",
+    "ba33ff178aeacfae846fbd67bdf578a0a9ee97948e4ba014938657c346730636",
+    "53a2629bd324d4bccb33b6fe3d54782b47e48ee21174b5f576874142ff5aca29"
+  ],
+  "compiled_protocol_hash": "c74f107d416f6f3b5fb30d8b2f6691023df336aa18c6c6277cf57dd95c94ffaf",
+  "review_method": "MANUAL_FIXTURE",
+  "reviewer_label": "specification_fixture",
+  "model_id": null,
+  "prompt_version": null,
+  "reviewed_at": "2026-08-11T09:00:06Z",
+  "approved": true,
+  "issues": [],
+  "content_hash": "bb12b09f277855e1d592e08bad2676284370355e1b5ca47058c3a725fd72259c"
+}

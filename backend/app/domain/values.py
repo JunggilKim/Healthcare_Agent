@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Annotated, Literal, TypeAlias, Union
+from typing import Annotated, Literal, Union
 
 from pydantic import Field, model_validator
 
 from backend.app.domain.base import StrictModel
 
-JsonScalar: TypeAlias = str | int | bool | None
-JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
+type JsonScalar = str | int | bool | None
+type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 
 
 class BooleanValue(StrictModel):

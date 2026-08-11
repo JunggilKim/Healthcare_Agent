@@ -1,0 +1,200 @@
+{
+  "compiled_trial_id": "NCT05239624:compiled:phase1-v1",
+  "nct_id": "NCT05239624",
+  "eligibility_text_sha256": "2ece5ea3cfc9adef45a4b11504b83a8dd247d1c39e2d8125ebfc0af4d511fd97",
+  "criteria": [
+    {
+      "criterion_id": "NCT05239624:INCLUSION:001:443174ab",
+      "nct_id": "NCT05239624",
+      "source_direction": "INCLUSION",
+      "source_order": 1,
+      "source_span": {
+        "source_id": "ctgov:NCT05239624:eligibility_criteria",
+        "start": 54,
+        "end": 78,
+        "quote": "at least 18 years of age",
+        "sha256": "443174ab849cdc980784e8f860fb76fc77e396038e079eb41d3c424de900ece0",
+        "language": "en"
+      },
+      "source_text_sha256": "443174ab849cdc980784e8f860fb76fc77e396038e079eb41d3c424de900ece0",
+      "normalized_summary": "age is at least 18 years",
+      "ast": {
+        "root_node_id": "NCT05239624:INCLUSION:001:443174ab:node:0",
+        "nodes": [{"node_id": "NCT05239624:INCLUSION:001:443174ab:node:0", "op": "GTE", "child_ids": [], "slot_id": "demographics.age", "value": {"kind": "number", "value": "18", "unit": "year"}, "values": [], "unit": null, "metadata": {}}]
+      },
+      "required_slots": ["demographics.age"],
+      "criticality": "CRITICAL",
+      "compiler_confidence": 1.0,
+      "protocol_verified": true,
+      "opaque": false,
+      "warnings": []
+    },
+    {
+      "criterion_id": "NCT05239624:INCLUSION:002:5f52ab88",
+      "nct_id": "NCT05239624",
+      "source_direction": "INCLUSION",
+      "source_order": 2,
+      "source_span": {
+        "source_id": "ctgov:NCT05239624:eligibility_criteria",
+        "start": 123,
+        "end": 241,
+        "quote": "histologically confirmed diagnosis of muscle invasive bladder cancer (previously known as transitional cell) carcinoma",
+        "sha256": "5f52ab885571e4612fc249216687759e84a17284025d390da599d70a78373192",
+        "language": "en"
+      },
+      "source_text_sha256": "5f52ab885571e4612fc249216687759e84a17284025d390da599d70a78373192",
+      "normalized_summary": "histology is urothelial or transitional-cell carcinoma as stated by pathology",
+      "ast": {
+        "root_node_id": "NCT05239624:INCLUSION:002:5f52ab88:node:0",
+        "nodes": [{"node_id": "NCT05239624:INCLUSION:002:5f52ab88:node:0", "op": "IN", "child_ids": [], "slot_id": "pathology.histology", "value": null, "values": [{"kind": "categorical", "value": "urothelial_carcinoma", "system": "trial-opt-canonical-v1"}], "unit": null, "metadata": {}}]
+      },
+      "required_slots": ["pathology.histology"],
+      "criticality": "CRITICAL",
+      "compiler_confidence": 1.0,
+      "protocol_verified": true,
+      "opaque": false,
+      "warnings": []
+    },
+    {
+      "criterion_id": "NCT05239624:INCLUSION:003:a7db6608",
+      "nct_id": "NCT05239624",
+      "source_direction": "INCLUSION",
+      "source_order": 3,
+      "source_span": {
+        "source_id": "ctgov:NCT05239624:eligibility_criteria",
+        "start": 358,
+        "end": 475,
+        "quote": "Muscle invasive urothelial carcinoma of the bladder histologically confirmed at the enrolling institution from TURBT.",
+        "sha256": "a7db66086a13127d0a5ba33b51413e54546b1c150dcffa59b841e33ccf388532",
+        "language": "en"
+      },
+      "source_text_sha256": "a7db66086a13127d0a5ba33b51413e54546b1c150dcffa59b841e33ccf388532",
+      "normalized_summary": "disease is muscle-invasive",
+      "ast": {
+        "root_node_id": "NCT05239624:INCLUSION:003:a7db6608:node:0",
+        "nodes": [{"node_id": "NCT05239624:INCLUSION:003:a7db6608:node:0", "op": "EQ", "child_ids": [], "slot_id": "pathology.muscle_invasion", "value": {"kind": "boolean", "value": true}, "values": [], "unit": null, "metadata": {}}]
+      },
+      "required_slots": ["pathology.muscle_invasion"],
+      "criticality": "CRITICAL",
+      "compiler_confidence": 1.0,
+      "protocol_verified": true,
+      "opaque": false,
+      "warnings": []
+    },
+    {
+      "criterion_id": "NCT05239624:INCLUSION:004:2b0a94f9",
+      "nct_id": "NCT05239624",
+      "source_direction": "INCLUSION",
+      "source_order": 4,
+      "source_span": {
+        "source_id": "ctgov:NCT05239624:eligibility_criteria",
+        "start": 307,
+        "end": 356,
+        "quote": "Clinical Stage T2-T4, N1-N3, M0 OR cT1, N2-N3, M0",
+        "sha256": "2b0a94f94951434bbff7b191f923944600f9bebe57f71b44d684298f15f3a256",
+        "language": "en"
+      },
+      "source_text_sha256": "2b0a94f94951434bbff7b191f923944600f9bebe57f71b44d684298f15f3a256",
+      "normalized_summary": "documented clinical TNM stage is in the allowed disjunction",
+      "ast": {
+        "root_node_id": "NCT05239624:INCLUSION:004:2b0a94f9:node:0",
+        "nodes": [{"node_id": "NCT05239624:INCLUSION:004:2b0a94f9:node:0", "op": "IN", "child_ids": [], "slot_id": "staging.clinical_group", "value": null, "values": [{"kind": "categorical", "value": "T2_T4_N1_N3_M0", "system": null}, {"kind": "categorical", "value": "T1_N2_N3_M0", "system": null}], "unit": null, "metadata": {}}]
+      },
+      "required_slots": ["staging.clinical_group"],
+      "criticality": "CRITICAL",
+      "compiler_confidence": 1.0,
+      "protocol_verified": true,
+      "opaque": false,
+      "warnings": []
+    },
+    {
+      "criterion_id": "NCT05239624:INCLUSION:005:dac9ad49",
+      "nct_id": "NCT05239624",
+      "source_direction": "INCLUSION",
+      "source_order": 5,
+      "source_span": {
+        "source_id": "ctgov:NCT05239624:eligibility_criteria",
+        "start": 477,
+        "end": 551,
+        "quote": "No prior treatments for muscle invasive or metastatic urothelial carcinoma",
+        "sha256": "dac9ad4957dbfc5a7eb5e8296a3b2fc32701522d1030f1c1fbe615b4bf7a849a",
+        "language": "en"
+      },
+      "source_text_sha256": "dac9ad4957dbfc5a7eb5e8296a3b2fc32701522d1030f1c1fbe615b4bf7a849a",
+      "normalized_summary": "no prior systemic treatment for muscle-invasive or metastatic urothelial carcinoma",
+      "ast": {
+        "root_node_id": "NCT05239624:INCLUSION:005:dac9ad49:node:0",
+        "nodes": [{"node_id": "NCT05239624:INCLUSION:005:dac9ad49:node:0", "op": "EQ", "child_ids": [], "slot_id": "prior_treatment.mibc_systemic", "value": {"kind": "boolean", "value": false}, "values": [], "unit": null, "metadata": {}}]
+      },
+      "required_slots": ["prior_treatment.mibc_systemic"],
+      "criticality": "CRITICAL",
+      "compiler_confidence": 1.0,
+      "protocol_verified": true,
+      "opaque": false,
+      "warnings": []
+    },
+    {
+      "criterion_id": "NCT05239624:INCLUSION:006:ba33ff17",
+      "nct_id": "NCT05239624",
+      "source_direction": "INCLUSION",
+      "source_order": 6,
+      "source_span": {
+        "source_id": "ctgov:NCT05239624:eligibility_criteria",
+        "start": 553,
+        "end": 632,
+        "quote": "Have an Eastern Cooperative Oncology Group (ECOG) performance status of 0 to 1.",
+        "sha256": "ba33ff178aeacfae846fbd67bdf578a0a9ee97948e4ba014938657c346730636",
+        "language": "en"
+      },
+      "source_text_sha256": "ba33ff178aeacfae846fbd67bdf578a0a9ee97948e4ba014938657c346730636",
+      "normalized_summary": "ECOG performance status is 0 or 1",
+      "ast": {
+        "root_node_id": "NCT05239624:INCLUSION:006:ba33ff17:node:0",
+        "nodes": [{"node_id": "NCT05239624:INCLUSION:006:ba33ff17:node:0", "op": "IN", "child_ids": [], "slot_id": "performance_status.ecog", "value": null, "values": [{"kind": "number", "value": "0", "unit": "score"}, {"kind": "number", "value": "1", "unit": "score"}], "unit": null, "metadata": {}}]
+      },
+      "required_slots": ["performance_status.ecog"],
+      "criticality": "CRITICAL",
+      "compiler_confidence": 1.0,
+      "protocol_verified": true,
+      "opaque": false,
+      "warnings": []
+    },
+    {
+      "criterion_id": "NCT05239624:INCLUSION:007:53a2629b",
+      "nct_id": "NCT05239624",
+      "source_direction": "INCLUSION",
+      "source_order": 7,
+      "source_span": {
+        "source_id": "ctgov:NCT05239624:eligibility_criteria",
+        "start": 733,
+        "end": 857,
+        "quote": "Measured or calculated creatinine clearance (GFR can also be used in place of creatinine or CrCl) GFR or CrCl of ≥ 30 mL/min",
+        "sha256": "53a2629bd324d4bccb33b6fe3d54782b47e48ee21174b5f576874142ff5aca29",
+        "language": "en"
+      },
+      "source_text_sha256": "53a2629bd324d4bccb33b6fe3d54782b47e48ee21174b5f576874142ff5aca29",
+      "normalized_summary": "measured or calculated GFR or creatinine clearance is at least 30 mL/min",
+      "ast": {
+        "root_node_id": "NCT05239624:INCLUSION:007:53a2629b:node:0",
+        "nodes": [{"node_id": "NCT05239624:INCLUSION:007:53a2629b:node:0", "op": "GTE", "child_ids": [], "slot_id": "organ_function.renal.gfr_or_crcl", "value": {"kind": "number", "value": "30", "unit": "mL/min"}, "values": [], "unit": null, "metadata": {}}]
+      },
+      "required_slots": ["organ_function.renal.gfr_or_crcl"],
+      "criticality": "CRITICAL",
+      "compiler_confidence": 1.0,
+      "protocol_verified": true,
+      "opaque": false,
+      "warnings": []
+    }
+  ],
+  "source_character_coverage": 1.0,
+  "protocol_verified": true,
+  "review_artifact_id": "review:NCT05239624:phase1-v1",
+  "compiler_model_id": "specification_fixture",
+  "compiler_prompt_version": "phase1-frozen-v1",
+  "ast_schema_version": "ast-v1",
+  "slot_catalog_version": "slot-catalog-v1",
+  "boundary_tests_passed": true,
+  "warnings": ["PHASE1_MANUAL_FIXTURE_ONLY"],
+  "content_hash": "c74f107d416f6f3b5fb30d8b2f6691023df336aa18c6c6277cf57dd95c94ffaf",
+  "created_at": "2026-08-11T09:00:06Z"
+}
