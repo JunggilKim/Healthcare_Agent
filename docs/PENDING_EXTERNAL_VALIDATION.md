@@ -14,7 +14,11 @@ local infrastructure state. They are not represented as completed.
   opaque safety fallback.
 - Required external proof later: model-access smoke test for `gemini-3.6-flash`,
   `gemini-3.5-flash-lite`, and `gemini-embedding-001`; paid compilation/review of the final curated
-  corpus; quota and cost-guard validation.
+  corpus; quota and cost-guard validation. The current S004 top-8 compiled cache is deliberately
+  opaque/review-required because no model output was available. Therefore the specification's
+  full-corpus S004/S008/S001 first-question golden assertions cannot yet be represented as passed;
+  only the frozen S004 vertical-slice question contract and credential-independent S001/S008
+  evidence-firewall/domain-path tests are confirmed.
 
 ## Docker Desktop
 
@@ -26,4 +30,3 @@ local infrastructure state. They are not represented as completed.
   build, Uvicorn API run, and Chromium E2E.
 - Required external proof later: recover Docker storage, build the release image, run it with
   outbound networking disabled in Snapshot Mode, and record its digest.
-

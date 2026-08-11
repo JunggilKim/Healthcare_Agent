@@ -6,7 +6,15 @@ from pydantic import Field, model_validator
 
 from backend.app.domain.base import StrictModel
 from backend.app.domain.enums import AcquisitionAction, CriterionVerdict
-from backend.app.domain.values import TypedValue
+from backend.app.domain.values import (
+    BooleanValue,
+    CategoricalValue,
+    DateValue,
+    DurationValue,
+    NumberValue,
+    StringValue,
+    TypedValue,
+)
 
 
 class AffectedCriterion(StrictModel):
@@ -65,6 +73,22 @@ class QuestionCandidate(StrictModel):
             raise ValueError("branch IDs must use deterministic question:index labels")
         if abs(sum(branch.weight for branch in self.branches) - 1.0) > 1e-9:
             raise ValueError("branch weights must sum to 1.0")
+        expected_types = {
+            "boolean": (BooleanValue,),
+            "number": (NumberValue,),
+            "categorical": (CategoricalValue,),
+            "categorical_free_string": (CategoricalValue, StringValue),
+            "date": (DateValue,),
+            "duration": (DurationValue,),
+        }
+        allowed = expected_types.get(self.answer_type)
+        if allowed is None:
+            raise ValueError(f"unsupported answer type: {self.answer_type}")
+        if any(
+            branch.synthetic_value is not None and not isinstance(branch.synthetic_value, allowed)
+            for branch in self.branches
+        ):
+            raise ValueError("branch value does not satisfy target slot type")
         return self
 
 

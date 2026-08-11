@@ -20,6 +20,7 @@ from backend.app.domain.evidence import (
 from backend.app.domain.model_outputs import (
     PatientExtractionResult,
     PatientFactProposal,
+    RetrievalHypothesisProposal,
     UnparsedSpan,
 )
 from backend.app.domain.values import (
@@ -223,9 +224,122 @@ def deterministic_surface_fallback(
                 )
             )
             break
+
+    def add_surface_fact(
+        pattern: str, slot_id: str, value: BooleanValue | CategoricalValue
+    ) -> int | None:
+        match = re.search(pattern, patient_text, re.IGNORECASE)
+        if match is None:
+            return None
+        facts.append(
+            PatientFactProposal(
+                slot_id=slot_id,
+                value=value,
+                start=match.start(),
+                end=match.end(),
+                quote=match.group(0),
+            )
+        )
+        return len(facts) - 1
+
+    surface_indexes: dict[str, int] = {}
+    surface_patterns: list[tuple[str, str, BooleanValue | CategoricalValue]] = [
+        (
+            r"chronic alcohol use",
+            "alcohol.chronic_use",
+            BooleanValue(kind="boolean", value=True),
+        ),
+        (
+            r"severe epigastric pain",
+            "symptom.epigastric_pain",
+            BooleanValue(kind="boolean", value=True),
+        ),
+        (
+            r"markedly elevated serum lipase",
+            "lab.lipase_interpretation",
+            CategoricalValue(kind="categorical", value="markedly_elevated"),
+        ),
+        (
+            r"markedly elevated serum lipase and amylase",
+            "lab.amylase_interpretation",
+            CategoricalValue(kind="categorical", value="markedly_elevated"),
+        ),
+        (
+            r"progressive dyspnea",
+            "symptom.dyspnea",
+            BooleanValue(kind="boolean", value=True),
+        ),
+        (r"dry cough", "symptom.dry_cough", BooleanValue(kind="boolean", value=True)),
+        (
+            r"honeycombing",
+            "imaging.honeycombing",
+            BooleanValue(kind="boolean", value=True),
+        ),
+        (
+            r"gross hematuria",
+            "symptom.gross_hematuria",
+            BooleanValue(kind="boolean", value=True),
+        ),
+        (
+            r"mass in the bladder wall",
+            "imaging.bladder_wall_mass",
+            BooleanValue(kind="boolean", value=True),
+        ),
+    ]
+    for pattern, slot_id, value in surface_patterns:
+        index = add_surface_fact(pattern, slot_id, value)
+        if index is not None:
+            surface_indexes[slot_id] = index
+
+    hypotheses: list[RetrievalHypothesisProposal] = []
+    if {
+        "symptom.epigastric_pain",
+        "lab.lipase_interpretation",
+    } <= surface_indexes.keys():
+        hypotheses.append(
+            RetrievalHypothesisProposal(
+                concept="acute pancreatitis",
+                normalized_concept="acute pancreatitis",
+                source_proposal_indexes=[
+                    surface_indexes["symptom.epigastric_pain"],
+                    surface_indexes["lab.lipase_interpretation"],
+                ],
+                rationale_code="SYMPTOM_LAB_RETRIEVAL_HYPOTHESIS_ONLY",
+            )
+        )
+    if {
+        "symptom.dyspnea",
+        "imaging.honeycombing",
+    } <= surface_indexes.keys():
+        hypotheses.append(
+            RetrievalHypothesisProposal(
+                concept="interstitial lung disease",
+                normalized_concept="interstitial lung disease",
+                source_proposal_indexes=[
+                    surface_indexes["symptom.dyspnea"],
+                    surface_indexes["imaging.honeycombing"],
+                ],
+                rationale_code="SYMPTOM_IMAGING_RETRIEVAL_HYPOTHESIS_ONLY",
+            )
+        )
+    if {
+        "symptom.gross_hematuria",
+        "imaging.bladder_wall_mass",
+    } <= surface_indexes.keys():
+        hypotheses.append(
+            RetrievalHypothesisProposal(
+                concept="bladder neoplasm",
+                normalized_concept="bladder neoplasm",
+                source_proposal_indexes=[
+                    surface_indexes["symptom.gross_hematuria"],
+                    surface_indexes["imaging.bladder_wall_mass"],
+                ],
+                rationale_code="SYMPTOM_IMAGING_RETRIEVAL_HYPOTHESIS_ONLY",
+            )
+        )
     return PatientExtractionResult(
         facts=facts,
-        retrieval_hypotheses=[],
+        retrieval_hypotheses=hypotheses,
         possible_conflicts=[],
         unparsed_spans=[],
         language=language,

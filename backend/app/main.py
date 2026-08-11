@@ -16,6 +16,7 @@ from backend.app.api.routes.health import router as health_router
 from backend.app.api.routes.sessions import router as sessions_router
 from backend.app.application.session_service import SnapshotSessionService
 from backend.app.infrastructure.local_store import LocalSessionStore
+from backend.app.infrastructure.rate_limiter import FixedWindowRateLimiter
 from backend.app.main_constants import DISCLAIMER
 from backend.app.settings import get_settings
 
@@ -26,6 +27,7 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     store = LocalSessionStore(settings.local_store_dir)
     await store.initialize()
     application.state.session_service = SnapshotSessionService(store)
+    application.state.rate_limiter = FixedWindowRateLimiter(salt=settings.ip_hash_salt)
     yield
 
 

@@ -13,7 +13,11 @@ from pydantic import BaseModel, ValidationError
 from backend.app.domain.generation import ModelUsage, StructuredGenerationRecord
 from backend.app.infrastructure.cache import LocalModelResultCache, model_cache_key
 from backend.app.infrastructure.circuit_breaker import CircuitBreaker, CircuitOpenError
-from backend.app.infrastructure.usage_guard import PricingEstimator
+from backend.app.infrastructure.usage_guard import (
+    CostGuardExceeded,
+    InMemoryUsageGuard,
+    PricingEstimator,
+)
 
 OutputModel = TypeVar("OutputModel", bound=BaseModel)
 
@@ -29,12 +33,14 @@ class StructuredGenerator:
         client: genai.Client,
         cache: LocalModelResultCache,
         pricing: PricingEstimator,
+        usage_guard: InMemoryUsageGuard | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         jitter: Callable[[float, float], float] = random.uniform,
     ) -> None:
         self.client = client
         self.cache = cache
         self.pricing = pricing
+        self.usage_guard = usage_guard
         self._sleep = sleep
         self._jitter = jitter
         self._circuits: dict[str, CircuitBreaker] = {}
@@ -63,6 +69,7 @@ class StructuredGenerator:
         thinking_level: str,
         max_output_tokens: int,
         max_attempts: int,
+        session_id: str = "unscoped",
     ) -> tuple[OutputModel, StructuredGenerationRecord]:
         generation_config = {
             "thinking_level": thinking_level,
@@ -89,7 +96,18 @@ class StructuredGenerator:
         last_error: Exception | None = None
         retry_prompt = prompt
         for attempt in range(max_attempts):
+            reservation = None
             try:
+                if self.usage_guard is not None:
+                    estimated_input_tokens = max(1, len(retry_prompt.encode()) // 4)
+                    reserved_cost = self.pricing.reserved_generation_cost(
+                        model_id,
+                        estimated_input_tokens=estimated_input_tokens,
+                        max_output_tokens=max_output_tokens,
+                    )
+                    reservation = self.usage_guard.reserve(
+                        session_id=session_id, amount_usd=reserved_cost
+                    )
                 response = await self.client.aio.models.generate_content(
                     model=model_id,
                     contents=retry_prompt,
@@ -113,6 +131,9 @@ class StructuredGenerator:
                     output_tokens=output_tokens,
                     reasoning_tokens=reasoning_tokens,
                 )
+                if reservation is not None:
+                    assert self.usage_guard is not None
+                    self.usage_guard.reconcile(reservation.reservation_id, actual_usd=cost)
                 usage = ModelUsage(
                     model_id=model_id,
                     task_name=task_name,
@@ -136,6 +157,8 @@ class StructuredGenerator:
                 self.cache.put(record)
                 circuit.record_success()
                 return parsed, record
+            except CostGuardExceeded as error:
+                raise StructuredGenerationUnavailable(str(error)) from error
             except Exception as error:
                 last_error = error
                 if attempt < max_attempts - 1:
@@ -166,6 +189,7 @@ class StructuredGenerator:
         fallback_thinking_level: str,
         primary_max_output_tokens: int,
         fallback_max_output_tokens: int,
+        session_id: str = "unscoped",
     ) -> tuple[OutputModel, StructuredGenerationRecord]:
         try:
             return await self.generate(
@@ -180,6 +204,7 @@ class StructuredGenerator:
                 thinking_level=primary_thinking_level,
                 max_output_tokens=primary_max_output_tokens,
                 max_attempts=3,
+                session_id=session_id,
             )
         except (StructuredGenerationUnavailable, CircuitOpenError):
             parsed, record = await self.generate(
@@ -194,5 +219,6 @@ class StructuredGenerator:
                 thinking_level=fallback_thinking_level,
                 max_output_tokens=fallback_max_output_tokens,
                 max_attempts=1,
+                session_id=session_id,
             )
             return parsed, record.model_copy(update={"used_fallback": True})

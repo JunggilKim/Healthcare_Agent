@@ -9,6 +9,7 @@ from backend.app.domain.canonical import canonical_sha256
 from backend.app.domain.enums import CriterionVerdict, EvidenceGrade
 from backend.app.domain.evidence import EligibilityContext, PatientFact
 from backend.app.domain.proof import ProofPacket, VerifierCheck
+from backend.app.domain.rendering import CriterionExplanation
 from backend.app.domain.trials import (
     CompiledCriterion,
     CompiledTrial,
@@ -330,3 +331,39 @@ def replay_packet_matches(
     result = evaluate_criterion(criterion, context, packet.evaluation_date)
     payload = canonical_replay_payload(criterion.criterion_id, packet.patient_state_version, result)
     return canonical_sha256(payload) == packet.canonical_replay_hash
+
+
+def build_post_render_proof(
+    decision_packet: ProofPacket,
+    explanation: CriterionExplanation,
+) -> ProofPacket:
+    """Create immutable r1 with PV-015; never mutate or re-rank the decision packet."""
+    if decision_packet.proof_revision != 0 or decision_packet.verification_phase != "DECISION":
+        raise ValueError("PV-015 requires a decision-time r0 packet")
+    explanation_valid = (
+        explanation.criterion_id == decision_packet.criterion_id
+        and explanation.verdict is decision_packet.final_verdict
+        and sorted(set(explanation.evidence_refs)) == sorted(set(decision_packet.evidence_fact_ids))
+    )
+    check = _check(
+        "PV-015",
+        explanation_valid,
+        "EXPLANATION_REFERENCES_MATCH" if explanation_valid else "EXPLANATION_VERIFICATION_FAILED",
+    )
+    proof_id = re.sub(r":r0$", ":r1", decision_packet.proof_id)
+    if proof_id == decision_packet.proof_id:
+        raise ValueError("decision proof ID does not end in r0")
+    return decision_packet.model_copy(
+        deep=True,
+        update={
+            "proof_id": proof_id,
+            "proof_revision": 1,
+            "verification_phase": "POST_RENDER",
+            "supersedes_proof_id": decision_packet.proof_id,
+            "verifier_checks": [*decision_packet.verifier_checks, check],
+            "blocking_issue_codes": [
+                *decision_packet.blocking_issue_codes,
+                *([] if explanation_valid else ["PV-015"]),
+            ],
+        },
+    )

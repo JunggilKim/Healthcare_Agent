@@ -32,3 +32,13 @@ class TrialEvaluation(StrictModel):
     ranking_key: RankingKey
     display_score: float
     degradation_codes: list[str]
+
+
+class RankDelta(StrictModel):
+    nct_id: str
+    before_rank: int
+    after_rank: int
+    before_decision: TrialDecision
+    after_decision: TrialDecision
+    changed_criterion_ids: list[str]
+    answer_fact_ids: list[str]

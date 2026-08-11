@@ -8,7 +8,11 @@ from fastapi import APIRouter, Depends, Request, status
 from pydantic import Field, model_validator
 from starlette.responses import StreamingResponse
 
-from backend.app.api.dependencies import get_session_service, require_session_token
+from backend.app.api.dependencies import (
+    enforce_rate_limit,
+    get_session_service,
+    require_session_token,
+)
 from backend.app.api.errors import ApiProblem
 from backend.app.application.session_service import SnapshotSessionService
 from backend.app.domain.base import StrictModel
@@ -63,8 +67,10 @@ def _sse(event_name: str, payload: dict[str, object]) -> bytes:
 @router.post("/sessions", status_code=status.HTTP_201_CREATED)
 async def create_session(
     body: CreateSessionRequest,
+    request: Request,
     service: SnapshotSessionService = Depends(get_session_service),
 ) -> dict[str, object]:
+    enforce_rate_limit(request, "snapshot_session" if body.mode == "snapshot" else "live_session")
     if body.patient_text is not None:
         if not body.confirm_synthetic_public:
             raise ApiProblem(
@@ -130,9 +136,12 @@ async def read_session(
 async def submit_answer(
     session_id: str,
     body: SubmitAnswerRequest,
+    request: Request,
     _: str = Depends(require_session_token),
     service: SnapshotSessionService = Depends(get_session_service),
 ) -> StreamingResponse:
+    enforce_rate_limit(request, "answer_submission")
+
     async def stream() -> AsyncIterator[bytes]:
         try:
             async for event_name, payload in service.submit_answer(

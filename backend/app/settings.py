@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     allow_live_model_calls: bool = False
     allow_live_ctgov_calls: bool = False
     session_cost_cap_usd: float = Field(default=1.25, gt=0)
+    ip_hash_salt: str = "local-development-only-change-me"
 
 
 @lru_cache(maxsize=1)
