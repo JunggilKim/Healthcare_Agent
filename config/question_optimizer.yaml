@@ -1,0 +1,23 @@
+version: 1
+top_k: 5
+default_max_questions: 5
+hard_max_questions: 7
+max_branches: 6
+stop_utility_threshold: 0.10
+stable_risk_reduction_threshold: 0.05
+weights:
+  mean_risk_reduction: 0.45
+  minimum_risk_reduction: 0.20
+  mean_decision_resolution: 0.15
+  branch_discrimination: 0.10
+  coverage: 0.10
+trial_risk_weights: {unknown_ratio: 0.55, conflict_ratio: 0.25, proof_gap: 0.20}
+burden_penalties:
+  boolean_patient_known: 0.03
+  categorical_patient_known: 0.05
+  numeric_or_date: 0.06
+  request_record: 0.12
+  clinician_review: 0.18
+sensitivity_penalties: {ordinary: 0.00, moderate: 0.03, high: 0.07}
+tie_tolerance: 1.0e-9
+

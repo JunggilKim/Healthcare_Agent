@@ -1,0 +1,331 @@
+version: slot-catalog-v1
+namespaces:
+  - demographics
+  - diagnosis
+  - pathology
+  - staging
+  - symptom
+  - condition
+  - medical_history
+  - procedure
+  - prior_treatment
+  - medication
+  - performance_status
+  - lab
+  - imaging
+  - infection
+  - pregnancy
+  - contraception
+  - organ_function
+  - smoking
+  - alcohol
+  - custom
+slots:
+  - slot_id: demographics.age
+    value_type: number
+    allowed_units: [year]
+    aliases: [age, 나이, 연령]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: numeric_or_date
+    sensitivity_class: ordinary
+    question_template_ko: 현재 만 나이를 확인할 수 있나요?
+    question_template_en: Can you confirm your current age in completed years?
+  - slot_id: demographics.sex
+    value_type: categorical
+    canonical_values: [male, female, other, unknown]
+    allowed_units: []
+    aliases: [sex, gender, 성별]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: categorical_patient_known
+    sensitivity_class: moderate
+    question_template_ko: 임상시험 기준 확인을 위해 기록상 성별 정보를 확인할 수 있나요?
+    question_template_en: Can you confirm the sex recorded in existing records?
+  - slot_id: smoking.history
+    value_type: categorical
+    canonical_values: [never, former, current, unknown]
+    allowed_units: []
+    aliases: [smoking history, smoker, 흡연력]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: categorical_patient_known
+    sensitivity_class: ordinary
+    question_template_ko: 흡연력은 없음, 과거 흡연, 현재 흡연 중 어디에 해당하나요?
+    question_template_en: Is the smoking history never, former, or current?
+  - slot_id: alcohol.chronic_use
+    value_type: boolean
+    allowed_units: []
+    aliases: [chronic alcohol use, 지속적인 음주력]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: boolean_patient_known
+    sensitivity_class: moderate
+    question_template_ko: 지속적인 음주력이 있다고 기록되어 있나요?
+    question_template_en: Is chronic alcohol use documented?
+  - slot_id: symptom.gross_hematuria
+    value_type: boolean
+    allowed_units: []
+    aliases: [gross hematuria, visible blood in urine, 육안적 혈뇨]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: boolean_patient_known
+    sensitivity_class: ordinary
+    question_template_ko: 눈으로 확인되는 혈뇨가 있었나요?
+    question_template_en: Have you had visible blood in the urine?
+  - slot_id: imaging.bladder_wall_mass
+    value_type: boolean
+    allowed_units: []
+    aliases: [bladder wall mass, 방광벽 종괴]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 기존 영상 판독지에 방광벽 종괴가 기재되어 있나요?
+    question_template_en: Does an existing imaging report document a bladder-wall mass?
+  - slot_id: pathology.histology
+    value_type: categorical_free_string
+    allowed_units: []
+    aliases: [histology, pathological diagnosis, 조직형, 병리 진단]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 병리검사 결과지에 기재된 확정 진단명과 조직형을 확인할 수 있나요?
+    question_template_en: Can you confirm the diagnosis and histology stated in the pathology report?
+  - slot_id: pathology.muscle_invasion
+    value_type: boolean
+    allowed_units: []
+    aliases: [muscle invasion, muscle-invasive, 근육 침윤]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 병리 또는 수술 기록에 근육 침윤 여부가 명시되어 있나요?
+    question_template_en: Is muscle invasion stated in pathology or operative records?
+  - slot_id: staging.clinical_group
+    value_type: categorical
+    canonical_values: [T2_T4_N1_N3_M0, T1_N2_N3_M0, OTHER]
+    allowed_units: []
+    aliases: [clinical TNM stage, 임상 TNM 병기]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 기존 기록에 임상 TNM 병기(cT, cN, cM)가 어떻게 기재되어 있나요?
+    question_template_en: What clinical TNM stage is documented in existing records?
+  - slot_id: prior_treatment.mibc_systemic
+    value_type: boolean
+    allowed_units: []
+    aliases: [prior MIBC systemic therapy, 이전 전신 치료]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: boolean_patient_known
+    sensitivity_class: ordinary
+    question_template_ko: 근육침윤성 또는 전이성 요로상피암에 대해 이전에 전신 치료를 받은 적이 있나요?
+    question_template_en: Have you received prior systemic treatment for muscle-invasive or metastatic urothelial cancer?
+  - slot_id: performance_status.ecog
+    value_type: number
+    allowed_range: [0, 4]
+    allowed_units: [score]
+    aliases: [ECOG, performance status, 수행상태]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 최근 진료기록에 기재된 ECOG 수행상태 점수(0–4)를 확인할 수 있나요?
+    question_template_en: Can you confirm the latest documented ECOG score from 0 to 4?
+  - slot_id: organ_function.renal.gfr_or_crcl
+    value_type: number
+    allowed_units: [mL/min]
+    aliases: [GFR, creatinine clearance, CrCl]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_VALUE
+    burden_class: numeric_or_date
+    sensitivity_class: ordinary
+    question_template_ko: 가장 최근 GFR 또는 크레아티닌 청소율 수치와 단위를 확인할 수 있나요?
+    question_template_en: Can you confirm the latest GFR or creatinine-clearance value and unit?
+  - slot_id: symptom.dyspnea
+    value_type: boolean
+    allowed_units: []
+    aliases: [dyspnea, shortness of breath, 호흡곤란]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: boolean_patient_known
+    sensitivity_class: ordinary
+    question_template_ko: 호흡곤란 증상이 있나요?
+    question_template_en: Do you have shortness of breath?
+  - slot_id: symptom.dry_cough
+    value_type: boolean
+    allowed_units: []
+    aliases: [dry cough, 마른기침]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: boolean_patient_known
+    sensitivity_class: ordinary
+    question_template_ko: 마른기침 증상이 있나요?
+    question_template_en: Do you have a dry cough?
+  - slot_id: imaging.honeycombing
+    value_type: boolean
+    allowed_units: []
+    aliases: [honeycombing, 벌집모양]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 흉부 CT 판독지에 벌집모양(honeycombing) 소견이 기재되어 있나요?
+    question_template_en: Is honeycombing documented in the chest CT report?
+  - slot_id: diagnosis.interstitial_lung_disease.confirmed
+    value_type: categorical_free_string
+    allowed_units: []
+    aliases: [interstitial lung disease, 간질성폐질환]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 기존 진료기록에 확정된 간질성폐질환 진단명이 기재되어 있나요?
+    question_template_en: Is a confirmed interstitial-lung-disease diagnosis documented?
+  - slot_id: lab.fvc_percent_predicted
+    value_type: number
+    allowed_units: ["% predicted"]
+    aliases: [FVC percent predicted, FVC 예측치 대비 백분율]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_VALUE
+    burden_class: numeric_or_date
+    sensitivity_class: ordinary
+    question_template_ko: 가장 최근 FVC 예측치 대비 백분율과 검사일을 확인할 수 있나요?
+    question_template_en: Can you confirm the latest FVC percent predicted and test date?
+  - slot_id: lab.dlco_percent_predicted
+    value_type: number
+    allowed_units: ["% predicted"]
+    aliases: [DLCO percent predicted, DLCO 예측치 대비 백분율]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_VALUE
+    burden_class: numeric_or_date
+    sensitivity_class: ordinary
+    question_template_ko: 가장 최근 DLCO 예측치 대비 백분율과 검사일을 확인할 수 있나요?
+    question_template_en: Can you confirm the latest DLCO percent predicted and test date?
+  - slot_id: symptom.epigastric_pain
+    value_type: boolean
+    allowed_units: []
+    aliases: [epigastric pain, 명치 통증]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: boolean_patient_known
+    sensitivity_class: ordinary
+    question_template_ko: 현재 명치 부위의 심한 통증이 있나요?
+    question_template_en: Do you currently have severe epigastric pain?
+  - slot_id: lab.lipase_interpretation
+    value_type: categorical
+    canonical_values: [normal, elevated, markedly_elevated]
+    allowed_units: []
+    aliases: [lipase interpretation, lipase 해석]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 기존 검사결과에서 lipase가 정상, 상승, 현저히 상승 중 어떻게 기재되어 있나요?
+    question_template_en: How is lipase described in existing results?
+  - slot_id: lab.amylase_interpretation
+    value_type: categorical
+    canonical_values: [normal, elevated, markedly_elevated]
+    allowed_units: []
+    aliases: [amylase interpretation, amylase 해석]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 기존 검사결과에서 amylase가 정상, 상승, 현저히 상승 중 어떻게 기재되어 있나요?
+    question_template_en: How is amylase described in existing results?
+  - slot_id: diagnosis.acute_pancreatitis.confirmed
+    value_type: boolean
+    allowed_units: []
+    aliases: [confirmed acute pancreatitis, 급성 췌장염 확정 진단]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 기존 진료기록에 급성 췌장염 확정 진단이 기재되어 있나요?
+    question_template_en: Is confirmed acute pancreatitis documented?
+  - slot_id: diagnosis.pancreatitis_etiology
+    value_type: categorical_free_string
+    allowed_units: []
+    aliases: [pancreatitis etiology, 췌장염 원인]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: moderate
+    question_template_ko: 기존 진료기록에 췌장염의 원인이 확정되어 기재되어 있나요?
+    question_template_en: Is a confirmed cause of pancreatitis documented?
+  - slot_id: medical_history.prior_pancreatitis
+    value_type: boolean
+    allowed_units: []
+    aliases: [prior pancreatitis, 이전 췌장염]
+    hard_admissible_grades: [A, B]
+    default_action: ASK_PATIENT
+    burden_class: boolean_patient_known
+    sensitivity_class: ordinary
+    question_template_ko: 이전에 췌장염 진단을 받은 적이 있나요?
+    question_template_en: Have you previously been diagnosed with pancreatitis?
+  - slot_id: condition.current_organ_failure
+    value_type: boolean
+    allowed_units: []
+    aliases: [current organ failure, 현재 장기부전]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 현재 장기부전 여부가 진료기록에 기재되어 있나요?
+    question_template_en: Is current organ failure documented?
+  - slot_id: infection.active_uncontrolled
+    value_type: boolean
+    allowed_units: []
+    aliases: [active uncontrolled infection, 조절되지 않는 활동성 감염]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: moderate
+    question_template_ko: 현재 조절되지 않는 활동성 감염이 있다고 기록되어 있나요?
+    question_template_en: Is an active uncontrolled infection documented?
+  - slot_id: pregnancy.status
+    value_type: categorical
+    canonical_values: [pregnant, not_pregnant, not_applicable, unknown]
+    allowed_units: []
+    aliases: [pregnancy status, 임신 여부]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: high
+    question_template_ko: 기존 기록에서 현재 임신 여부를 확인할 수 있나요?
+    question_template_en: Can pregnancy status be confirmed from existing records?
+  - slot_id: prior_treatment.last_systemic_anticancer_date
+    value_type: date
+    allowed_units: []
+    aliases: [last systemic anticancer treatment date, 최근 전신 항암치료 날짜]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 가장 최근 전신 항암치료 날짜를 기존 기록에서 확인할 수 있나요?
+    question_template_en: Can the latest systemic anticancer treatment date be confirmed?
+  - slot_id: procedure.last_major_surgery_date
+    value_type: date
+    allowed_units: []
+    aliases: [last major surgery date, 최근 주요 수술 날짜]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_RECORD
+    burden_class: request_record
+    sensitivity_class: ordinary
+    question_template_ko: 가장 최근 주요 수술 날짜를 기존 기록에서 확인할 수 있나요?
+    question_template_en: Can the latest major surgery date be confirmed?
+  - slot_id: medication.prednisone_equivalent_mg_per_day
+    value_type: number
+    allowed_units: [mg/day]
+    aliases: [prednisone equivalent daily dose, prednisone 환산 일일 용량]
+    hard_admissible_grades: [A, B]
+    default_action: REQUEST_VALUE
+    burden_class: numeric_or_date
+    sensitivity_class: ordinary
+    question_template_ko: 현재 전신 스테로이드의 prednisone 환산 일일 용량을 확인할 수 있나요?
+    question_template_en: Can you confirm the current prednisone-equivalent daily dose?
+

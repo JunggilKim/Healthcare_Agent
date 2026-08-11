@@ -1,0 +1,74 @@
+[project]
+name = "trial-opt"
+version = "0.1.0"
+description = "Proof-carrying active evidence acquisition for interactive clinical trial matching"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { file = "LICENSE" }
+dependencies = [
+  "aiosqlite>=0.20,<1",
+  "fastapi>=0.115,<1",
+  "google-cloud-firestore>=2.20,<3",
+  "google-cloud-storage>=3,<4",
+  "google-genai==2.17.0",
+  "httpx>=0.28,<1",
+  "numpy>=2,<3",
+  "orjson>=3.10,<4",
+  "pydantic>=2.10,<3",
+  "pydantic-settings>=2.7,<3",
+  "python-dateutil>=2.9,<3",
+  "pyyaml>=6,<7",
+  "rank-bm25>=0.2.2,<1",
+  "scikit-learn>=1.6,<2",
+  "structlog>=25,<26",
+  "tenacity>=9,<10",
+  "uvicorn[standard]>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+  "coverage[toml]>=7.6,<8",
+  "hypothesis>=6.120,<7",
+  "mypy>=1.14,<2",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.25,<1",
+  "respx>=0.22,<1",
+  "ruff>=0.9,<1",
+  "types-python-dateutil>=2.9,<3",
+  "types-pyyaml>=6,<7",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+markers = [
+  "gcp: opt-in tests that require Google Cloud",
+  "live: opt-in tests that use live external services",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["backend/app/static"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "RUF"]
+ignore = ["UP007", "UP040", "UP042"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+packages = ["backend.app.domain", "backend.app.application"]
+
+[tool.coverage.run]
+source = ["backend/app"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true

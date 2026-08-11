@@ -1,0 +1,17 @@
+version: 1
+retrieval:
+  rrf_k: 60
+  exact_condition_bonus: 0.05
+  raw_candidate_cap: 100
+  retained_candidate_cap: 20
+  dense_rerank_pool_cap: 20
+  max_uncached_document_embeddings_per_session: 20
+  embedding_request_concurrency: 5
+  compiled_candidate_cap: 8
+  detailed_result_cap: 5
+  prominent_ui_cap: 3
+  irrelevance_threshold: 0.15
+allowed_statuses: {RECRUITING: 3, NOT_YET_RECRUITING: 2, ENROLLING_BY_INVITATION: 1}
+tiers: {PRE_SCREEN_PASS: 1, POTENTIAL_MATCH: 2, REVIEW_REQUIRED: 3, INELIGIBLE: 4, IRRELEVANT: 5}
+display_score: {pass_ratio: 0.40, proof_completeness: 0.25, retrieval_score: 0.25, recruitment_status: 0.10}
+

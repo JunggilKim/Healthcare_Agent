@@ -1,0 +1,12 @@
+version: 1
+session:
+  max_patient_chars: 12000
+  max_answer_chars: 4000
+  default_expiration_days: 7
+  orchestration_lease_seconds: 360
+external:
+  ctgov: {connect_timeout_seconds: 3, read_timeout_seconds: 10, retries: 2, max_queries: 5}
+  sse: {heartbeat_seconds: 10, frontend_silence_warning_seconds: 8, required_fallback_seconds: 12}
+cost: {session_cap_usd: 1.25, default_daily_cap_usd: 10, demo_daily_cap_usd: 25, total_tracked_cap_usd: 180}
+security: {allow_real_patient_data: false, persist_raw_input_only_after_confirmation: true}
+

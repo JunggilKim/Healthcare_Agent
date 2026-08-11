@@ -1,0 +1,14 @@
+name: GCP smoke
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  smoke:
+    environment: gcp-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/smoke_test_deployment.sh --live
+

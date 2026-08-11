@@ -1,0 +1,4 @@
+version: 1
+renderer: json
+excluded_fields: [patient_text, answer_text, full_prompt, full_criterion, source_quote]
+

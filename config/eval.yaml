@@ -1,0 +1,7 @@
+version: 1
+seed: 20260811
+split: {development: 0.6, validation: 0.2, test: 0.2}
+missingness_rates: [0.2, 0.4, 0.6]
+patterns: [MCAR, REALISTIC]
+max_questions: 7
+

@@ -1,0 +1,16 @@
+version: 1
+canonical_units:
+  year: {aliases: [year, years, yr, yrs], family: time, multiplier: "365"}
+  day: {aliases: [day, days], family: time, multiplier: "1"}
+  week: {aliases: [week, weeks], family: time, multiplier: "7"}
+  month: {aliases: [month, months], family: time, multiplier: "30"}
+  mm: {aliases: [mm], family: length, multiplier: "0.001"}
+  cm: {aliases: [cm], family: length, multiplier: "0.01"}
+  m: {aliases: [m], family: length, multiplier: "1"}
+  mg: {aliases: [mg], family: mass, multiplier: "0.001"}
+  g: {aliases: [g], family: mass, multiplier: "1"}
+  kg: {aliases: [kg], family: mass, multiplier: "1000"}
+  "% predicted": {aliases: ["% predicted", "%pred"], family: percentage, multiplier: "1"}
+  "mL/min": {aliases: [mL/min, ml/min], family: renal_flow, multiplier: "1"}
+  "mg/day": {aliases: [mg/day, mg/d], family: dose_rate, multiplier: "1"}
+

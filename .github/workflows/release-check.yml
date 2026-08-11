@@ -1,0 +1,20 @@
+name: Release check
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: "0.12.3"}
+      - uses: actions/setup-node@v4
+        with: {node-version: "24", cache: npm}
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: uv run python scripts/verify_release.py --strict
+

@@ -1,0 +1,13 @@
+version: 1
+effective_date: 2026-08-11
+currency: USD
+source: https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
+standard_paygo_global_per_million_tokens:
+  gemini-3.6-flash: {input: 1.50, output_reasoning: 7.50}
+  gemini-3.5-flash-lite: {input: 0.30, output_reasoning: 2.50}
+batch_global_per_million_tokens:
+  gemini-3.6-flash: {input: 0.75, output_reasoning: 3.75}
+  gemini-3.5-flash-lite: {input: 0.15, output_reasoning: 1.25}
+embedding:
+  gemini-embedding-001: {online_per_1000_input_tokens: 0.00015, batch_per_1000_input_tokens: 0.00012}
+

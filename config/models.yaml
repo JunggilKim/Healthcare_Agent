@@ -1,0 +1,26 @@
+version: 1
+provider: google_cloud_first_party
+sdk:
+  package: google-genai
+  version: 2.17.0
+  api_version: v1
+  location: global
+consumption:
+  online: STANDARD_PAYGO
+  offline: BATCH
+  priority_paygo_allowed: false
+models:
+  primary: {id: gemini-3.6-flash, launch_stage_required: GA}
+  lite: {id: gemini-3.5-flash-lite, launch_stage_required: GA}
+  embedding: {id: gemini-embedding-001, dimensions: 768}
+forbidden_patterns: [preview, gemini-2.5, anthropic, claude, openai, partner]
+routing:
+  patient_extraction: {model: primary, thinking: MEDIUM}
+  retrieval_query: {model: lite, thinking: LOW}
+  protocol_compiler: {model: primary, thinking: HIGH}
+  protocol_reviewer: {model: primary, thinking: MEDIUM}
+  answer_interpreter: {model: lite, thinking: MINIMAL}
+  question_renderer: {model: lite, thinking: MINIMAL}
+  report_renderer: {model: lite, thinking: MINIMAL}
+  synthetic_paraphrase: {model: lite, thinking: LOW, batch: true}
+
