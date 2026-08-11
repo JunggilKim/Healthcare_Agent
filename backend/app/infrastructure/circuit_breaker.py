@@ -20,9 +20,15 @@ class CircuitOpenError(RuntimeError):
 class CircuitBreaker:
     failure_threshold: int = 5
     recovery_seconds: float = 60.0
+    failure_window_seconds: float | None = 60.0
     clock: Callable[[], float] = time.monotonic
     consecutive_failures: int = 0
     opened_at: float | None = None
+    failure_times: list[float] | None = None
+
+    def __post_init__(self) -> None:
+        if self.failure_times is None:
+            self.failure_times = []
 
     @property
     def state(self) -> CircuitState:
@@ -39,8 +45,16 @@ class CircuitBreaker:
     def record_success(self) -> None:
         self.consecutive_failures = 0
         self.opened_at = None
+        assert self.failure_times is not None
+        self.failure_times.clear()
 
     def record_failure(self) -> None:
-        self.consecutive_failures += 1
+        now = self.clock()
+        assert self.failure_times is not None
+        if self.failure_window_seconds is not None:
+            cutoff = now - self.failure_window_seconds
+            self.failure_times[:] = [value for value in self.failure_times if value >= cutoff]
+        self.failure_times.append(now)
+        self.consecutive_failures = len(self.failure_times)
         if self.consecutive_failures >= self.failure_threshold:
-            self.opened_at = self.clock()
+            self.opened_at = now

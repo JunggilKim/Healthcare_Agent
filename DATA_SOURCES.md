@@ -18,4 +18,10 @@ Gemini-produced vector corpus and is used only to verify adapter and RRF behavio
 external call. The final demo snapshot will replace this test-only artifact with the
 specification-required reviewed corpus and model-produced embeddings.
 
+The Phase-3 top-8 artifacts under `data/fixtures/compiled/S004` were deterministically derived
+from the pinned Phase-2 search response. Because no authenticated paid Gemini call was made, they
+preserve each complete eligibility field as an opaque source span with 100% non-whitespace
+coverage, but are explicitly unverified and review-required. Their manifest binds every compiled
+artifact, coverage report, source retrieval hash, and prompt hash.
+
 TREC 2022 retrieval is not yet run.

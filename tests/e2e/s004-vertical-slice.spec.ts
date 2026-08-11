@@ -20,7 +20,7 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
     page.getByRole("heading", { name: "20 retained candidates · top 8 selected" }),
   ).toBeVisible();
   await expect(page.getByTestId("retrieval-candidate")).toHaveCount(20);
-  await expect(page.getByText("selected · not compiled").first()).toBeVisible();
+  await expect(page.getByText("opaque · review required").first()).toBeVisible();
 
   const ageRow = page.getByRole("row").filter({ hasText: "Age ≥ 18 years" });
   await expect(ageRow.getByText("PASS", { exact: true })).toBeVisible();

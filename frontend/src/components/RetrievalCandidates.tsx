@@ -24,7 +24,11 @@ export function RetrievalCandidates({ retrieval }: { retrieval: RetrievalView })
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-black text-cyan-300">#{index + 1}</span>
               <span className="text-[0.62rem] font-bold uppercase text-slate-500">
-                {selected.has(candidate.nct_id) ? "selected · not compiled" : "retained"}
+                {candidate.compilation_status === "OPAQUE_REVIEW_REQUIRED"
+                  ? "opaque · review required"
+                  : selected.has(candidate.nct_id)
+                    ? "selected · not compiled"
+                    : "retained"}
               </span>
             </div>
             <p className="mt-2 text-xs font-bold text-slate-200">{candidate.nct_id}</p>

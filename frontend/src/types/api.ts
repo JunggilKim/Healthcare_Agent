@@ -73,7 +73,8 @@ export const retrievalSchema = z.object({
         nct_id: z.string(),
         retrieval_score: z.number(),
         exact_condition_match: z.boolean(),
-        compiled: z.literal(false),
+        compiled: z.boolean(),
+        compilation_status: z.enum(["NOT_COMPILED", "OPAQUE_REVIEW_REQUIRED", "VERIFIED"]),
         trial: z.object({
           brief_title: z.string(),
           overall_status: z.string(),

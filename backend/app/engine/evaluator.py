@@ -19,6 +19,8 @@ from backend.app.domain.values import (
     StringValue,
     TypedValue,
 )
+from backend.app.engine.temporal import directional_days
+from backend.app.engine.unit_converter import UnitConversionError, default_unit_converter
 
 EVALUATOR_VERSION = "evaluator-v1"
 
@@ -107,9 +109,41 @@ def _compare_fact(node: AstNode, fact: PatientFact) -> tuple[CriterionVerdict, s
         return CriterionVerdict.PASS, None
     if node.op is AstOperator.EQ:
         assert node.value is not None
+        if isinstance(fact.value, NumberValue) and isinstance(node.value, NumberValue):
+            number = fact.value.value
+            if fact.value.unit != node.value.unit:
+                if fact.value.unit is None or node.value.unit is None:
+                    return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+                try:
+                    number = default_unit_converter().convert(
+                        number, fact.value.unit, node.value.unit
+                    )
+                except UnitConversionError:
+                    return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+            return (
+                CriterionVerdict.PASS if number == node.value.value else CriterionVerdict.FAIL
+            ), None
         expected = _normalized_scalar(node.value)
         return (CriterionVerdict.PASS if patient_value == expected else CriterionVerdict.FAIL), None
     if node.op is AstOperator.IN:
+        if isinstance(fact.value, NumberValue) and all(
+            isinstance(value, NumberValue) for value in node.values
+        ):
+            outcomes: list[bool] = []
+            for value in node.values:
+                assert isinstance(value, NumberValue)
+                number = fact.value.value
+                if fact.value.unit != value.unit:
+                    if fact.value.unit is None or value.unit is None:
+                        return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+                    try:
+                        number = default_unit_converter().convert(
+                            number, fact.value.unit, value.unit
+                        )
+                    except UnitConversionError:
+                        return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+                outcomes.append(number == value.value)
+            return (CriterionVerdict.PASS if any(outcomes) else CriterionVerdict.FAIL), None
         expected_values = {_normalized_scalar(value) for value in node.values}
         return (
             CriterionVerdict.PASS if patient_value in expected_values else CriterionVerdict.FAIL
@@ -117,22 +151,39 @@ def _compare_fact(node: AstNode, fact: PatientFact) -> tuple[CriterionVerdict, s
     if node.op in {AstOperator.GTE, AstOperator.GT, AstOperator.LTE, AstOperator.LT}:
         if not isinstance(fact.value, NumberValue) or not isinstance(node.value, NumberValue):
             return CriterionVerdict.UNKNOWN, "TYPE_MISMATCH"
+        patient_number = fact.value.value
         if fact.value.unit != node.value.unit:
-            return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+            if fact.value.unit is None or node.value.unit is None:
+                return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+            try:
+                patient_number = default_unit_converter().convert(
+                    patient_number, fact.value.unit, node.value.unit
+                )
+            except UnitConversionError:
+                return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+        threshold = node.value.value
         comparisons = {
-            AstOperator.GTE: fact.value.value >= node.value.value,
-            AstOperator.GT: fact.value.value > node.value.value,
-            AstOperator.LTE: fact.value.value <= node.value.value,
-            AstOperator.LT: fact.value.value < node.value.value,
+            AstOperator.GTE: patient_number >= threshold,
+            AstOperator.GT: patient_number > threshold,
+            AstOperator.LTE: patient_number <= threshold,
+            AstOperator.LT: patient_number < threshold,
         }
         return (CriterionVerdict.PASS if comparisons[node.op] else CriterionVerdict.FAIL), None
     if node.op is AstOperator.BETWEEN_INCLUSIVE:
         if not isinstance(fact.value, NumberValue) or not isinstance(node.value, RangeValue):
             return CriterionVerdict.UNKNOWN, "TYPE_MISMATCH"
+        patient_number = fact.value.value
         if fact.value.unit != node.value.unit:
-            return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+            if fact.value.unit is None or node.value.unit is None:
+                return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
+            try:
+                patient_number = default_unit_converter().convert(
+                    patient_number, fact.value.unit, node.value.unit
+                )
+            except UnitConversionError:
+                return CriterionVerdict.UNKNOWN, "UNIT_CONVERSION_UNSUPPORTED"
         assert node.value.lower is not None and node.value.upper is not None
-        passed = node.value.lower <= fact.value.value <= node.value.upper
+        passed = node.value.lower <= patient_number <= node.value.upper
         return (CriterionVerdict.PASS if passed else CriterionVerdict.FAIL), None
     if node.op is AstOperator.DURATION_AT_LEAST_DAYS:
         if not isinstance(fact.value, DurationValue) or not isinstance(node.value, DurationValue):
@@ -199,9 +250,6 @@ def evaluate_criterion(
 ) -> EvaluationResult:
     """Evaluate one verified bounded AST with open-world semantics."""
 
-    del (
-        evaluation_date
-    )  # Phase-1 operators have no temporal reference; kept in the public boundary.
     nodes = {node.node_id: node for node in criterion.ast.nodes}
     step_index = 0
 
@@ -300,6 +348,120 @@ def evaluate_criterion(
                         step_index,
                         "MISSING_ADMISSIBLE_FACT",
                         [],
+                        [],
+                        verdict,
+                    )
+                ],
+            )
+
+        if node.op is AstOperator.WITHIN_DAYS or (
+            node.op in {AstOperator.BEFORE, AstOperator.AFTER}
+            and node.metadata.get("reference_kind") == "SLOT"
+        ):
+            reference_kind = node.metadata.get("reference_kind")
+            reference_facts: list[PatientFact] = []
+            if reference_kind == "SLOT":
+                reference_slot_id = node.metadata.get("reference_slot_id")
+                assert isinstance(reference_slot_id, str)
+                reference_conflicts = _open_conflicts(reference_slot_id, context)
+                if reference_conflicts:
+                    step_index += 1
+                    return EvaluationResult(
+                        verdict=CriterionVerdict.CONFLICT,
+                        conflict_ids=reference_conflicts,
+                        derivation_steps=[
+                            _step(
+                                criterion.criterion_id,
+                                node,
+                                step_index,
+                                "DETECT_REFERENCE_CONFLICT",
+                                [],
+                                [],
+                                CriterionVerdict.CONFLICT,
+                            )
+                        ],
+                    )
+                reference_facts = _applicable_facts(reference_slot_id, context)
+                if not reference_facts:
+                    step_index += 1
+                    return EvaluationResult(
+                        verdict=CriterionVerdict.UNKNOWN,
+                        missing_slot_ids=[reference_slot_id],
+                        derivation_steps=[
+                            _step(
+                                criterion.criterion_id,
+                                node,
+                                step_index,
+                                "MISSING_REFERENCE_DATE",
+                                [],
+                                [],
+                                CriterionVerdict.UNKNOWN,
+                            )
+                        ],
+                    )
+
+            temporal_results: list[CriterionVerdict] = []
+            issues: list[str] = []
+            for event_fact in facts:
+                if not isinstance(event_fact.value, DateValue):
+                    issues.append("TYPE_MISMATCH")
+                    continue
+                reference_dates: list[date] = []
+                if reference_kind == "SLOT":
+                    for reference_fact in reference_facts:
+                        if isinstance(reference_fact.value, DateValue):
+                            reference_dates.append(reference_fact.value.value)
+                        else:
+                            issues.append("TYPE_MISMATCH")
+                else:
+                    reference_dates.append(evaluation_date)
+                for reference_date in reference_dates:
+                    if node.op is AstOperator.WITHIN_DAYS:
+                        assert isinstance(node.value, DurationValue)
+                        days = directional_days(
+                            event_fact.value.value,
+                            reference_date,
+                            str(node.metadata["direction"]),
+                        )
+                        passed = days is not None and days <= node.value.days
+                    else:
+                        inclusive = bool(node.metadata["inclusive"])
+                        if node.op is AstOperator.BEFORE:
+                            passed = (
+                                event_fact.value.value <= reference_date
+                                if inclusive
+                                else event_fact.value.value < reference_date
+                            )
+                        else:
+                            passed = (
+                                event_fact.value.value >= reference_date
+                                if inclusive
+                                else event_fact.value.value > reference_date
+                            )
+                    temporal_results.append(
+                        CriterionVerdict.PASS if passed else CriterionVerdict.FAIL
+                    )
+            if issues or not temporal_results:
+                verdict = CriterionVerdict.UNKNOWN
+            elif len(set(temporal_results)) > 1:
+                verdict = CriterionVerdict.CONFLICT
+                issues.append("MULTIPLE_INCOMPATIBLE_VALUES")
+            else:
+                verdict = temporal_results[0]
+            evidence_ids = [fact.fact_id for fact in facts + reference_facts]
+            step_index += 1
+            return EvaluationResult(
+                verdict=verdict,
+                evidence_fact_ids=evidence_ids,
+                missing_slot_ids=[node.slot_id] if verdict is CriterionVerdict.UNKNOWN else [],
+                issue_codes=sorted(set(issues)),
+                derivation_steps=[
+                    _step(
+                        criterion.criterion_id,
+                        node,
+                        step_index,
+                        f"COMPARE_{node.op.value}",
+                        evidence_ids,
                         [],
                         verdict,
                     )

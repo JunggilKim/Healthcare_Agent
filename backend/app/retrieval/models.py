@@ -38,7 +38,10 @@ class RankedCandidate(StrictModel):
     full_rrf: float | None
     retrieval_score: float = Field(ge=0, le=1)
     trial: RawTrialRecord
-    compiled: Literal[False] = False
+    compiled: bool = False
+    compilation_status: Literal["NOT_COMPILED", "OPAQUE_REVIEW_REQUIRED", "VERIFIED"] = (
+        "NOT_COMPILED"
+    )
 
 
 class RetrievalResult(StrictModel):

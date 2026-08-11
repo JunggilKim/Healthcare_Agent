@@ -166,7 +166,10 @@ def _validate_node_shape(node: AstNode, slots: Mapping[str, SlotDefinition]) -> 
             raise AstValidationError("BEFORE/AFTER requires a fixed date or SLOT reference")
     elif op is AstOperator.DURATION_AT_LEAST_DAYS:
         _reject(
-            not isinstance(node.value, DurationValue) or bool(node.values) or bool(node.metadata),
+            slot.value_type != "duration"
+            or not isinstance(node.value, DurationValue)
+            or bool(node.values)
+            or bool(node.metadata),
             "duration payload",
         )
     elif op is AstOperator.IS_A:
@@ -183,6 +186,13 @@ def _validate_node_shape(node: AstNode, slots: Mapping[str, SlotDefinition]) -> 
     elif slot.value_type == "number" and op in {AstOperator.EQ, AstOperator.IN}:
         values = [node.value] if node.value is not None else node.values
         _reject(any(not isinstance(value, NumberValue) for value in values), "number slot value")
+        _reject(
+            any(
+                isinstance(value, NumberValue) and value.unit not in slot.allowed_units
+                for value in values
+            ),
+            "numeric value unit is not allowed for slot",
+        )
     elif slot.value_type in {"categorical", "categorical_free_string"} and op in {
         AstOperator.EQ,
         AstOperator.IN,
@@ -191,6 +201,13 @@ def _validate_node_shape(node: AstNode, slots: Mapping[str, SlotDefinition]) -> 
         _reject(
             any(not isinstance(value, (CategoricalValue, StringValue)) for value in values),
             "categorical slot value",
+        )
+
+    numeric_payload = node.value if isinstance(node.value, (NumberValue, RangeValue)) else None
+    if numeric_payload is not None and slot.value_type == "number":
+        _reject(
+            numeric_payload.unit not in slot.allowed_units,
+            "numeric threshold unit is not allowed for slot",
         )
 
 

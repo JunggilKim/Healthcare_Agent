@@ -1,0 +1,292 @@
+from __future__ import annotations
+
+import hashlib
+import re
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
+from typing import Literal
+from uuid import uuid4
+
+from backend.app.agents.prompts import render_prompt
+from backend.app.application.catalog import SlotCatalog, SlotDefinition
+from backend.app.domain.enums import EvidenceGrade
+from backend.app.domain.evidence import (
+    FactConflict,
+    PatientFact,
+    PatientState,
+    RetrievalHypothesis,
+    SourceSpan,
+)
+from backend.app.domain.model_outputs import (
+    PatientExtractionResult,
+    PatientFactProposal,
+    UnparsedSpan,
+)
+from backend.app.domain.values import (
+    BooleanValue,
+    CategoricalValue,
+    DateValue,
+    DurationValue,
+    NumberValue,
+    StringValue,
+    UnknownValue,
+)
+from backend.app.infrastructure.structured_generation import (
+    StructuredGenerationUnavailable,
+    StructuredGenerator,
+)
+
+
+class PatientExtractionValidationError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class MaterializedPatientExtraction:
+    state: PatientState
+    unparsed_spans: list[UnparsedSpan]
+
+
+def _validate_span(text: str, start: int, end: int, quote: str) -> None:
+    if not 0 <= start < end <= len(text) or text[start:end] != quote:
+        raise PatientExtractionValidationError(
+            "proposal source span does not match immutable input"
+        )
+
+
+def _validate_value(proposal: PatientFactProposal, slot: SlotDefinition) -> None:
+    value = proposal.value
+    if isinstance(value, UnknownValue):
+        raise PatientExtractionValidationError("unknown values must be omitted from facts")
+    if slot.value_type == "boolean" and not isinstance(value, BooleanValue):
+        raise PatientExtractionValidationError("boolean slot requires BooleanValue")
+    if slot.value_type == "number":
+        if not isinstance(value, NumberValue):
+            raise PatientExtractionValidationError("numeric slot requires NumberValue")
+        if value.unit not in slot.allowed_units:
+            raise PatientExtractionValidationError("numeric unit is not allowed for slot")
+        if slot.allowed_range and not slot.allowed_range[0] <= value.value <= slot.allowed_range[1]:
+            raise PatientExtractionValidationError("numeric value is outside slot range")
+    if slot.value_type == "date" and not isinstance(value, DateValue):
+        raise PatientExtractionValidationError("date slot requires DateValue")
+    if slot.value_type == "duration" and not isinstance(value, DurationValue):
+        raise PatientExtractionValidationError("duration slot requires DurationValue")
+    if slot.value_type == "categorical":
+        if not isinstance(value, CategoricalValue):
+            raise PatientExtractionValidationError("categorical slot requires CategoricalValue")
+        if value.value not in slot.canonical_values:
+            raise PatientExtractionValidationError("categorical value is not canonical")
+    if slot.value_type == "categorical_free_string" and not isinstance(
+        value, (CategoricalValue, StringValue)
+    ):
+        raise PatientExtractionValidationError(
+            "categorical free-string slot requires categorical or string value"
+        )
+
+
+def materialize_patient_extraction(
+    *,
+    patient_text: str,
+    source_id: str,
+    proposal: PatientExtractionResult,
+    slot_catalog: SlotCatalog,
+    asserted_at: datetime,
+) -> MaterializedPatientExtraction:
+    slots = slot_catalog.by_id()
+    facts: list[PatientFact] = []
+    for fact_proposal in proposal.facts:
+        _validate_span(
+            patient_text,
+            fact_proposal.start,
+            fact_proposal.end,
+            fact_proposal.quote,
+        )
+        slot = slots.get(fact_proposal.slot_id)
+        if slot is None:
+            raise PatientExtractionValidationError(f"unknown slot: {fact_proposal.slot_id}")
+        _validate_value(fact_proposal, slot)
+        quote_hash = hashlib.sha256(fact_proposal.quote.encode()).hexdigest()
+        facts.append(
+            PatientFact(
+                fact_id=f"fact_{uuid4()}",
+                slot_id=fact_proposal.slot_id,
+                value=fact_proposal.value,
+                grade=EvidenceGrade.A_DIRECT,
+                source_spans=[
+                    SourceSpan(
+                        source_id=source_id,
+                        start=fact_proposal.start,
+                        end=fact_proposal.end,
+                        quote=fact_proposal.quote,
+                        sha256=quote_hash,
+                        language=proposal.language,
+                    )
+                ],
+                derived_from_fact_ids=[],
+                transformation_id=None,
+                asserted_at=asserted_at.astimezone(UTC),
+                effective_date=fact_proposal.effective_date,
+                admissible_for_hard_decision="A" in slot.hard_admissible_grades,
+                confidence=fact_proposal.confidence,
+            )
+        )
+
+    hypotheses: list[RetrievalHypothesis] = []
+    for hypothesis in proposal.retrieval_hypotheses:
+        if not hypothesis.source_proposal_indexes or any(
+            index < 0 or index >= len(facts) for index in hypothesis.source_proposal_indexes
+        ):
+            raise PatientExtractionValidationError("hypothesis source index is invalid")
+        hypotheses.append(
+            RetrievalHypothesis(
+                hypothesis_id=f"hyp_{uuid4()}",
+                concept=hypothesis.concept,
+                normalized_concept=hypothesis.normalized_concept,
+                source_fact_ids=[
+                    facts[index].fact_id for index in hypothesis.source_proposal_indexes
+                ],
+                rationale_code=hypothesis.rationale_code,
+                grade=EvidenceGrade.H_HYPOTHESIS,
+                admissible_for_eligibility=False,
+            )
+        )
+
+    conflicts: list[FactConflict] = []
+    for conflict in proposal.possible_conflicts:
+        if any(index < 0 or index >= len(facts) for index in conflict.proposal_indexes):
+            raise PatientExtractionValidationError("conflict source index is invalid")
+        referenced = [facts[index] for index in conflict.proposal_indexes]
+        if any(fact.slot_id != conflict.slot_id for fact in referenced):
+            raise PatientExtractionValidationError("conflict facts must share the declared slot")
+        conflicts.append(
+            FactConflict(
+                conflict_id=f"conflict_{uuid4()}",
+                slot_id=conflict.slot_id,
+                fact_ids=[fact.fact_id for fact in referenced],
+                conflict_type=conflict.conflict_type,
+                status="OPEN",
+            )
+        )
+
+    for span in proposal.unparsed_spans:
+        _validate_span(patient_text, span.start, span.end, span.quote)
+    return MaterializedPatientExtraction(
+        state=PatientState(
+            confirmed_facts=facts,
+            retrieval_hypotheses=hypotheses,
+            conflicts=conflicts,
+        ),
+        unparsed_spans=proposal.unparsed_spans,
+    )
+
+
+_ENGLISH_AGE = re.compile(r"\b(?P<age>\d{1,3})[- ]year[- ]old\b", re.IGNORECASE)
+_KOREAN_AGE = re.compile(r"(?<!\d)(?:만\s*)?(?P<age>\d{1,3})세")
+_SEX_TERMS = {
+    "man": "male",
+    "male": "male",
+    "woman": "female",
+    "female": "female",
+    "남성": "male",
+    "여성": "female",
+}
+
+
+def deterministic_surface_fallback(
+    patient_text: str, *, language: Literal["ko", "en", "other"] = "other"
+) -> PatientExtractionResult:
+    """Extract only unambiguous demographics; unsupported medicine remains unparsed."""
+    facts: list[PatientFactProposal] = []
+    age_match = _ENGLISH_AGE.search(patient_text) or _KOREAN_AGE.search(patient_text)
+    if age_match:
+        facts.append(
+            PatientFactProposal(
+                slot_id="demographics.age",
+                value=NumberValue(kind="number", value=age_match.group("age"), unit="year"),
+                start=age_match.start(),
+                end=age_match.end(),
+                quote=age_match.group(0),
+            )
+        )
+    for term, normalized in _SEX_TERMS.items():
+        match = re.search(
+            rf"(?<![\w가-힣]){re.escape(term)}(?![\w가-힣])", patient_text, re.IGNORECASE
+        )
+        if match:
+            facts.append(
+                PatientFactProposal(
+                    slot_id="demographics.sex",
+                    value=CategoricalValue(kind="categorical", value=normalized),
+                    start=match.start(),
+                    end=match.end(),
+                    quote=match.group(0),
+                )
+            )
+            break
+    return PatientExtractionResult(
+        facts=facts,
+        retrieval_hypotheses=[],
+        possible_conflicts=[],
+        unparsed_spans=[],
+        language=language,
+    )
+
+
+class PatientEvidenceAgent:
+    def __init__(self, generator: StructuredGenerator, slot_catalog: SlotCatalog) -> None:
+        self.generator = generator
+        self.slot_catalog = slot_catalog
+
+    async def extract(
+        self,
+        *,
+        patient_text: str,
+        source_id: str,
+        language_hint: Literal["ko", "en", "auto"],
+        evaluation_date: date,
+        asserted_at: datetime,
+    ) -> tuple[MaterializedPatientExtraction, bool]:
+        normalized_input = {
+            "patient_text": patient_text,
+            "language_hint": language_hint,
+            "evaluation_date": evaluation_date.isoformat(),
+            "slot_catalog_version": self.slot_catalog.version,
+            "existing_facts": [],
+            "task": "initial_extraction",
+        }
+        prompt = render_prompt("patient_extraction_v1.md", patient_text=patient_text)
+        degraded = False
+        try:
+            proposal, _ = await self.generator.generate_primary_with_lite_fallback(
+                primary_model_id="gemini-3.6-flash",
+                lite_model_id="gemini-3.5-flash-lite",
+                task_name="patient_extraction",
+                prompt=prompt,
+                prompt_version="1.0.0",
+                output_schema_version="patient-extraction-v1",
+                slot_catalog_version=self.slot_catalog.version,
+                normalized_input=normalized_input,
+                output_model=PatientExtractionResult,
+                primary_thinking_level="MEDIUM",
+                fallback_thinking_level="HIGH",
+                primary_max_output_tokens=2000,
+                fallback_max_output_tokens=2000,
+            )
+        except StructuredGenerationUnavailable:
+            degraded = True
+            language: Literal["ko", "en", "other"]
+            if language_hint == "ko":
+                language = "ko"
+            elif language_hint == "en":
+                language = "en"
+            else:
+                language = "other"
+            proposal = deterministic_surface_fallback(patient_text, language=language)
+        materialized = materialize_patient_extraction(
+            patient_text=patient_text,
+            source_id=source_id,
+            proposal=proposal,
+            slot_catalog=self.slot_catalog,
+            asserted_at=asserted_at,
+        )
+        return materialized, degraded

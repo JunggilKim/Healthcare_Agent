@@ -188,4 +188,9 @@ def test_s004_retrieval_api_returns_ui_safe_candidate_caps() -> None:
     assert payload["mode"] == "snapshot"
     assert len(payload["ranked_candidates"]) == 20
     assert len(payload["selected_for_compilation"]) == 8
-    assert all(candidate["compiled"] is False for candidate in payload["ranked_candidates"])
+    assert all(candidate["compiled"] is True for candidate in payload["ranked_candidates"][:8])
+    assert all(
+        candidate["compilation_status"] == "OPAQUE_REVIEW_REQUIRED"
+        for candidate in payload["ranked_candidates"][:8]
+    )
+    assert all(candidate["compiled"] is False for candidate in payload["ranked_candidates"][8:])

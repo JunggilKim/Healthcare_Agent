@@ -47,7 +47,10 @@ class RecordedEmbeddingProvider:
         vector = self._vectors.get(key)
         if vector is None or vector.shape != (self.dim,):
             raise EmbeddingUnavailableError(f"no valid recorded embedding for {task_type}")
-        return vector.copy()
+        norm = float(np.linalg.norm(vector))
+        if norm == 0 or not np.isfinite(vector).all():
+            raise EmbeddingUnavailableError("recorded embedding is invalid")
+        return vector.copy() / norm
 
     async def embed_query(self, text: str) -> np.ndarray:
         return self._lookup("RETRIEVAL_QUERY", text)
@@ -89,7 +92,10 @@ class GeminiEmbeddingProvider:
         vector = np.asarray(embeddings[0].values, dtype=np.float64)
         if vector.shape != (self.dimension,) or not np.isfinite(vector).all():
             raise EmbeddingUnavailableError("Gemini returned an invalid embedding")
-        return vector
+        norm = float(np.linalg.norm(vector))
+        if norm == 0:
+            raise EmbeddingUnavailableError("Gemini returned a zero embedding")
+        return vector / norm
 
     async def embed_query(self, text: str) -> np.ndarray:
         return await self._embed_one(text, "RETRIEVAL_QUERY")

@@ -13,7 +13,9 @@ from backend.app.settings import REPOSITORY_ROOT
 
 class SlotDefinition(StrictModel):
     slot_id: str
-    value_type: Literal["boolean", "number", "categorical", "categorical_free_string", "date"]
+    value_type: Literal[
+        "boolean", "number", "categorical", "categorical_free_string", "date", "duration"
+    ]
     canonical_values: list[str] = Field(default_factory=list)
     allowed_range: list[int] = Field(default_factory=list)
     allowed_units: list[str]

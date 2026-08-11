@@ -43,4 +43,20 @@ async def s004_retrieval() -> RetrievalResult:
         embeddings=RecordedEmbeddingProvider(root / "embeddings.json"),
         snapshot_root=root,
     )
-    return await retriever.retrieve(query, mode="snapshot")
+    result = await retriever.retrieve(query, mode="snapshot")
+    compiled_manifest = orjson.loads(
+        (REPOSITORY_ROOT / "data" / "fixtures" / "compiled" / "S004" / "manifest.json").read_bytes()
+    )
+    opaque_ids = {entry["nct_id"] for entry in compiled_manifest["entries"]}
+    candidates = [
+        candidate.model_copy(
+            update={
+                "compiled": candidate.nct_id in opaque_ids,
+                "compilation_status": (
+                    "OPAQUE_REVIEW_REQUIRED" if candidate.nct_id in opaque_ids else "NOT_COMPILED"
+                ),
+            }
+        )
+        for candidate in result.ranked_candidates
+    ]
+    return result.model_copy(update={"ranked_candidates": candidates})

@@ -17,11 +17,19 @@ make demo-offline
 ```
 
 Open `http://localhost:8080`, select the frozen S004 Snapshot flow, and use pinned branch A or B.
-The page also shows the bounded Phase-2 retrieval pool (20 retained, top 8 selected and visibly
-"not compiled"). The health endpoint is available at `http://localhost:8080/api/v1/health`.
+The page also shows the bounded retrieval pool (20 retained). The top 8 are loaded from the
+Phase-3 cache and visibly labeled `opaque · review required`; they cannot create a hard verdict
+until a hash-bound semantic review succeeds. The health endpoint is available at
+`http://localhost:8080/api/v1/health`.
 
 The primary demo is offline: it makes no ClinicalTrials.gov or Gemini request. The tracked
 Phase-2 fixture is hash-bound to the official API v2 source timestamp. Live CTGov retrieval,
 exact-byte local caching, three-source RRF, lexical fallback, and automatic snapshot fallback are
 implemented and covered independently. The deterministic recorded embedding vectors are test
 fixtures, not claims of a live Gemini run.
+
+The Google Cloud first-party `google-genai` v1 client, structured schemas, retry/fallback policy,
+usage metadata, price estimator, and immutable application cache are implemented. No paid model
+execution has been claimed in the committed Phase-3 cache: its manifest records
+`model_execution=not_run_no_external_credentials`, and every affected criterion is `OPAQUE` with
+`protocol_verified=false`.
