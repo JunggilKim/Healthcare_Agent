@@ -15,6 +15,12 @@ interface StreamEvent {
   data: Record<string, unknown>;
 }
 
+export interface DemoCase {
+  id: string;
+  text: string;
+  has_full_snapshot: boolean;
+}
+
 async function jsonOrThrow(response: Response) {
   if (!response.ok) throw new Error(`API request failed: ${response.status}`);
   return (await response.json()) as unknown;
@@ -36,6 +42,12 @@ export async function createS004Session(): Promise<SessionCredentials> {
   const payload = (await jsonOrThrow(response)) as { session_id: string; session_token: string };
   sessionStorage.setItem(`trial-opt:${payload.session_id}`, payload.session_token);
   return { sessionId: payload.session_id, token: payload.session_token };
+}
+
+export async function readDemoCases(): Promise<DemoCase[]> {
+  const response = await fetch("/api/v1/demo/cases");
+  const payload = (await jsonOrThrow(response)) as { cases: DemoCase[] };
+  return payload.cases;
 }
 
 export async function readS004Retrieval(): Promise<RetrievalView> {
@@ -86,13 +98,15 @@ export async function analyzeSession(
 export async function submitPinnedAnswer(
   credentials: SessionCredentials,
   questionId: string,
-  branch: "A" | "B",
+  branch: "A" | "B" | "UNKNOWN" | "DECLINED",
   onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
   const answerText =
     branch === "A"
       ? "Existing pathology report confirms high-grade urothelial carcinoma."
-      : "No pathology test has been performed; only the CT finding is available.";
+      : branch === "B"
+        ? "No pathology test has been performed; only the CT finding is available."
+        : null;
   const response = await fetch(`/api/v1/sessions/${credentials.sessionId}/answers`, {
     method: "POST",
     headers: {
@@ -104,8 +118,8 @@ export async function submitPinnedAnswer(
       question_id: questionId,
       answer_text: answerText,
       structured_value: null,
-      unknown: false,
-      declined: false,
+      unknown: branch === "UNKNOWN",
+      declined: branch === "DECLINED",
     }),
   });
   await readEventStream(response, onEvent);
@@ -122,4 +136,18 @@ export async function replayProof(credentials: SessionCredentials): Promise<bool
   return payload.proof_packets.every(
     (packet) => packet.verifier_checks.find((check) => check.check_id === "PV-012")?.passed,
   );
+}
+
+export async function exportReport(credentials: SessionCredentials): Promise<void> {
+  const response = await fetch(`/api/v1/sessions/${credentials.sessionId}/export`, {
+    headers: { "X-Session-Token": credentials.token },
+  });
+  const payload = await jsonOrThrow(response);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `trial-opt-${credentials.sessionId}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }

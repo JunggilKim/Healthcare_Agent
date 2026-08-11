@@ -8,14 +8,15 @@ export function TrialCard({ session }: { session: SessionView }) {
     return acc;
   }, {});
   return (
-    <article className="panel border-cyan-400/30">
+    <article className="panel border-cyan-400/30 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="rank-badge">#1</span>
+        <span className="mode-badge">RANK Δ 0</span>
         <span className="mode-badge">RECRUITING · PINNED 2026-08-11</span>
       </div>
-      <p className="mt-5 text-sm font-semibold text-cyan-300">NCT05239624</p>
-      <h2 className="mt-2 text-2xl font-bold leading-snug">Enfortumab Vedotin and Pembrolizumab in People With Bladder Cancer</h2>
-      <div className="mt-5 flex flex-wrap items-end justify-between gap-4">
+      <p className="mt-3 text-sm font-semibold text-cyan-300">NCT05239624</p>
+      <h2 className="mt-1 text-xl font-bold leading-snug">Enfortumab Vedotin and Pembrolizumab in People With Bladder Cancer</h2>
+      <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-wider text-slate-500">현재 사전 선별 상태</p>
           <p className="mt-1 text-lg font-bold text-amber-200">{trial.decision}</p>
@@ -25,7 +26,7 @@ export function TrialCard({ session }: { session: SessionView }) {
           <p className="text-xs text-slate-400">evidence match score · 확률 아님</p>
         </div>
       </div>
-      <div className="mt-5 grid grid-cols-5 gap-2 text-center text-xs">
+      <div className="mt-3 grid grid-cols-5 gap-2 text-center text-xs">
         {(["PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE", "CONFLICT"] as const).map((verdict) => (
           <div key={verdict} className="rounded-xl bg-slate-950/70 p-2">
             <strong className="block text-base text-white">{counts[verdict] ?? 0}</strong>
@@ -33,8 +34,12 @@ export function TrialCard({ session }: { session: SessionView }) {
           </div>
         ))}
       </div>
-      <p className="mt-4 text-sm text-slate-400">Proof completeness {Math.round(trial.proof_completeness * 100)}%</p>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+        <span>Proof completeness {Math.round(trial.proof_completeness * 100)}%</span>
+        <span>Top missing · pathology.histology</span>
+        <a className="font-bold text-cyan-200 underline-offset-4 hover:underline" href="#criteria-title">Why?</a>
+        <a className="font-bold text-cyan-200 underline-offset-4 hover:underline" href="https://clinicaltrials.gov/study/NCT05239624" target="_blank" rel="noreferrer">ClinicalTrials.gov ↗</a>
+      </div>
     </article>
   );
 }
-

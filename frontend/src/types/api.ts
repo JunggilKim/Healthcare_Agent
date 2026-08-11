@@ -3,10 +3,14 @@ import { z } from "zod";
 export const proofSchema = z
   .object({
     criterion_id: z.string(),
+    criterion_source_hash: z.string(),
     final_verdict: z.enum(["PASS", "FAIL", "UNKNOWN", "NOT_APPLICABLE", "CONFLICT"]),
     evidence_fact_ids: z.array(z.string()),
     missing_slot_ids: z.array(z.string()),
     hard_decision_allowed: z.boolean(),
+    derivation_steps: z.array(
+      z.object({ step_id: z.string(), operation: z.string(), output: z.unknown() }).passthrough(),
+    ),
     verifier_checks: z.array(
       z.object({ check_id: z.string(), applicable: z.boolean(), passed: z.boolean() }).passthrough(),
     ),
@@ -42,9 +46,20 @@ export const sessionSchema = z
     mode: z.string(),
     patient_text: z.string(),
     patient_state_version: z.number(),
-    facts: z.array(z.object({ slot_id: z.string(), grade: z.string() }).passthrough()),
+    facts: z.array(
+      z.object({ fact_id: z.string(), slot_id: z.string(), grade: z.string() }).passthrough(),
+    ),
     retrieval_hypotheses: z.array(z.object({ concept: z.string(), grade: z.literal("H") }).passthrough()),
     proofs: z.array(proofSchema),
+    criteria: z.array(
+      z.object({
+        criterion_id: z.string(),
+        source_direction: z.string(),
+        source_quote: z.string(),
+        normalized_summary: z.string(),
+        ast: z.object({ root_node_id: z.string(), nodes: z.array(z.unknown()) }).passthrough(),
+      }),
+    ),
     trial_evaluation: z
       .object({
         nct_id: z.string(),

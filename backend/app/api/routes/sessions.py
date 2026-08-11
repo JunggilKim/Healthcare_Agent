@@ -16,6 +16,7 @@ from backend.app.api.dependencies import (
 from backend.app.api.errors import ApiProblem
 from backend.app.application.session_service import SnapshotSessionService
 from backend.app.domain.base import StrictModel
+from backend.app.security.pii_detector import detect_identifier_ranges
 
 router = APIRouter(tags=["sessions"])
 
@@ -78,6 +79,17 @@ async def create_session(
                 "INVALID_INPUT",
                 "Synthetic/public confirmation required",
                 "Arbitrary text requires explicit public or synthetic confirmation.",
+            )
+        identifier_matches = detect_identifier_ranges(body.patient_text)
+        if identifier_matches and not body.identifier_warning_acknowledged:
+            raise ApiProblem(
+                422,
+                "PII_WARNING_REQUIRED",
+                "Identifier warning acknowledgement required",
+                "Potential identifier categories/ranges: "
+                + ", ".join(
+                    f"{item.category}[{item.start}:{item.end}]" for item in identifier_matches
+                ),
             )
         raise ApiProblem(
             422,
@@ -168,4 +180,21 @@ async def read_proof(
     payload = await service.read_proof(session_id, nct_id)
     if payload is None:
         raise ApiProblem(404, "SESSION_NOT_FOUND", "Proof not found", "The proof is not available.")
+    return payload
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_report(
+    session_id: str,
+    _: str = Depends(require_session_token),
+    service: SnapshotSessionService = Depends(get_session_service),
+) -> dict[str, object]:
+    payload = await service.export_report(session_id)
+    if payload is None:
+        raise ApiProblem(
+            404,
+            "SESSION_NOT_FOUND",
+            "Report not found",
+            "The report is not available.",
+        )
     return payload

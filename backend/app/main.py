@@ -4,8 +4,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.errors import ApiProblem, problem_handler
@@ -45,14 +45,30 @@ app.include_router(demo_router, prefix="/api/v1")
 app.include_router(sessions_router, prefix="/api/v1")
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
-if (_STATIC_DIR / "index.html").is_file():
-    app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="spa")
-else:
+_INDEX_FILE = _STATIC_DIR / "index.html"
+if (_STATIC_DIR / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="spa-assets")
 
-    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    async def phase_zero_landing() -> str:
-        return f"""<!doctype html>
+
+def _phase_zero_html() -> str:
+    return f"""<!doctype html>
 <html lang=\"ko\"><head><meta charset=\"utf-8\"><title>TRIAL-OPT</title></head>
 <body><main><h1>TRIAL-OPT</h1>
 <p>근거 증명형 능동 정보 획득 기반 임상시험 사전 선별 연구 프로토타입</p>
 <p>{DISCLAIMER}</p></main></body></html>"""
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def spa_root() -> Response:
+    return FileResponse(_INDEX_FILE) if _INDEX_FILE.is_file() else HTMLResponse(_phase_zero_html())
+
+
+@app.get("/{frontend_path:path}", response_class=HTMLResponse, include_in_schema=False)
+async def spa_route(frontend_path: str) -> Response:
+    if frontend_path == "about" or (
+        frontend_path.startswith("session/") and len(frontend_path.split("/")) == 2
+    ):
+        return (
+            FileResponse(_INDEX_FILE) if _INDEX_FILE.is_file() else HTMLResponse(_phase_zero_html())
+        )
+    raise HTTPException(status_code=404, detail="Not Found")

@@ -19,6 +19,9 @@ local infrastructure state. They are not represented as completed.
   full-corpus S004/S008/S001 first-question golden assertions cannot yet be represented as passed;
   only the frozen S004 vertical-slice question contract and credential-independent S001/S008
   evidence-firewall/domain-path tests are confirmed.
+- Snapshot consequence: `scripts/build_demo_snapshot.py --mode live` intentionally refuses to
+  fabricate the missing reviewed artifacts. Phase 5's complete three-case snapshot exit criterion
+  and Phase 6's final experiment tab evidence remain pending until those exact-hash artifacts exist.
 
 ## Docker Desktop
 

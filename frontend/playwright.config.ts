@@ -11,7 +11,12 @@ export default defineConfig({
     trace: "retain-on-failure",
     viewport: { width: 1440, height: 900 },
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+  ],
   webServer: {
     command:
       "cd .. && APP_ENV=test STORE_BACKEND=local LOCAL_STORE_DIR=.local_store/e2e " +
@@ -22,4 +27,3 @@ export default defineConfig({
     timeout: 30_000,
   },
 });
-

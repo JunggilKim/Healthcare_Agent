@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
+from backend.app.agents.report_renderer import validate_or_fallback_report
 from backend.app.application.catalog import load_slot_catalog
 from backend.app.application.state_machine import validate_transition
 from backend.app.application.vertical_slice import load_vertical_slice
@@ -336,19 +337,29 @@ class SnapshotSessionService:
         )
         yield "stage_started", {**event, "stage": "Answer Interpretation"}
         current = SessionState.ANSWER_INTERPRETING
-        if slot_id != "pathology.histology":
-            raise ValueError("SNAPSHOT_BRANCH_UNAVAILABLE")
         branches = self.fixture.answers["pathology_histology"]
-        if answer_text == branches["branch_a"]["answer_text"] and not unknown and not declined:
+        if (
+            slot_id == "pathology.histology"
+            and answer_text == branches["branch_a"]["answer_text"]
+            and not unknown
+            and not declined
+        ):
             fact = PatientFact.model_validate(branches["branch_a"]["fact"])
             payload["facts"] = [
                 item for item in payload["facts"] if item["slot_id"] != "pathology.histology"
             ] + [fact.model_dump(mode="json")]
             payload["source_texts"][fact.source_spans[0].source_id] = answer_text
             answer_fact_ids = [fact.fact_id]
-        elif answer_text == branches["branch_b"]["answer_text"] or unknown or declined:
+        elif (
+            (
+                slot_id == "pathology.histology"
+                and answer_text == branches["branch_b"]["answer_text"]
+            )
+            or unknown
+            or declined
+        ):
             payload["unavailable_slot_ids"] = sorted(
-                set(payload["unavailable_slot_ids"]) | {"pathology.histology"}
+                set(payload["unavailable_slot_ids"]) | {slot_id}
             )
             answer_fact_ids = []
         else:
@@ -447,6 +458,16 @@ class SnapshotSessionService:
         if payload is None:
             return None
         payload.pop("source_texts", None)
+        payload["criteria"] = [
+            {
+                "criterion_id": criterion.criterion_id,
+                "source_direction": criterion.source_direction,
+                "source_quote": criterion.source_span.quote,
+                "normalized_summary": criterion.normalized_summary,
+                "ast": criterion.ast.model_dump(mode="json"),
+            }
+            for criterion in self.fixture.compiled_trial.criteria
+        ]
         return payload
 
     async def read_proof(self, session_id: str, nct_id: str) -> dict[str, Any] | None:
@@ -461,3 +482,30 @@ class SnapshotSessionService:
             "proof_packets": payload["proofs"],
             "registry": self.fixture.raw_trial.model_dump(mode="json"),
         }
+
+    async def export_report(self, session_id: str) -> dict[str, Any] | None:
+        payload = await self.store.read_session(session_id)
+        if payload is None or payload.get("trial_evaluation") is None:
+            return None
+        evaluation = TrialEvaluation.model_validate(payload["trial_evaluation"])
+        proofs = [ProofPacket.model_validate(item) for item in payload["proofs"]]
+        report = validate_or_fallback_report(
+            evaluation=evaluation,
+            decision_proofs=proofs,
+            proposal=None,
+        )
+        export_payload = {
+            "schema_version": "trial-opt-report-v1",
+            "session_id": session_id,
+            "patient_state_version": int(payload["patient_state_version"]),
+            "mode": payload["mode"],
+            "data_timestamp": "2026-08-11T09:00:06Z",
+            "estimated_cost_usd": 0.0,
+            "model_execution": "snapshot_cache_no_live_model_call",
+            "medical_disclaimer": (
+                "Research pre-screening only; the trial team makes the final determination."
+            ),
+            "report": report.model_dump(mode="json"),
+        }
+        _, digest = await self.store.write_json_artifact(f"exports/{session_id}", export_payload)
+        return {**export_payload, "artifact_sha256": digest}

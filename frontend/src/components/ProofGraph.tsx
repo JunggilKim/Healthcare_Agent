@@ -1,0 +1,75 @@
+import cytoscape from "cytoscape";
+import { useEffect, useRef } from "react";
+
+import type { SessionView } from "../types/api";
+
+export function ProofGraph({ session }: { session: SessionView }) {
+  const container = useRef<HTMLDivElement>(null);
+  const proof =
+    session.proofs.find((item) => item.missing_slot_ids.includes("pathology.histology")) ??
+    session.proofs[0];
+
+  useEffect(() => {
+    if (!container.current || !proof || !session.trial_evaluation) return;
+    const evidenceLabel = proof.evidence_fact_ids.length
+      ? `${proof.evidence_fact_ids.length} admissible fact`
+      : proof.missing_slot_ids[0] ?? "no admissible evidence";
+    const graph = cytoscape({
+      container: container.current,
+      elements: [
+        { data: { id: "source", label: "Patient source span" } },
+        { data: { id: "fact", label: evidenceLabel } },
+        { data: { id: "criterion", label: "Eligibility criterion" } },
+        { data: { id: "verdict", label: proof.final_verdict } },
+        { data: { id: "decision", label: session.trial_evaluation.decision } },
+        { data: { id: "rank", label: "Rank #1" } },
+        { data: { source: "source", target: "fact", label: "EXTRACTED_FROM" } },
+        { data: { source: "fact", target: "criterion", label: "SUPPORTS" } },
+        { data: { source: "criterion", target: "verdict", label: "EVALUATES" } },
+        { data: { source: "verdict", target: "decision", label: "AGGREGATES_TO" } },
+        { data: { source: "decision", target: "rank", label: "CONTRIBUTES_TO_RANK" } },
+      ],
+      layout: { name: "breadthfirst", directed: true, padding: 24, spacingFactor: 1.15 },
+      style: [
+        {
+          selector: "node",
+          style: {
+            "background-color": "#0f766e",
+            color: "#e2e8f0",
+            label: "data(label)",
+            "font-size": 10,
+            "text-wrap": "wrap",
+            "text-max-width": "95px",
+            "text-valign": "bottom",
+            "text-margin-y": 8,
+            width: 28,
+            height: 28,
+          },
+        },
+        {
+          selector: "edge",
+          style: {
+            width: 1.5,
+            "line-color": "#475569",
+            "target-arrow-color": "#475569",
+            "target-arrow-shape": "triangle",
+            "curve-style": "bezier",
+          },
+        },
+      ],
+      userZoomingEnabled: false,
+      userPanningEnabled: false,
+      boxSelectionEnabled: false,
+    });
+    return () => graph.destroy();
+  }, [proof, session.trial_evaluation]);
+
+  return (
+    <section className="panel" aria-labelledby="proof-graph-title">
+      <p className="eyebrow">FILTERED PROOF PATH</p>
+      <h2 id="proof-graph-title" className="panel-title">Proof graph</h2>
+      <p className="mt-2 text-xs leading-5 text-slate-500">선택 기준의 근거 경로만 표시합니다. 전체 세션 그래프는 렌더링하지 않습니다.</p>
+      <div ref={container} className="mt-3 h-56 rounded-xl bg-slate-950/70" />
+    </section>
+  );
+}

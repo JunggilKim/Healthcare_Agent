@@ -1,0 +1,95 @@
+import "@testing-library/jest-dom/vitest";
+import { render, screen } from "@testing-library/react";
+
+import { sessionSchema } from "../types/api";
+import { AgentTimeline } from "./AgentTimeline";
+import { CriterionMatrix } from "./CriterionMatrix";
+import { QuestionPanel } from "./QuestionPanel";
+import { TrialCard } from "./TrialCard";
+
+const session = sessionSchema.parse({
+  session_id: "session-test",
+  state: "QUESTION_READY",
+  mode: "snapshot",
+  patient_text: "Synthetic patient text",
+  patient_state_version: 0,
+  facts: [],
+  retrieval_hypotheses: [],
+  criteria: [
+    {
+      criterion_id: "NCT05239624:INCLUSION:002:5f52ab88",
+      source_direction: "INCLUSION",
+      source_quote: "Histologically confirmed urothelial carcinoma",
+      normalized_summary: "histology is urothelial carcinoma as stated by pathology",
+      ast: { root_node_id: "node:0", nodes: [] },
+    },
+  ],
+  proofs: [
+    {
+      criterion_id: "NCT05239624:INCLUSION:002:5f52ab88",
+      criterion_source_hash: "a".repeat(64),
+      final_verdict: "UNKNOWN",
+      evidence_fact_ids: [],
+      missing_slot_ids: ["pathology.histology"],
+      hard_decision_allowed: false,
+      derivation_steps: [],
+      verifier_checks: [{ check_id: "PV-012", applicable: true, passed: true }],
+    },
+  ],
+  trial_evaluation: {
+    nct_id: "NCT05239624",
+    decision: "POTENTIAL_MATCH",
+    display_score: 47,
+    proof_completeness: 1,
+  },
+  current_question: {
+    selected: {
+      question_id: "q_00000000-0000-4000-8000-000000000001",
+      slot_id: "pathology.histology",
+      action: "REQUEST_RECORD",
+      affected: [
+        {
+          criterion_id: "NCT05239624:INCLUSION:002:5f52ab88",
+          nct_id: "NCT05239624",
+        },
+      ],
+      utility_components: { mean_risk_reduction: 0.4, final_utility: 0.2 },
+    },
+    patient_facing_question: "병리검사 결과를 확인할 수 있나요?",
+    deterministic_rationale: "미확인 기준에 영향을 줍니다.",
+    top_alternatives: [],
+  },
+});
+
+test("trial card labels the score as nonprobabilistic", () => {
+  render(<TrialCard session={session} />);
+  expect(screen.getByText(/evidence match score · 확률 아님/)).toBeVisible();
+  expect(screen.getByText("POTENTIAL_MATCH")).toBeVisible();
+});
+
+test("criterion matrix exposes unresolved evidence and verifier state", () => {
+  render(<CriterionMatrix session={session} />);
+  expect(screen.getByText("Pathology-confirmed urothelial histology")).toBeVisible();
+  expect(screen.getByText("pathology.histology")).toBeVisible();
+  expect(screen.getByText("1/1 applicable ✓")).toBeVisible();
+});
+
+test("question panel always offers unknown and record-decline controls", () => {
+  render(<QuestionPanel session={session} busy={false} onAnswer={() => undefined} />);
+  expect(screen.getByRole("button", { name: "잘 모르겠습니다" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "이 기록을 제공할 수 없습니다" })).toBeEnabled();
+  expect(screen.getByText(/no new test is being recommended/)).toBeVisible();
+});
+
+test("agent timeline communicates degraded state in text", () => {
+  render(
+    <AgentTimeline
+      states={{
+        "Patient Evidence": "completed",
+        "Trial Retrieval": "degraded",
+      }}
+    />,
+  );
+  expect(screen.getByText("대체 경로")).toBeVisible();
+  expect(screen.getByText("완료")).toBeVisible();
+});
