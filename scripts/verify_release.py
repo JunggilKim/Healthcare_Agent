@@ -532,7 +532,17 @@ class Verifier:
         started = time.monotonic()
         try:
             process = subprocess.Popen(
-                ["make", "demo-offline"],
+                [
+                    "uv",
+                    "run",
+                    "uvicorn",
+                    "backend.app.main:app",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "8080",
+                    "--no-access-log",
+                ],
                 cwd=REPOSITORY_ROOT,
                 text=True,
                 stdout=subprocess.PIPE,
