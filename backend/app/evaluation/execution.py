@@ -70,6 +70,17 @@ def eligibility_context_from_world(
     return EligibilityContext(facts=patient_facts, conflicts=conflicts)
 
 
+def benchmark_fact_source_texts(facts: list[WorldFact]) -> dict[str, str]:
+    """Return the exact source strings used by ``eligibility_context_from_world``."""
+
+    return {
+        f"benchmark:{fact.fact_id}": canonical_json_bytes(
+            {"slot_id": fact.slot_id, "value": fact.value.model_dump(mode="json")}
+        ).decode()
+        for fact in facts
+    }
+
+
 def evaluate_world(trial: CompiledTrial, world: PatientWorld) -> dict[str, EvaluationResult]:
     if trial.nct_id != world.nct_id or trial.content_hash != world.compiled_protocol_hash:
         raise ValueError(f"BENCHMARK_WORLD_PROTOCOL_MISMATCH:{world.world_id}")

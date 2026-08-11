@@ -36,7 +36,7 @@ from backend.app.domain.trials import CompiledTrial, ProtocolReviewArtifact, Raw
 from backend.app.engine.multi_trial_optimizer import FullOptimizationState
 from backend.app.engine.proof_verifier import build_verified_proof
 from backend.app.engine.ranker import rank_trials
-from backend.app.engine.trial_aggregator import aggregate_trial
+from backend.app.engine.trial_aggregator import aggregate_trial, is_trial_irrelevant
 from backend.app.infrastructure.cache import FirestoreModelResultCache, LocalModelResultCache
 from backend.app.infrastructure.firestore_usage_guard import FirestoreUsageGuard
 from backend.app.infrastructure.gcp_store import GcpSessionStore
@@ -622,6 +622,12 @@ class LiveSessionService:
                     raw_trial=raw_trials[nct_id],
                     proofs=packets,
                     retrieval_score=candidate_by_id[nct_id].retrieval_score,
+                    irrelevant=is_trial_irrelevant(
+                        retrieval_score=candidate_by_id[nct_id].retrieval_score,
+                        exact_condition_match=candidate_by_id[nct_id].exact_condition_match,
+                        compiled_trial=compiled,
+                        facts=context.facts,
+                    ),
                 )
             )
         state = SessionState.EVALUATING

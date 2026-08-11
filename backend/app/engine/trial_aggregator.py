@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from backend.app.domain.enums import CriterionVerdict, TrialDecision
+from backend.app.domain.evidence import PatientFact
 from backend.app.domain.proof import ProofPacket
 from backend.app.domain.ranking import RankingKey, TrialEvaluation
 from backend.app.domain.trials import CompiledTrial, RawTrialRecord
@@ -17,6 +18,29 @@ _TIER_ORDER = {
 }
 _STATUS_PRIORITY = {"RECRUITING": 3, "NOT_YET_RECRUITING": 2, "ENROLLING_BY_INVITATION": 1}
 _STATUS_SCORE = {"RECRUITING": 1.0, "NOT_YET_RECRUITING": 0.7, "ENROLLING_BY_INVITATION": 0.4}
+
+
+def is_trial_irrelevant(
+    *,
+    retrieval_score: float,
+    exact_condition_match: bool,
+    compiled_trial: CompiledTrial,
+    facts: list[PatientFact],
+) -> bool:
+    """Apply the conservative three-part irrelevance gate from the release contract."""
+
+    confirmed_slots = {fact.slot_id for fact in facts}
+    compiled_condition_slots = {
+        slot_id
+        for criterion in compiled_trial.criteria
+        for slot_id in criterion.required_slots
+        if slot_id.startswith(("condition.", "diagnosis.", "pathology.histology"))
+    }
+    return (
+        retrieval_score < 0.15
+        and not exact_condition_match
+        and not bool(confirmed_slots & compiled_condition_slots)
+    )
 
 
 def _proof_is_complete(packet: ProofPacket) -> bool:

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from backend.app.application.catalog import SlotDefinition
+from backend.app.domain.enums import TrialDecision
 from backend.app.domain.evidence import EligibilityContext, FactConflict, PatientFact
 from backend.app.domain.proof import ProofPacket
 from backend.app.domain.ranking import RankDelta
@@ -11,7 +12,7 @@ from backend.app.domain.sessions import SessionAggregate
 from backend.app.domain.trials import ProtocolReviewArtifact, RawTrialRecord
 from backend.app.engine.proof_verifier import build_verified_proof
 from backend.app.engine.ranker import rank_trials
-from backend.app.engine.trial_aggregator import aggregate_trial
+from backend.app.engine.trial_aggregator import aggregate_trial, is_trial_irrelevant
 
 
 def build_reverse_slot_index(
@@ -86,6 +87,15 @@ def reevaluate_for_answered_slot(
         next_proofs[nct_id] = packets
         if changed_ids:
             previous_evaluation = aggregate.trial_evaluations[nct_id]
+            remains_irrelevant = (
+                previous_evaluation.decision is TrialDecision.IRRELEVANT
+                and is_trial_irrelevant(
+                    retrieval_score=previous_evaluation.retrieval_score,
+                    exact_condition_match=False,
+                    compiled_trial=compiled,
+                    facts=updated_facts,
+                )
+            )
             next_evaluations[nct_id] = aggregate_trial(
                 session_id=aggregate.session_id,
                 patient_state_version=new_version,
@@ -93,6 +103,7 @@ def reevaluate_for_answered_slot(
                 raw_trial=raw_trials[nct_id],
                 proofs=packets,
                 retrieval_score=previous_evaluation.retrieval_score,
+                irrelevant=remains_irrelevant,
             )
 
     ranked = rank_trials(list(next_evaluations.values()))

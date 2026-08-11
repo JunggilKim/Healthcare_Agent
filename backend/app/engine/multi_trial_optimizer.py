@@ -65,6 +65,15 @@ class _SimulatedCandidate:
     raw_coverage: float
 
 
+@dataclass(frozen=True)
+class CandidatePolicyStatistics:
+    """Shared counterfactual statistics used by transparent benchmark baselines."""
+
+    candidate: QuestionCandidate
+    raw_coverage: float
+    mean_verified_trial_eliminations: float
+
+
 def rank_discount(rank: int) -> float:
     return 1.0 / math.log2(rank + 1)
 
@@ -355,6 +364,37 @@ def _simulate_candidate(
         for item in {(item.nct_id, item.criterion_id): item for item in candidate.affected}.values()
     )
     return _SimulatedCandidate(candidate, metrics, outcomes, raw_coverage)
+
+
+def candidate_policy_statistics(state: FullOptimizationState) -> list[CandidatePolicyStatistics]:
+    """Evaluate candidates with the same branch simulator used by the live B6 policy."""
+
+    before_risk = compute_topk_risk(state)
+    before_decisions = {
+        nct_id: evaluation.decision
+        for nct_id, evaluation in state.aggregate.trial_evaluations.items()
+    }
+    statistics: list[CandidatePolicyStatistics] = []
+    for candidate in generate_slot_candidates(state):
+        simulated = _simulate_candidate(state, candidate, before_risk)
+        eliminations = [
+            sum(
+                decision is TrialDecision.INELIGIBLE
+                and before_decisions.get(nct_id) is not TrialDecision.INELIGIBLE
+                for nct_id, (_, decision) in outcome.items()
+            )
+            for outcome in simulated.outcomes
+        ]
+        statistics.append(
+            CandidatePolicyStatistics(
+                candidate=candidate,
+                raw_coverage=simulated.raw_coverage,
+                mean_verified_trial_eliminations=(
+                    sum(eliminations) / len(eliminations) if eliminations else 0.0
+                ),
+            )
+        )
+    return statistics
 
 
 def _score(simulated: _SimulatedCandidate, coverage: float) -> QuestionCandidate:

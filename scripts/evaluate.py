@@ -31,10 +31,12 @@ from backend.app.evaluation.annotations import (  # noqa: E402
     load_compiled_trials,
     load_jsonl,
 )
+from backend.app.evaluation.corpus import load_release_corpus  # noqa: E402
 from backend.app.evaluation.execution import (  # noqa: E402
     evaluate_adjudicated_subset,
     evaluate_world,
 )
+from backend.app.evaluation.interactive import evaluate_interactive_benchmark  # noqa: E402
 from backend.app.evaluation.metrics import (  # noqa: E402
     classification_metrics,
     mean,
@@ -45,6 +47,15 @@ from backend.app.evaluation.models import (  # noqa: E402
     BenchmarkArtifact,
     MissingnessObservation,
     PatientWorld,
+)
+from backend.app.evaluation.policy_evidence import (  # noqa: E402
+    load_direct_llm_policy_evidence,
+    validate_direct_llm_policy_evidence,
+)
+from backend.app.evaluation.retrieval_evidence import (  # noqa: E402
+    evaluate_curated_retrieval,
+    load_curated_retrieval_evidence,
+    validate_curated_retrieval_evidence,
 )
 from backend.app.infrastructure.local_artifacts import LocalArtifactStore  # noqa: E402
 from backend.app.retrieval.ctgov_client import ClinicalTrialsGovClient  # noqa: E402
@@ -67,7 +78,11 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("config/eval.yaml"))
     parser.add_argument("--benchmark", type=Path, default=BENCHMARK_PATH)
     parser.add_argument("--compiled-trials", type=Path, action="append")
+    parser.add_argument("--raw-trials", type=Path, action="append")
+    parser.add_argument("--reviews", type=Path, action="append")
     parser.add_argument("--annotation-manifest", type=Path)
+    parser.add_argument("--retrieval-evidence", type=Path)
+    parser.add_argument("--b5-policy-evidence", type=Path)
     parser.add_argument("--policies", default="all")
     parser.add_argument("--seed", type=int, default=20260811)
     parser.add_argument("--all", action="store_true", dest="all_ablations")
@@ -544,7 +559,38 @@ def main() -> None:
         raise RuntimeError("SEED_MUST_MATCH_COMMITTED_EVAL_CONFIG")
     if not args.benchmark.is_file():
         raise RuntimeError("BENCHMARK_MISSING_RUN_GENERATE_BENCHMARK_FIRST")
-    benchmark = BenchmarkArtifact.model_validate(orjson.loads(args.benchmark.read_bytes()))
+    benchmark_bytes = args.benchmark.read_bytes()
+    benchmark = BenchmarkArtifact.model_validate(orjson.loads(benchmark_bytes))
+    release_corpus = None
+    retrieval_evidence = None
+    retrieval_evidence_bytes = None
+    if args.retrieval_evidence is not None:
+        if not args.compiled_trials or not args.raw_trials or not args.reviews:
+            raise RuntimeError("RELEASE_RETRIEVAL_REQUIRES_COMPILED_RAW_AND_REVIEW_ARTIFACTS")
+        release_corpus = load_release_corpus(
+            compiled_paths=args.compiled_trials,
+            raw_paths=args.raw_trials,
+            review_paths=args.reviews,
+        )
+        retrieval_evidence_bytes = args.retrieval_evidence.read_bytes()
+        retrieval_evidence = load_curated_retrieval_evidence(str(args.retrieval_evidence))
+        validate_curated_retrieval_evidence(
+            retrieval_evidence,
+            benchmark=benchmark,
+            benchmark_bytes=benchmark_bytes,
+            corpus=release_corpus,
+        )
+    direct_llm_evidence = None
+    if args.b5_policy_evidence is not None:
+        if retrieval_evidence_bytes is None:
+            raise RuntimeError("B5_POLICY_EVIDENCE_REQUIRES_RETRIEVAL_EVIDENCE")
+        direct_llm_evidence = load_direct_llm_policy_evidence(str(args.b5_policy_evidence))
+        validate_direct_llm_policy_evidence(
+            direct_llm_evidence,
+            benchmark_bytes=benchmark_bytes,
+            retrieval_evidence_bytes=retrieval_evidence_bytes,
+            seed=args.seed,
+        )
     suites = (
         ["retrieval", "criterion", "interactive", "ablation"]
         if args.suite == "all"
@@ -554,7 +600,16 @@ def main() -> None:
     for suite in suites:
         started = datetime.now(UTC)
         if suite == "retrieval":
-            payload = asyncio.run(_retrieval_suite())
+            payload = (
+                evaluate_curated_retrieval(
+                    retrieval_evidence,
+                    benchmark=benchmark,
+                    benchmark_bytes=benchmark_bytes,
+                    corpus=release_corpus,
+                )
+                if retrieval_evidence is not None and release_corpus is not None
+                else asyncio.run(_retrieval_suite())
+            )
         elif suite == "criterion":
             if args.annotation_manifest is not None:
                 if not benchmark.acceptance_eligible:
@@ -568,10 +623,21 @@ def main() -> None:
             else:
                 payload = _criterion_suite(benchmark)
         elif suite == "interactive":
-            payload = _interactive_suite(
-                benchmark,
-                seed=args.seed,
-                max_questions=int(config["max_questions"]),
+            payload = (
+                evaluate_interactive_benchmark(
+                    benchmark=benchmark,
+                    corpus=release_corpus,
+                    retrieval_evidence=retrieval_evidence,
+                    seed=args.seed,
+                    max_questions=int(config["max_questions"]),
+                    direct_llm_evidence=direct_llm_evidence,
+                )
+                if retrieval_evidence is not None and release_corpus is not None
+                else _interactive_suite(
+                    benchmark,
+                    seed=args.seed,
+                    max_questions=int(config["max_questions"]),
+                )
             )
         else:
             payload = _ablation_suite(
@@ -588,7 +654,19 @@ def main() -> None:
             ended=ended,
         )
         outputs.append(str(_write_result(suite, payload, metadata)))
-    print(orjson.dumps({"outputs": outputs, "acceptance_eligible": False}).decode())
+    print(
+        orjson.dumps(
+            {
+                "outputs": outputs,
+                "acceptance_eligible": all(
+                    orjson.loads(Path(path).read_bytes())["metrics"].get(
+                        "acceptance_eligible", False
+                    )
+                    for path in outputs
+                ),
+            }
+        ).decode()
+    )
 
 
 if __name__ == "__main__":
