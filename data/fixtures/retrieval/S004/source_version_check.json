@@ -1,0 +1,24 @@
+{
+  "nct_id": "NCT05239624",
+  "api_version": "2.0.5",
+  "registry_data_timestamp": "2026-08-11T09:00:06",
+  "raw_record_sha256": "6e342382edc485fd43d567e5b5029b7f4bff550354698199af4320bb6d034532",
+  "eligibility_text_sha256": "2d0b8c2e0aef911790e7c7d2560b72e692c5b906bf53c13de98da306c5aceff4",
+  "exact_fragment_matches": [
+    "NCT05239624:INCLUSION:001:443174ab",
+    "NCT05239624:INCLUSION:002:5f52ab88",
+    "NCT05239624:INCLUSION:003:a7db6608",
+    "NCT05239624:INCLUSION:004:2b0a94f9",
+    "NCT05239624:INCLUSION:005:dac9ad49",
+    "NCT05239624:INCLUSION:006:ba33ff17"
+  ],
+  "source_version_deviations": [
+    {
+      "criterion_id": "NCT05239624:INCLUSION:007:53a2629b",
+      "fixture_text": "Measured or calculated creatinine clearance (GFR can also be used in place of creatinine or CrCl) GFR or CrCl of ≥ 30 mL/min",
+      "live_source_text": "Measured or calculatedb creatinine clearance (GFR can also be used in place of creatinine or CrCl) GFR or CrCl of ≥ 30 mL/min",
+      "difference": "The current API record attaches footnote marker b directly to calculated; the threshold and units are unchanged.",
+      "hard_decision_impact": "NONE_FOR_PINNED_PHASE1_FIXTURE; live compilation must bind to the current exact span and hash."
+    }
+  ]
+}

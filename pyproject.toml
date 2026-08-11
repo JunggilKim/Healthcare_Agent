@@ -67,7 +67,7 @@ ignore = ["UP007", "UP040", "UP042"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-packages = ["backend.app.domain", "backend.app.application"]
+packages = ["backend.app"]
 
 [tool.coverage.run]
 source = ["backend/app"]

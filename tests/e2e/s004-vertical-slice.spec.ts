@@ -16,6 +16,11 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
   await expect(page.getByText("Pathology-confirmed urothelial histology")).toBeVisible();
   await expect(page.getByRole("heading", { name: /병리검사 결과지/ })).toBeVisible();
   await expect(page.getByText("Imaging suspicion ≠ pathology confirmation")).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "20 retained candidates · top 8 selected" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("retrieval-candidate")).toHaveCount(20);
+  await expect(page.getByText("selected · not compiled").first()).toBeVisible();
 
   const ageRow = page.getByRole("row").filter({ hasText: "Age ≥ 18 years" });
   await expect(ageRow.getByText("PASS", { exact: true })).toBeVisible();
@@ -35,4 +40,3 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
   await page.getByRole("button", { name: "Replay Proof" }).click();
   await expect(page.getByText("Proof replay passed · PV-012 7/7")).toBeVisible();
 });
-

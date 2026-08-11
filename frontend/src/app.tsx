@@ -3,6 +3,7 @@ import { useState } from "react";
 import {
   analyzeSession,
   createS004Session,
+  readS004Retrieval,
   readSession,
   replayProof,
   submitPinnedAnswer,
@@ -12,12 +13,14 @@ import { AgentTimeline } from "./components/AgentTimeline";
 import { CriterionMatrix } from "./components/CriterionMatrix";
 import { Disclaimer } from "./components/Disclaimer";
 import { QuestionPanel } from "./components/QuestionPanel";
+import { RetrievalCandidates } from "./components/RetrievalCandidates";
 import { TrialCard } from "./components/TrialCard";
-import type { SessionView } from "./types/api";
+import type { RetrievalView, SessionView } from "./types/api";
 
 export function App() {
   const [credentials, setCredentials] = useState<SessionCredentials | null>(null);
   const [session, setSession] = useState<SessionView | null>(null);
+  const [retrieval, setRetrieval] = useState<RetrievalView | null>(null);
   const [busy, setBusy] = useState(false);
   const [pipelineComplete, setPipelineComplete] = useState(false);
   const [statusText, setStatusText] = useState("Snapshot Demo 준비됨");
@@ -31,6 +34,7 @@ export function App() {
     try {
       const nextCredentials = await createS004Session();
       setCredentials(nextCredentials);
+      setRetrieval(await readS004Retrieval());
       await analyzeSession(nextCredentials, ({ event }) => setStatusText(`Event · ${event}`));
       setSession(await readSession(nextCredentials));
       setPipelineComplete(true);
@@ -125,10 +129,10 @@ export function App() {
             <div className="space-y-5"><TrialCard session={session} /><section className="panel"><p className="eyebrow">PATIENT SOURCE</p><p className="mt-3 leading-7 text-slate-300">{session.patient_text}</p></section></div>
             <div className="space-y-5"><section className="panel border-amber-300/30"><p className="eyebrow text-amber-300">EVIDENCE FIREWALL</p><h2 className="mt-3 font-bold">Imaging suspicion ≠ pathology confirmation</h2><p className="mt-3 text-sm leading-6 text-slate-400">Bladder cancer remains a Grade-H retrieval hypothesis. PV-007 verifies that no hypothesis ID appears in a hard decision.</p></section><CriterionMatrix session={session} /></div>
           </div>
+          {retrieval ? <div className="mt-6"><RetrievalCandidates retrieval={retrieval} /></div> : null}
           <div className="mt-6"><Disclaimer /></div>
         </div>
       )}
     </main>
   );
 }
-

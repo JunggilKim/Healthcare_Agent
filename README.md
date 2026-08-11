@@ -6,7 +6,7 @@ TRIAL-OPT is a Korean-first research prototype for proof-carrying active evidenc
 
 The repository is being implemented phase-by-phase from `TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`. The offline quick start, full architecture, evaluation commands, deployment guide, and release artifact identifiers will be completed in their specification-defined phases.
 
-## Offline vertical slice
+## Offline Phase-2 demo
 
 ```bash
 make bootstrap
@@ -16,4 +16,12 @@ cd frontend && npm run e2e && cd ..
 make demo-offline
 ```
 
-Open `http://localhost:8080`, select the frozen S004 Snapshot flow, and use pinned branch A or B. The health endpoint is available at `http://localhost:8080/api/v1/health`. This Phase-1 path makes no ClinicalTrials.gov or Gemini request.
+Open `http://localhost:8080`, select the frozen S004 Snapshot flow, and use pinned branch A or B.
+The page also shows the bounded Phase-2 retrieval pool (20 retained, top 8 selected and visibly
+"not compiled"). The health endpoint is available at `http://localhost:8080/api/v1/health`.
+
+The primary demo is offline: it makes no ClinicalTrials.gov or Gemini request. The tracked
+Phase-2 fixture is hash-bound to the official API v2 source timestamp. Live CTGov retrieval,
+exact-byte local caching, three-source RRF, lexical fallback, and automatic snapshot fallback are
+implemented and covered independently. The deterministic recorded embedding vectors are test
+fixtures, not claims of a live Gemini run.

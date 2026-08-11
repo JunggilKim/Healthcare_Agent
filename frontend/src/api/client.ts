@@ -1,4 +1,9 @@
-import { sessionSchema, type SessionView } from "../types/api";
+import {
+  retrievalSchema,
+  sessionSchema,
+  type RetrievalView,
+  type SessionView,
+} from "../types/api";
 
 export interface SessionCredentials {
   sessionId: string;
@@ -31,6 +36,11 @@ export async function createS004Session(): Promise<SessionCredentials> {
   const payload = (await jsonOrThrow(response)) as { session_id: string; session_token: string };
   sessionStorage.setItem(`trial-opt:${payload.session_id}`, payload.session_token);
   return { sessionId: payload.session_id, token: payload.session_token };
+}
+
+export async function readS004Retrieval(): Promise<RetrievalView> {
+  const response = await fetch("/api/v1/demo/retrieval/S004");
+  return retrievalSchema.parse(await jsonOrThrow(response));
 }
 
 export async function readSession(credentials: SessionCredentials): Promise<SessionView> {
@@ -113,4 +123,3 @@ export async function replayProof(credentials: SessionCredentials): Promise<bool
     (packet) => packet.verifier_checks.find((check) => check.check_id === "PV-012")?.passed,
   );
 }
-

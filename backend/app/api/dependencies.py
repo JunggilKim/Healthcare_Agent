@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import Header, Request
 
 from backend.app.api.errors import ApiProblem
@@ -7,7 +9,7 @@ from backend.app.application.session_service import SnapshotSessionService
 
 
 def get_session_service(request: Request) -> SnapshotSessionService:
-    return request.app.state.session_service
+    return cast(SnapshotSessionService, request.app.state.session_service)
 
 
 async def require_session_token(

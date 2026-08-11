@@ -15,7 +15,10 @@ class ApiProblem(Exception):
     retryable: bool = False
 
 
-async def problem_handler(request: Request, problem: ApiProblem) -> JSONResponse:
+async def problem_handler(request: Request, error: Exception) -> JSONResponse:
+    if not isinstance(error, ApiProblem):
+        raise error
+    problem = error
     request_id = getattr(request.state, "request_id", "unknown")
     return JSONResponse(
         status_code=problem.status,

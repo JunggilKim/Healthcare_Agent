@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import date
 
 import orjson
@@ -97,7 +98,7 @@ async def start_analysis(
     _: str = Depends(require_session_token),
     service: SnapshotSessionService = Depends(get_session_service),
 ) -> StreamingResponse:
-    async def stream() -> object:
+    async def stream() -> AsyncIterator[bytes]:
         try:
             async for event_name, payload in service.analyze(session_id):
                 yield _sse(event_name, payload)
@@ -132,7 +133,7 @@ async def submit_answer(
     _: str = Depends(require_session_token),
     service: SnapshotSessionService = Depends(get_session_service),
 ) -> StreamingResponse:
-    async def stream() -> object:
+    async def stream() -> AsyncIterator[bytes]:
         try:
             async for event_name, payload in service.submit_answer(
                 session_id,

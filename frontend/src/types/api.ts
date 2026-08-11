@@ -60,3 +60,28 @@ export const sessionSchema = z
 
 export type SessionView = z.infer<typeof sessionSchema>;
 
+export const retrievalSchema = z.object({
+  mode: z.enum(["live", "snapshot", "hybrid_degraded"]),
+  api_version: z.string(),
+  registry_data_timestamp: z.string(),
+  dense_source_used: z.boolean(),
+  degradation_codes: z.array(z.string()),
+  selected_for_compilation: z.array(z.string()).max(8),
+  ranked_candidates: z
+    .array(
+      z.object({
+        nct_id: z.string(),
+        retrieval_score: z.number(),
+        exact_condition_match: z.boolean(),
+        compiled: z.literal(false),
+        trial: z.object({
+          brief_title: z.string(),
+          overall_status: z.string(),
+          conditions: z.array(z.string()),
+        }),
+      }),
+    )
+    .max(20),
+});
+
+export type RetrievalView = z.infer<typeof retrievalSchema>;
