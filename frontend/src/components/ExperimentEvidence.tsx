@@ -12,7 +12,7 @@ import {
 import { z } from "zod";
 
 const pointSchema = z.object({ questions: z.number(), accuracy: z.number() });
-const policySchema = z.object({
+const completedPolicySchema = z.object({
   policy: z.string(),
   runs: z.number(),
   final_decision_accuracy: z.number(),
@@ -20,6 +20,11 @@ const policySchema = z.object({
   accuracy_auc: z.number(),
   median_questions_to_stable_top3: z.number(),
 });
+const pendingPolicySchema = z.object({
+  policy: z.literal("B5"),
+  status: z.string(),
+});
+const policySchema = z.union([completedPolicySchema, pendingPolicySchema]);
 const ablationSchema = z.object({
   ablation: z.string(),
   final_decision_accuracy: z.number(),
@@ -107,7 +112,7 @@ export function ExperimentEvidence() {
       <div className="mt-4 overflow-x-auto" tabIndex={0} aria-label="Question policy smoke table">
         <table className="w-full min-w-[680px] text-left text-xs">
           <thead className="text-slate-400"><tr><th className="pb-2">Policy</th><th>Runs</th><th>Final accuracy</th><th>Accuracy AUC</th><th>Mean questions</th><th>Median to stable top-3*</th></tr></thead>
-          <tbody className="divide-y divide-slate-800">{summary.policy_table.map((policy) => <tr key={policy.policy}><td className="py-2 font-bold text-cyan-200">{policy.policy}</td><td>{policy.runs}</td><td>{policy.final_decision_accuracy.toFixed(3)}</td><td>{policy.accuracy_auc.toFixed(3)}</td><td>{policy.question_count_mean.toFixed(2)}</td><td>{policy.median_questions_to_stable_top3.toFixed(1)}</td></tr>)}</tbody>
+          <tbody className="divide-y divide-slate-800">{summary.policy_table.map((policy) => <tr key={policy.policy}><td className="py-2 font-bold text-cyan-200">{policy.policy}</td>{"status" in policy ? <td colSpan={5} className="py-2 text-amber-200">{policy.status}</td> : <><td>{policy.runs}</td><td>{policy.final_decision_accuracy.toFixed(3)}</td><td>{policy.accuracy_auc.toFixed(3)}</td><td>{policy.question_count_mean.toFixed(2)}</td><td>{policy.median_questions_to_stable_top3.toFixed(1)}</td></>}</tr>)}</tbody>
         </table>
       </div>
       <p className="mt-2 text-[0.65rem] text-slate-400">* Single-trial fixture proxy; stable top-3 is not estimable and this value is not an acceptance result.</p>
