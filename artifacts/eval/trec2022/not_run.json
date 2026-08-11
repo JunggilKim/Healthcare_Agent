@@ -1,0 +1,15 @@
+{
+  "acquisition_instructions": [
+    "Install ir_datasets in a separate licensed-data evaluation environment.",
+    "Load exactly ir_datasets.load('clinicaltrials/2021/trec-ct-2022').",
+    "Provide the frozen 2021 ClinicalTrials.gov corpus required by the adapter.",
+    "Rerun this command with --materialize and --licensed-corpus-root."
+  ],
+  "dataset_id": "clinicaltrials/2021/trec-ct-2022",
+  "missing_prerequisite": "The optional ir_datasets package is not installed in the release environment.",
+  "missing_prerequisite_code": "MISSING_IR_DATASETS_PACKAGE",
+  "reason_release_non_blocking": "The mandatory retrieval gate uses Dataset A; fabricated TREC scores are forbidden.",
+  "release_blocking": false,
+  "schema_version": "trial-opt-trec-not-run-v1",
+  "status": "NOT_RUN"
+}

@@ -3,5 +3,22 @@ seed: 20260811
 split: {development: 0.6, validation: 0.2, test: 0.2}
 missingness_rates: [0.2, 0.4, 0.6]
 patterns: [MCAR, REALISTIC]
-max_questions: 7
-
+max_questions: 5
+worlds_per_trial: {minimum: 5, target: 9, maximum: 10}
+dataset_a:
+  target_trials: [24, 36]
+  minimum_worlds: 300
+  minimum_criterion_labels: 1500
+  manual_review_subset: 200
+  dual_review_subset: 50
+runtime:
+  app_env: eval
+ablations:
+  evidence_firewall: true
+  proof_verifier: true
+  evidence_grade_hard_gate: true
+  minimum_branch_utility: true
+  burden_penalty: true
+  branch_discrimination: true
+  slot_level_deduplication: true
+  policy: trial_opt

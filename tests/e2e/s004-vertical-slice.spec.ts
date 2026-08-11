@@ -67,4 +67,7 @@ test("unknown and failure-rehearsal paths remain usable", async ({ page }) => {
   await page.getByRole("button", { name: "이 기록을 제공할 수 없습니다" }).click();
   await expect(page.getByText("추가 질문 없이 현재 근거를 보고합니다.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Export report" })).toBeEnabled();
+  await page.getByRole("button", { name: "Experiment Evidence" }).click();
+  await expect(page.getByText(/Provisional fixture smoke/)).toBeVisible();
+  await expect(page.getByText(/Acceptance eligible: false/)).toBeVisible();
 });

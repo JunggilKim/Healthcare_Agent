@@ -65,6 +65,9 @@ async def spa_root() -> Response:
 
 @app.get("/{frontend_path:path}", response_class=HTMLResponse, include_in_schema=False)
 async def spa_route(frontend_path: str) -> Response:
+    candidate = (_STATIC_DIR / frontend_path).resolve()
+    if _STATIC_DIR.resolve() in candidate.parents and candidate.is_file():
+        return FileResponse(candidate)
     if frontend_path == "about" or (
         frontend_path.startswith("session/") and len(frontend_path.split("/")) == 2
     ):

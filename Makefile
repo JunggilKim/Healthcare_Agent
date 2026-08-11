@@ -32,7 +32,10 @@ live-local:
 	APP_ENV=local STORE_BACKEND=local DEFAULT_RUNTIME_MODE=live uv run uvicorn backend.app.main:app --host 127.0.0.1 --port 8080
 
 eval:
+	uv run python scripts/generate_benchmark.py --config config/eval.yaml --seed 20260811
 	uv run python scripts/evaluate.py --suite all --config config/eval.yaml
+	uv run python scripts/acquire_trec.py
+	uv run python scripts/render_eval_report.py --latest
 
 build-snapshot:
 	uv run python scripts/build_demo_snapshot.py --cases S004,S008,S001 --mode live --manual-review-manifest data/demo/manual_review.yaml --output data/demo/current

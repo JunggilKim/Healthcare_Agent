@@ -1,0 +1,7 @@
+metric,value,acceptance_eligible,scope
+criterion_macro_f1_self_consistency,0.8,False,project-created S004 structured fixture engineering smoke
+unsupported_hard_decision_rate_fixture,0.0,False,project-created S004 structured fixture engineering smoke
+false_pre_screen_pass_rate_fixture,0.0,False,project-created S004 structured fixture engineering smoke
+retrieval_recall_at_20_proxy,1.0,False,project-created S004 structured fixture engineering smoke
+b6_final_decision_accuracy_fixture,1.0,False,project-created S004 structured fixture engineering smoke
+b6_median_questions_fixture,0.0,False,project-created S004 structured fixture engineering smoke

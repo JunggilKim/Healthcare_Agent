@@ -1,0 +1,13 @@
+{
+  "schema_version": "trial-opt-annotation-manifest-v1",
+  "status": "PENDING_PROJECT_REVIEW",
+  "label": "protocol-text adjudication by project reviewers",
+  "required_pairs": 200,
+  "required_dual_reviews": 50,
+  "completed_pairs": 0,
+  "completed_dual_reviews": 0,
+  "adjudicated_pairs": 0,
+  "raw_agreement": null,
+  "cohen_kappa": null,
+  "records": []
+}
