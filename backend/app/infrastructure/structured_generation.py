@@ -57,6 +57,7 @@ class StructuredGenerator:
         return self._circuits.setdefault(
             model_id,
             CircuitBreaker(
+                name=model_id,
                 failure_threshold=5,
                 failure_window_seconds=120,
                 recovery_seconds=90,
@@ -209,8 +210,10 @@ class StructuredGenerator:
                     delay = (1, 2, 4)[min(attempt, 2)] + float(self._jitter(0.0, 0.5))
                     await self._sleep(delay)
         circuit.record_failure()
+        cause = type(last_error).__name__ if last_error is not None else "UnknownError"
         raise StructuredGenerationUnavailable(
-            f"structured generation failed for {task_name} after {max_attempts} attempts"
+            f"structured generation failed for {task_name} after {max_attempts} attempts "
+            f"(last_error={cause})"
         ) from last_error
 
     @staticmethod

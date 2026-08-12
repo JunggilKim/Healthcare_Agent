@@ -95,7 +95,7 @@ async def test_retry_policy_and_circuit_open_after_five_exhausted_calls(tmp_path
         return httpx.Response(503, request=request, headers={"content-type": "application/json"})
 
     clock_value = 0.0
-    circuit = CircuitBreaker(clock=lambda: clock_value)
+    circuit = CircuitBreaker(name="ctgov", clock=lambda: clock_value)
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(
         base_url="https://clinicaltrials.gov/api/v2", transport=transport
@@ -111,7 +111,7 @@ async def test_retry_policy_and_circuit_open_after_five_exhausted_calls(tmp_path
             with pytest.raises(CtgovUnavailableError):
                 await client.version()
         assert attempts == 15
-        with pytest.raises(CircuitOpenError):
+        with pytest.raises(CircuitOpenError, match="ctgov circuit is open"):
             await client.version()
         clock_value = 61.0
         with pytest.raises(CtgovUnavailableError):

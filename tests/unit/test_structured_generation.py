@@ -255,7 +255,8 @@ async def test_gemini_timeout_and_429_exhaust_bounded_retries(tmp_path: Path, fa
         sleep=_no_sleep,
         jitter=lambda _low, _high: 0,
     )
-    with pytest.raises(StructuredGenerationUnavailable):
+    expected_error = "TimeoutError" if failure == "timeout" else "RuntimeError"
+    with pytest.raises(StructuredGenerationUnavailable, match=f"last_error={expected_error}"):
         await generator.generate(
             model_id="gemini-3.6-flash",
             task_name="fault-test",

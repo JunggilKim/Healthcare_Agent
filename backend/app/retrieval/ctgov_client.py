@@ -90,7 +90,7 @@ class ClinicalTrialsGovClient:
     ) -> None:
         self.cache = cache
         self._client = client
-        self.circuit = circuit or CircuitBreaker()
+        self.circuit = circuit or CircuitBreaker(name="ctgov")
         self._sleep = sleep
         self._jitter = jitter
         self._api_version: str | None = None

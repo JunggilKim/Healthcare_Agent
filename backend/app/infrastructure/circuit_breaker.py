@@ -18,6 +18,7 @@ class CircuitOpenError(RuntimeError):
 
 @dataclass
 class CircuitBreaker:
+    name: str = "dependency"
     failure_threshold: int = 5
     recovery_seconds: float = 60.0
     failure_window_seconds: float | None = 60.0
@@ -40,7 +41,7 @@ class CircuitBreaker:
 
     def before_call(self) -> None:
         if self.state is CircuitState.OPEN:
-            raise CircuitOpenError("ctgov circuit is open")
+            raise CircuitOpenError(f"{self.name} circuit is open")
 
     def record_success(self) -> None:
         self.consecutive_failures = 0
