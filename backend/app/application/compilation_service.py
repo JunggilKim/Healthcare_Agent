@@ -629,8 +629,13 @@ class ProtocolCompilationService:
                     else degradation_codes
                 ),
             )
-        except (StructuredGenerationUnavailable, ProtocolCompilationError, ValueError):
-            degradation_codes.append("PROTOCOL_COMPILATION_OPAQUE_FALLBACK")
+        except (StructuredGenerationUnavailable, ProtocolCompilationError, ValueError) as error:
+            degradation_codes.extend(
+                [
+                    "PROTOCOL_COMPILATION_OPAQUE_FALLBACK",
+                    f"PROTOCOL_COMPILATION_FAILURE_{type(error).__name__.upper()}",
+                ]
+            )
             return CompilationWorkflowResult(
                 compilation=opaque_fallback_compilation(
                     trial=trial,
