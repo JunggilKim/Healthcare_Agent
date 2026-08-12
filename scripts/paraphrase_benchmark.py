@@ -223,6 +223,12 @@ async def _validate_online_async(args: argparse.Namespace) -> None:
         if unknown:
             raise RuntimeError(f"PARAPHRASE_WORLD_ID_UNKNOWN:{sorted(unknown)}")
         selected_items = [item for item in selected_items if item[0] in requested]
+    # A failed paraphrase is a per-record validation outcome, not evidence that
+    # every remaining offline record should be skipped. Keep the production
+    # circuit behavior unchanged while allowing this bounded batch to finish.
+    offline_failure_threshold = max(5, len(selected_items) + 1)
+    for model_id in (EXTRACTION_MODEL_ID, PARAPHRASE_MODEL_ID):
+        generator.circuit(model_id).failure_threshold = offline_failure_threshold
     pairs = await asyncio.gather(*(extract(*item) for item in selected_items))
     response_path = output / "extraction_responses.jsonl"
     successes = [response for response, _ in pairs if response is not None]
@@ -242,6 +248,7 @@ async def _validate_online_async(args: argparse.Namespace) -> None:
         "failure_count": len(failures),
         "response_sha256": hashlib.sha256(response_path.read_bytes()).hexdigest(),
         "fallback_count": sum(bool(record.get("used_fallback")) for record in records),
+        "circuit_failure_threshold": offline_failure_threshold,
         "cache_hit_count": sum(bool(record["usage"]["cache_hit"]) for record in records),
         "estimated_cost_usd": round(
             sum(
