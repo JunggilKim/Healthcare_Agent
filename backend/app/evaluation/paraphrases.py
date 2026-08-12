@@ -49,12 +49,12 @@ def patient_extraction_batch_response_schema() -> dict[str, Any]:
             },
             # These optional fields are intentionally flattened instead of a
             # discriminated oneOf. Scalar unions avoid Vertex's invalid null
-            # property expansion while preserving boolean/number/string JSON
-            # values for strict post-generation Pydantic validation.
+            # property expansion. Decimal/date/text values use their canonical
+            # string representation while booleans remain JSON booleans; strict
+            # post-generation Pydantic validation remains authoritative.
             "value": {
                 "anyOf": [
                     {"type": "boolean"},
-                    {"type": "number"},
                     {"type": "string"},
                 ]
             },
@@ -63,8 +63,8 @@ def patient_extraction_batch_response_schema() -> dict[str, Any]:
             "system": {"type": "string"},
             "precision": {"type": "string", "enum": ["DAY", "MONTH", "YEAR"]},
             "days": {"type": "integer"},
-            "lower": {"anyOf": [{"type": "number"}, {"type": "string"}]},
-            "upper": {"anyOf": [{"type": "number"}, {"type": "string"}]},
+            "lower": {"type": "string"},
+            "upper": {"type": "string"},
             "lower_inclusive": {"type": "boolean"},
             "upper_inclusive": {"type": "boolean"},
             "reason": {"type": "string"},
@@ -321,7 +321,7 @@ def build_extraction_requests(
                     }
                 ],
                 "generationConfig": {
-                    "maxOutputTokens": 2048,
+                    "maxOutputTokens": 2000,
                     "thinkingConfig": {"thinkingLevel": "MEDIUM"},
                     "responseMimeType": "application/json",
                     "responseJsonSchema": response_schema,

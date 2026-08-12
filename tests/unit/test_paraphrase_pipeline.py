@@ -118,6 +118,7 @@ def test_extraction_batch_requests_use_frozen_medium_thinking_without_temperatur
 
     generation_config = requests[0]["request"]["generationConfig"]
     assert generation_config["thinkingConfig"] == {"thinkingLevel": "MEDIUM"}
+    assert generation_config["maxOutputTokens"] == 2000
     assert "temperature" not in generation_config
     schema_text = orjson.dumps(generation_config["responseJsonSchema"]).decode()
     assert "oneOf" not in schema_text
