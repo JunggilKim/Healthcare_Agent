@@ -4,6 +4,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from itertools import pairwise
 
 from backend.app.agents.prompts import render_prompt
 from backend.app.agents.protocol_compiler import (
@@ -46,10 +47,22 @@ class _OfflineSourceItem:
     start: int
     end: int
     direction: SourceDirection
+    isolation_required: bool = False
 
 
 _HEADING = re.compile(r"^\s*(inclusion|exclusion)\s+criteria\s*:?\s*$", re.IGNORECASE)
 _LIST_MARKER = re.compile(r"^\s*(?:[-*•°]|\d+\\?[.)])\s+")
+_EXPLICIT_MUSCLE_PHRASE = re.compile(
+    r"(?:non[- ]muscle[- ]invasive|muscle[- ]invasive)\s+"
+    r"(?:bladder\s+(?:urothelial\s+)?(?:cancer|carcinoma)|"
+    r"urothelial\s+carcinoma\s+of\s+the\s+bladder)"
+    r"(?:\s*\((?:NMIBC|MIBC)\))?",
+    re.IGNORECASE,
+)
+_POSITIVE_DIAGNOSIS_CUE = re.compile(
+    r"(?:diagnos|confirm|proven|must\s+have|has\s+)", re.IGNORECASE
+)
+_NON_DIAGNOSIS_CONTEXT = re.compile(r"(?:treatment|therapy|history\s+of)", re.IGNORECASE)
 
 
 class ProtocolCompilationService:
@@ -170,6 +183,47 @@ class ProtocolCompilationService:
         return [item for item in items if source[item.start : item.end].strip()]
 
     @staticmethod
+    def _isolate_explicit_muscle_phrases(
+        source: str, items: list[_OfflineSourceItem]
+    ) -> list[_OfflineSourceItem]:
+        """Isolate one explicit positive MIBC/NMIBC phrase for independent review.
+
+        Long registry bullets often combine a directly executable muscle-invasion
+        statement with unsupported staging or procedural clauses. Exact-span
+        segmentation lets the model and semantic reviewer approve only the
+        explicit phrase while every surrounding byte remains independently
+        compiled or OPAQUE.
+        """
+
+        isolated: list[_OfflineSourceItem] = []
+        for item in items:
+            text = source[item.start : item.end]
+            matches = list(_EXPLICIT_MUSCLE_PHRASE.finditer(text))
+            if item.direction is not SourceDirection.INCLUSION or len(matches) != 1:
+                isolated.append(item)
+                continue
+            match = matches[0]
+            context = text[: match.start()]
+            if not _POSITIVE_DIAGNOSIS_CUE.search(context) or _NON_DIAGNOSIS_CONTEXT.search(
+                context
+            ):
+                isolated.append(item)
+                continue
+            boundaries = (0, match.start(), match.end(), len(text))
+            for start, end in pairwise(boundaries):
+                if start == end or not text[start:end].strip():
+                    continue
+                isolated.append(
+                    _OfflineSourceItem(
+                        start=item.start + start,
+                        end=item.start + end,
+                        direction=item.direction,
+                        isolation_required=True,
+                    )
+                )
+        return isolated
+
+    @staticmethod
     def _opaque_item_proposal(
         trial: RawTrialRecord, item: _OfflineSourceItem, source_order: int
     ) -> CriterionCompilationProposal:
@@ -211,7 +265,7 @@ class ProtocolCompilationService:
         session_id: str,
     ) -> tuple[CompiledTrialProposal, bool]:
         source = trial.eligibility_criteria or ""
-        items = self._offline_source_items(source)
+        items = self._isolate_explicit_muscle_phrases(source, self._offline_source_items(source))
         if not items:
             raise ProtocolCompilationError("offline compiler found no source items")
         assert self.offline_compiler_chunk_size is not None
@@ -220,6 +274,8 @@ class ProtocolCompilationService:
             if (
                 not groups
                 or groups[-1][-1].direction != item.direction
+                or groups[-1][-1].isolation_required
+                or item.isolation_required
                 or len(groups[-1]) >= self.offline_compiler_chunk_size
             ):
                 groups.append([])

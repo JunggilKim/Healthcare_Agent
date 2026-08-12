@@ -600,6 +600,29 @@ def test_offline_compiler_splits_ctgov_escaped_numbered_items() -> None:
     assert all(item.direction.value == "EXCLUSION" for item in items)
 
 
+def test_offline_compiler_isolates_one_explicit_positive_mibc_phrase() -> None:
+    source = (
+        "Inclusion Criteria:\n"
+        "* Participants must have histologically confirmed muscle-invasive bladder cancer "
+        "(MIBC) (T2-T4aN0M0) and submit tissue.\n"
+    )
+    service = ProtocolCompilationService
+    items = service._isolate_explicit_muscle_phrases(source, service._offline_source_items(source))
+
+    assert "".join(source[item.start : item.end] for item in items) == source[20:]
+    assert [
+        source[item.start : item.end] for item in items if "muscle" in source[item.start : item.end]
+    ] == ["muscle-invasive bladder cancer (MIBC)"]
+    assert all(item.isolation_required for item in items)
+
+    non_diagnostic = (
+        "Inclusion Criteria:\n"
+        "* Prior treatment for non-muscle-invasive bladder cancer is permitted.\n"
+    )
+    original = service._offline_source_items(non_diagnostic)
+    assert service._isolate_explicit_muscle_phrases(non_diagnostic, original) == original
+
+
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:
     root = Path("data/fixtures/compiled/S004")
     manifest = orjson.loads((root / "manifest.json").read_bytes())
