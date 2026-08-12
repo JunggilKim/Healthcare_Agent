@@ -491,6 +491,8 @@ def _finalize_candidate_pool(args: argparse.Namespace) -> None:
         ],
     }
     selection_output.write_bytes(canonical_json_bytes(selection_payload))
+    benchmark_output = output / "benchmark.json"
+    benchmark_output.write_bytes(canonical_json_bytes(updated.model_dump(mode="json")))
     manifest = {
         "schema_version": "trial-opt-paraphrase-pool-finalization-v1",
         "status": "COMPLETE",
@@ -502,6 +504,8 @@ def _finalize_candidate_pool(args: argparse.Namespace) -> None:
         "selection_sha256": hashlib.sha256(selection_output.read_bytes()).hexdigest(),
         "paraphrases_sha256": hashlib.sha256(paraphrase_output.read_bytes()).hexdigest(),
         "extraction_sha256": hashlib.sha256(extraction_output.read_bytes()).hexdigest(),
+        "benchmark_output_sha256": hashlib.sha256(benchmark_output.read_bytes()).hexdigest(),
+        "acceptance_eligible": updated.acceptance_eligible,
     }
     (output / "pool_manifest.json").write_bytes(canonical_json_bytes(manifest))
     print(orjson.dumps({"output": str(output), **manifest}).decode())
