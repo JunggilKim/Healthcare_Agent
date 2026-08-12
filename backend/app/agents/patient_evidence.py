@@ -412,6 +412,19 @@ class PatientEvidenceAgent:
             slot_catalog=compact_patient_slot_catalog(self.slot_catalog),
         )
         degraded = False
+
+        def fallback_proposal() -> PatientExtractionResult:
+            if pinned_fallback is not None:
+                return pinned_fallback
+            language: Literal["ko", "en", "other"]
+            if language_hint == "ko":
+                language = "ko"
+            elif language_hint == "en":
+                language = "en"
+            else:
+                language = "other"
+            return deterministic_surface_fallback(patient_text, language=language)
+
         try:
             proposal, _ = await self.generator.generate_primary_with_lite_fallback(
                 primary_model_id="gemini-3.6-flash",
@@ -431,22 +444,24 @@ class PatientEvidenceAgent:
             )
         except StructuredGenerationUnavailable:
             degraded = True
-            if pinned_fallback is not None:
-                proposal = pinned_fallback
-            else:
-                language: Literal["ko", "en", "other"]
-                if language_hint == "ko":
-                    language = "ko"
-                elif language_hint == "en":
-                    language = "en"
-                else:
-                    language = "other"
-                proposal = deterministic_surface_fallback(patient_text, language=language)
-        materialized = materialize_patient_extraction(
-            patient_text=patient_text,
-            source_id=source_id,
-            proposal=proposal,
-            slot_catalog=self.slot_catalog,
-            asserted_at=asserted_at,
-        )
+            proposal = fallback_proposal()
+        try:
+            materialized = materialize_patient_extraction(
+                patient_text=patient_text,
+                source_id=source_id,
+                proposal=proposal,
+                slot_catalog=self.slot_catalog,
+                asserted_at=asserted_at,
+            )
+        except PatientExtractionValidationError:
+            if degraded:
+                raise
+            degraded = True
+            materialized = materialize_patient_extraction(
+                patient_text=patient_text,
+                source_id=source_id,
+                proposal=fallback_proposal(),
+                slot_catalog=self.slot_catalog,
+                asserted_at=asserted_at,
+            )
         return materialized, degraded
