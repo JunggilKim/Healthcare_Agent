@@ -59,6 +59,9 @@ _EXPLICIT_MUSCLE_PHRASE = re.compile(
     r"(?:\s*\((?:NMIBC|MIBC)\))?|\b(?:NMIBC|MIBC)\b)",
     re.IGNORECASE,
 )
+_EXPLICIT_HISTOLOGY_PHRASE = re.compile(
+    r"(?:transitional[- ]cell|urothelial)\s+(?:cancer|carcinoma)", re.IGNORECASE
+)
 _POSITIVE_DIAGNOSIS_CUE = re.compile(
     r"(?:diagnos|confirm|proven|must\s+have|has\s+)", re.IGNORECASE
 )
@@ -224,6 +227,45 @@ class ProtocolCompilationService:
         return isolated
 
     @staticmethod
+    def _isolate_explicit_histology_phrases(
+        source: str, items: list[_OfflineSourceItem]
+    ) -> list[_OfflineSourceItem]:
+        """Isolate one positive bladder histology phrase from a compound bullet.
+
+        Confirmation, staging, and procedural text around the phrase remains in
+        independently reviewed spans. This permits the bounded histology clause
+        to be executable without treating the rest of the source as supported.
+        """
+
+        isolated: list[_OfflineSourceItem] = []
+        for item in items:
+            text = source[item.start : item.end]
+            matches = list(_EXPLICIT_HISTOLOGY_PHRASE.finditer(text))
+            if item.direction is not SourceDirection.INCLUSION or len(matches) != 1:
+                isolated.append(item)
+                continue
+            match = matches[0]
+            context = text[: match.start()]
+            if not _POSITIVE_DIAGNOSIS_CUE.search(context) or _NON_DIAGNOSIS_CONTEXT.search(
+                context
+            ):
+                isolated.append(item)
+                continue
+            boundaries = (0, match.start(), match.end(), len(text))
+            for start, end in pairwise(boundaries):
+                if start == end or not text[start:end].strip():
+                    continue
+                isolated.append(
+                    _OfflineSourceItem(
+                        start=item.start + start,
+                        end=item.start + end,
+                        direction=item.direction,
+                        isolation_required=True,
+                    )
+                )
+        return isolated
+
+    @staticmethod
     def _opaque_item_proposal(
         trial: RawTrialRecord, item: _OfflineSourceItem, source_order: int
     ) -> CriterionCompilationProposal:
@@ -266,6 +308,7 @@ class ProtocolCompilationService:
     ) -> tuple[CompiledTrialProposal, bool]:
         source = trial.eligibility_criteria or ""
         items = self._isolate_explicit_muscle_phrases(source, self._offline_source_items(source))
+        items = self._isolate_explicit_histology_phrases(source, items)
         if not items:
             raise ProtocolCompilationError("offline compiler found no source items")
         assert self.offline_compiler_chunk_size is not None

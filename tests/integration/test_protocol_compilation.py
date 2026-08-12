@@ -648,6 +648,32 @@ def test_offline_compiler_isolates_diagnosis_acronym_but_not_treatment_acronym()
     assert service._isolate_explicit_muscle_phrases(treatment, original) == original
 
 
+def test_offline_compiler_isolates_positive_histology_phrase_with_residuals() -> None:
+    service = ProtocolCompilationService
+    source = (
+        "Inclusion Criteria:\n"
+        "* Diagnosed with histologically confirmed grade 3 T1 N0 M0 transitional cell "
+        "carcinoma, or carcinoma in situ.\n"
+    )
+    items = service._isolate_explicit_histology_phrases(
+        source, service._offline_source_items(source)
+    )
+    assert "".join(source[item.start : item.end] for item in items) == source[20:]
+    assert [
+        source[item.start : item.end]
+        for item in items
+        if "transitional" in source[item.start : item.end]
+    ] == ["transitional cell carcinoma"]
+    assert all(item.isolation_required for item in items)
+
+    treatment = (
+        "Inclusion Criteria:\n"
+        "* Participant has received no prior treatment for urothelial carcinoma.\n"
+    )
+    original = service._offline_source_items(treatment)
+    assert service._isolate_explicit_histology_phrases(treatment, original) == original
+
+
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:
     root = Path("data/fixtures/compiled/S004")
     manifest = orjson.loads((root / "manifest.json").read_bytes())
