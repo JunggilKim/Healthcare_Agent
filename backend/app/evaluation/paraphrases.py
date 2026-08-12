@@ -48,17 +48,23 @@ def patient_extraction_batch_response_schema() -> dict[str, Any]:
                 ],
             },
             # These optional fields are intentionally flattened instead of a
-            # discriminated oneOf. Empty schemas preserve the JSON scalar type
-            # emitted for `value`/range bounds; the strict Pydantic model then
-            # enforces the exact field set and type selected by `kind`.
-            "value": {},
+            # discriminated oneOf. Scalar unions avoid Vertex's invalid null
+            # property expansion while preserving boolean/number/string JSON
+            # values for strict post-generation Pydantic validation.
+            "value": {
+                "anyOf": [
+                    {"type": "boolean"},
+                    {"type": "number"},
+                    {"type": "string"},
+                ]
+            },
             "unit": {"type": "string"},
             "normalized": {"type": "string"},
             "system": {"type": "string"},
             "precision": {"type": "string", "enum": ["DAY", "MONTH", "YEAR"]},
             "days": {"type": "integer"},
-            "lower": {},
-            "upper": {},
+            "lower": {"anyOf": [{"type": "number"}, {"type": "string"}]},
+            "upper": {"anyOf": [{"type": "number"}, {"type": "string"}]},
             "lower_inclusive": {"type": "boolean"},
             "upper_inclusive": {"type": "boolean"},
             "reason": {"type": "string"},

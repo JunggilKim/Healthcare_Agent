@@ -121,7 +121,7 @@ def test_extraction_batch_requests_use_frozen_medium_thinking_without_temperatur
     assert "temperature" not in generation_config
     schema_text = orjson.dumps(generation_config["responseJsonSchema"]).decode()
     assert "oneOf" not in schema_text
-    assert "anyOf" not in schema_text
+    assert '"type":"null"' not in schema_text
     typed_value = generation_config["responseJsonSchema"]["properties"]["facts"]["items"][
         "properties"
     ]["value"]
