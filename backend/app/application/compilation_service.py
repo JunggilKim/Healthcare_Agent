@@ -53,10 +53,10 @@ class _OfflineSourceItem:
 _HEADING = re.compile(r"^\s*(inclusion|exclusion)\s+criteria\s*:?\s*$", re.IGNORECASE)
 _LIST_MARKER = re.compile(r"^\s*(?:[-*•°]|\d+\\?[.)])\s+")
 _EXPLICIT_MUSCLE_PHRASE = re.compile(
-    r"(?:non[- ]muscle[- ]invasive|muscle[- ]invasive)\s+"
+    r"(?:(?:non[- ]muscle[- ]invasive|muscle[- ]invasive)\s+"
     r"(?:bladder\s+(?:urothelial\s+)?(?:cancer|carcinoma)|"
     r"urothelial\s+carcinoma\s+of\s+the\s+bladder)"
-    r"(?:\s*\((?:NMIBC|MIBC)\))?",
+    r"(?:\s*\((?:NMIBC|MIBC)\))?|\b(?:NMIBC|MIBC)\b)",
     re.IGNORECASE,
 )
 _POSITIVE_DIAGNOSIS_CUE = re.compile(
