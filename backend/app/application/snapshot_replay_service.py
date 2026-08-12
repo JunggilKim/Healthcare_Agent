@@ -186,16 +186,23 @@ class SnapshotReplayService:
             branch
             for branch in branches
             if branch.get("question_id") == question_id
-            and bool(branch.get("unknown", False)) == unknown
-            and bool(branch.get("declined", False)) == declined
             and (
-                unknown
-                or declined
+                (
+                    (unknown or declined)
+                    and (bool(branch.get("unknown", False)) or bool(branch.get("declined", False)))
+                )
                 or (
-                    structured_value is not None
+                    not unknown
+                    and not declined
+                    and structured_value is not None
                     and branch.get("structured_value") == structured_value
                 )
-                or (structured_value is None and branch.get("answer_text") == answer_text)
+                or (
+                    not unknown
+                    and not declined
+                    and structured_value is None
+                    and branch.get("answer_text") == answer_text
+                )
             )
         ]
         if len(matching) != 1:
@@ -234,7 +241,18 @@ class SnapshotReplayService:
         )
         yield "trial_evaluated", {"sequence": event.sequence, "state": target.value}
         yield "rankings_updated", {"sequence": event.sequence, "state": target.value}
-        yield "question_selected", {"sequence": event.sequence, "state": target.value}
+        yield (
+            "question_selected",
+            {
+                "sequence": event.sequence,
+                "state": target.value,
+                "slot_id": (
+                    next_selection["selected"].get("slot_id")
+                    if isinstance(next_selection.get("selected"), dict)
+                    else None
+                ),
+            },
+        )
         yield "completed", {"sequence": event.sequence, "state": target.value}
 
     async def read_proof(self, session_id: str, nct_id: str) -> dict[str, object] | None:
@@ -252,12 +270,21 @@ class SnapshotReplayService:
             return None
         case_root = self.root / payload["snapshot_case_root"]
         reports = self._load(case_root / "reports.json")
-        return {
+        report = reports.get("initial", reports)
+        export_payload = {
             "schema_version": "trial-opt-report-v1",
             "session_id": session_id,
+            "patient_state_version": int(payload.get("patient_state_version", 0)),
             "mode": "snapshot",
-            "report": reports,
-            "disclaimer": (
-                "Research pre-screening only; not diagnosis, medical advice, or final eligibility."
+            "data_timestamp": self.manifest().data_timestamp,
+            "estimated_cost_usd": 0.0,
+            "model_execution": "snapshot_cache_no_live_model_call",
+            "medical_disclaimer": (
+                "Research pre-screening only; the trial team makes the final determination."
             ),
+            "report": report,
         }
+        _, digest = await self.store.write_json_artifact(
+            f"sessions/{session_id}/exports", export_payload
+        )
+        return {**export_payload, "artifact_sha256": digest}

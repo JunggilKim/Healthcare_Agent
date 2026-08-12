@@ -751,9 +751,7 @@ class ProtocolCompilationService:
                         proposal=proposal,
                         slot_catalog=self.slot_catalog,
                         compiler_model_id=(
-                            "gemini-3.5-flash-lite"
-                            if compiler_fallback
-                            else "gemini-3.6-flash"
+                            "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                         ),
                         compiler_prompt_version="1.0.6",
                         created_at=now,
@@ -775,9 +773,7 @@ class ProtocolCompilationService:
                         review,
                         evaluation_date=evaluation_date,
                     )
-                    degradation_codes.append(
-                        "REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE"
-                    )
+                    degradation_codes.append("REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE")
                     review, reviewer_fallback = await self._review(
                         compilation, session_id=session_id
                     )

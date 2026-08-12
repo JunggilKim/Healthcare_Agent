@@ -87,12 +87,12 @@ def _case_source_spec(value: str) -> tuple[str, str, Path]:
 def _case_selection_spec(value: str) -> tuple[str, list[str]]:
     case_id, separator, ids = value.partition(":")
     selected = ids.split(",") if ids else []
-    if not separator or case_id not in CASE_IDS or any(
-        not nct_id.startswith("NCT") for nct_id in selected
+    if (
+        not separator
+        or case_id not in CASE_IDS
+        or any(not nct_id.startswith("NCT") for nct_id in selected)
     ):
-        raise argparse.ArgumentTypeError(
-            "case selection must be CASE_ID:NCT########,NCT########"
-        )
+        raise argparse.ArgumentTypeError("case selection must be CASE_ID:NCT########,NCT########")
     return case_id, selected
 
 
@@ -140,9 +140,7 @@ def main() -> None:
     for case_id, selected_ids in case_selections.items():
         if case_id == "S004":
             raise RuntimeError("DEMO_CORPUS_S004_USE_DEDICATED_SOURCE_ARGUMENT")
-        if len(selected_ids) != args.trials_per_case or len(set(selected_ids)) != len(
-            selected_ids
-        ):
+        if len(selected_ids) != args.trials_per_case or len(set(selected_ids)) != len(selected_ids):
             raise RuntimeError(f"DEMO_CORPUS_CASE_SELECTION_INVALID:{case_id}")
 
     acquisition = orjson.loads((args.acquisition / "acquisition.json").read_bytes())
@@ -182,10 +180,7 @@ def main() -> None:
         }
         if case_id == "S004":
             selected_ids = [nct_id for nct_id, _ in args.s004_source]
-            sourced = [
-                _compiled_source(case_id, nct_id, root)
-                for nct_id, root in args.s004_source
-            ]
+            sourced = [_compiled_source(case_id, nct_id, root) for nct_id, root in args.s004_source]
             compiled = [item[0] for item in sourced]
             reviews = [item[1] for item in sourced]
             source_records.update(
@@ -226,10 +221,7 @@ def main() -> None:
                     compiled.append(compiled_item)
                     reviews.append(review_item)
                     source_records[nct_id] = (
-                        overrides[nct_id]
-                        .resolve()
-                        .relative_to(REPOSITORY_ROOT)
-                        .as_posix()
+                        overrides[nct_id].resolve().relative_to(REPOSITORY_ROOT).as_posix()
                     )
                 else:
                     compiled.append(base_compiled[nct_id])

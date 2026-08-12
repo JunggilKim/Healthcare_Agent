@@ -698,14 +698,21 @@ async def materialize(args: argparse.Namespace) -> dict[str, object]:
         for path in sorted((args.output / "sessions").rglob("*"))
         if path.is_file()
     }
-    data_timestamps = {str(item["data_timestamp"]) for item in acquisition["cases"]}
-    if len(data_timestamps) != 1:
-        raise RuntimeError("SNAPSHOT_CASE_DATA_TIMESTAMPS_DIFFER")
+    case_data_timestamps = {
+        str(item["case_id"]): str(item["data_timestamp"]) for item in acquisition["cases"]
+    }
+    if set(case_data_timestamps) != set(CASE_IDS):
+        raise RuntimeError("SNAPSHOT_CASE_DATA_TIMESTAMPS_INCOMPLETE")
     snapshot_acquisition = {
         "schema_version": "trial-opt-live-acquisition-v1",
         "mode": "LIVE",
         "case_ids": list(CASE_IDS),
-        "data_timestamp": next(iter(data_timestamps)),
+        # ClinicalTrials.gov may advance its version holder between otherwise
+        # related queries.  A single release timestamp therefore uses the
+        # oldest included registry version so the UI never overstates corpus
+        # freshness, while the exact per-case versions remain auditable.
+        "data_timestamp": min(case_data_timestamps.values()),
+        "case_data_timestamps": case_data_timestamps,
         "source_candidate_acquisition_sha256": _sha256(args.acquisition / "acquisition.json"),
         "source_release_corpus_sha256": _sha256(args.corpus / "manifest.json"),
         "project_id": args.project,

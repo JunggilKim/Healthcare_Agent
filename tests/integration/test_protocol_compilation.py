@@ -485,9 +485,7 @@ async def test_offline_repair_failure_quarantines_rejected_criterion() -> None:
     )
     assert result.review_artifact is not None
     assert result.compilation.compiled_trial.criteria[0].opaque is True
-    assert result.degradation_codes == [
-        "REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE"
-    ]
+    assert result.degradation_codes == ["REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE"]
 
 
 @pytest.mark.asyncio
@@ -700,20 +698,15 @@ def test_offline_compiler_isolates_diagnosis_acronym_but_not_treatment_acronym()
         "Inclusion Criteria:\n"
         "* Participant has a histologically confirmed diagnosis of MIBC (T2-T4aN0M0).\n"
     )
-    items = service._isolate_explicit_muscle_phrases(
-        source, service._offline_source_items(source)
-    )
+    items = service._isolate_explicit_muscle_phrases(source, service._offline_source_items(source))
     assert "".join(source[item.start : item.end] for item in items) == source[20:]
     assert [
-        source[item.start : item.end]
-        for item in items
-        if source[item.start : item.end] == "MIBC"
+        source[item.start : item.end] for item in items if source[item.start : item.end] == "MIBC"
     ] == ["MIBC"]
     assert all(item.isolation_required for item in items)
 
     treatment = (
-        "Inclusion Criteria:\n"
-        "* Participant has received no prior systemic treatment for MIBC.\n"
+        "Inclusion Criteria:\n* Participant has received no prior systemic treatment for MIBC.\n"
     )
     original = service._offline_source_items(treatment)
     assert service._isolate_explicit_muscle_phrases(treatment, original) == original
@@ -762,10 +755,7 @@ def test_offline_compiler_isolates_positive_histology_phrase_with_residuals() ->
 
 def test_offline_compiler_isolates_explicit_acute_pancreatitis_diagnosis() -> None:
     service = ProtocolCompilationService
-    source = (
-        "Inclusion Criteria:\n"
-        "* Diagnosis of mild or moderately severe acute pancreatitis.\n"
-    )
+    source = "Inclusion Criteria:\n* Diagnosis of mild or moderately severe acute pancreatitis.\n"
     items = service._isolate_explicit_acute_pancreatitis_phrases(
         source, service._offline_source_items(source)
     )
