@@ -283,7 +283,14 @@ class ProtocolCompilationService:
         isolated: list[_OfflineSourceItem] = []
         for item in items:
             text = source[item.start : item.end]
-            matches = list(_EXPLICIT_ACUTE_PANCREATITIS_PHRASE.finditer(text))
+            matches = [
+                match
+                for match in _EXPLICIT_ACUTE_PANCREATITIS_PHRASE.finditer(text)
+                if _POSITIVE_DIAGNOSIS_CUE.search(text[max(0, match.start() - 80) : match.start()])
+                and not _NON_DIAGNOSIS_CONTEXT.search(
+                    text[max(0, match.start() - 80) : match.start()]
+                )
+            ]
             if (
                 item.direction is not SourceDirection.INCLUSION
                 or item.isolation_required
@@ -292,12 +299,6 @@ class ProtocolCompilationService:
                 isolated.append(item)
                 continue
             match = matches[0]
-            context = text[: match.start()]
-            if not _POSITIVE_DIAGNOSIS_CUE.search(context) or _NON_DIAGNOSIS_CONTEXT.search(
-                context
-            ):
-                isolated.append(item)
-                continue
             boundaries = (0, match.start(), match.end(), len(text))
             for start, end in pairwise(boundaries):
                 if start == end or not text[start:end].strip():

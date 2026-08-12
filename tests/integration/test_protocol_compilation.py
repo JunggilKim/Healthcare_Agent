@@ -783,6 +783,20 @@ def test_offline_compiler_isolates_explicit_acute_pancreatitis_diagnosis() -> No
     original = service._offline_source_items(history)
     assert service._isolate_explicit_acute_pancreatitis_phrases(history, original) == original
 
+    repeated = (
+        "Inclusion Criteria:\n"
+        "* Definitive diagnosis of acute pancreatitis requires pain, laboratory, or "
+        "imaging evidence compatible with acute pancreatitis.\n"
+    )
+    items = service._isolate_explicit_acute_pancreatitis_phrases(
+        repeated, service._offline_source_items(repeated)
+    )
+    assert [
+        repeated[item.start : item.end]
+        for item in items
+        if repeated[item.start : item.end] == "acute pancreatitis"
+    ] == ["acute pancreatitis"]
+
 
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:
     root = Path("data/fixtures/compiled/S004")
