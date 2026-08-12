@@ -29,6 +29,7 @@ from backend.app.evaluation.paraphrases import (  # noqa: E402
     apply_validated_paraphrases,
     build_extraction_requests,
     build_paraphrase_requests,
+    paraphrase_candidate_worlds,
     parse_extraction_responses,
     parse_paraphrase_responses,
     select_paraphrase_worlds,
@@ -80,8 +81,20 @@ def _load_selection(path: Path, benchmark_path: Path) -> list[SelectedWorld]:
 def _prepare(args: argparse.Namespace) -> None:
     benchmark = _load_benchmark(args.benchmark)
     prompt_path = REPOSITORY_ROOT / "prompts" / "synthetic_paraphrase_v1.md"
+    candidates = paraphrase_candidate_worlds(benchmark)
+    target_count = len(select_paraphrase_worlds(benchmark))
+    candidate_count = args.candidate_count or target_count
+    if args.candidate_offset < 0 or candidate_count < 1:
+        raise RuntimeError("PARAPHRASE_CANDIDATE_RANGE_INVALID")
+    selected_candidates = candidates[
+        args.candidate_offset : args.candidate_offset + candidate_count
+    ]
+    if len(selected_candidates) != candidate_count:
+        raise RuntimeError("PARAPHRASE_CANDIDATE_RANGE_EXCEEDS_BENCHMARK")
     requests, selected = build_paraphrase_requests(
-        benchmark, prompt_template=prompt_path.read_text(encoding="utf-8")
+        benchmark,
+        prompt_template=prompt_path.read_text(encoding="utf-8"),
+        selected=selected_candidates,
     )
     output = args.output_dir.resolve()
     if output.exists() and any(output.iterdir()):
@@ -96,6 +109,9 @@ def _prepare(args: argparse.Namespace) -> None:
         "model_id": PARAPHRASE_MODEL_ID,
         "prompt_version": PARAPHRASE_PROMPT_VERSION,
         "prompt_sha256": hashlib.sha256(prompt_path.read_bytes()).hexdigest(),
+        "candidate_offset": args.candidate_offset,
+        "candidate_count": candidate_count,
+        "target_validated_count": target_count,
         "selected_worlds": [
             {"world_id": item.world_id, "language": item.language} for item in selected
         ],
@@ -107,7 +123,10 @@ def _prepare(args: argparse.Namespace) -> None:
 def _prepare_validation(args: argparse.Namespace) -> None:
     benchmark = _load_benchmark(args.benchmark)
     selected = _load_selection(args.selection_manifest, args.benchmark)
-    if selected != select_paraphrase_worlds(benchmark):
+    selection_manifest = orjson.loads(args.selection_manifest.read_bytes())
+    offset = int(selection_manifest.get("candidate_offset", 0))
+    expected = paraphrase_candidate_worlds(benchmark)[offset : offset + len(selected)]
+    if selected != expected:
         raise RuntimeError("PARAPHRASE_SELECTION_NOT_REPRODUCIBLE")
     paraphrases = parse_paraphrase_responses(_jsonl_rows(args.paraphrase_output), selected)
     prompt = (REPOSITORY_ROOT / "prompts" / "patient_extraction_v1.md").read_text(encoding="utf-8")
@@ -368,6 +387,126 @@ def _consolidate_validation(args: argparse.Namespace) -> None:
     print(orjson.dumps({"output": str(output), **manifest}).decode())
 
 
+def _finalize_candidate_pool(args: argparse.Namespace) -> None:
+    if not (len(args.selection_manifest) == len(args.paraphrases) == len(args.extraction_output)):
+        raise RuntimeError("PARAPHRASE_POOL_BUNDLE_COUNT_MISMATCH")
+    benchmark = _load_benchmark(args.benchmark)
+    candidate_order = paraphrase_candidate_worlds(benchmark)
+    target_count = len(select_paraphrase_worlds(benchmark))
+    worlds = {world.world_id: world for world in benchmark.worlds}
+    validated: dict[str, tuple[SelectedWorld, str, PatientExtractionResult, dict[str, Any]]] = {}
+    bundle_hashes = []
+    for selection_path, paraphrase_path, extraction_path in zip(
+        args.selection_manifest,
+        args.paraphrases,
+        args.extraction_output,
+        strict=True,
+    ):
+        selected = _load_selection(selection_path, args.benchmark)
+        selected_by_id = {item.world_id: item for item in selected}
+        candidate_paraphrases = orjson.loads(paraphrase_path.read_bytes())
+        if not isinstance(candidate_paraphrases, dict) or set(candidate_paraphrases) != set(
+            selected_by_id
+        ):
+            raise RuntimeError("PARAPHRASE_POOL_CANDIDATE_SET_MISMATCH")
+        for row in _jsonl_rows([extraction_path]):
+            world_id = row.get("id")
+            if not isinstance(world_id, str) or world_id not in selected_by_id:
+                raise RuntimeError("PARAPHRASE_POOL_RESPONSE_ID_INVALID")
+            if world_id in validated:
+                continue
+            extraction = parse_extraction_responses([row], {world_id})[world_id]
+            narrative = candidate_paraphrases[world_id]
+            if not isinstance(narrative, str):
+                raise RuntimeError("PARAPHRASE_POOL_NARRATIVE_INVALID")
+            try:
+                validate_paraphrase_spans(worlds[world_id], narrative, extraction)
+            except ValueError:
+                continue
+            validated[world_id] = (
+                selected_by_id[world_id],
+                narrative,
+                extraction,
+                row,
+            )
+        bundle_hashes.append(
+            {
+                "selection_manifest": selection_path.as_posix(),
+                "selection_sha256": hashlib.sha256(selection_path.read_bytes()).hexdigest(),
+                "paraphrases": paraphrase_path.as_posix(),
+                "paraphrases_sha256": hashlib.sha256(paraphrase_path.read_bytes()).hexdigest(),
+                "extraction_output": extraction_path.as_posix(),
+                "extraction_sha256": hashlib.sha256(extraction_path.read_bytes()).hexdigest(),
+            }
+        )
+    language_targets = {"ko": (target_count + 1) // 2, "en": target_count // 2}
+    selected_final = []
+    language_counts = {"ko": 0, "en": 0}
+    for candidate in candidate_order:
+        if candidate.world_id not in validated:
+            continue
+        if language_counts[candidate.language] >= language_targets[candidate.language]:
+            continue
+        selected_final.append(candidate)
+        language_counts[candidate.language] += 1
+        if len(selected_final) == target_count:
+            break
+    if len(selected_final) != target_count:
+        raise RuntimeError(
+            "PARAPHRASE_POOL_VALIDATED_CANDIDATES_INSUFFICIENT:"
+            f"available={len(validated)}:selected={len(selected_final)}:"
+            f"language_counts={language_counts}:targets={language_targets}"
+        )
+    final_ids = {item.world_id for item in selected_final}
+    final_paraphrases = {world_id: validated[world_id][1] for world_id in sorted(final_ids)}
+    final_extractions = {world_id: validated[world_id][2] for world_id in final_ids}
+    updated = apply_validated_paraphrases(
+        benchmark,
+        final_paraphrases,
+        final_extractions,
+        selected_final,
+    )
+    if not updated.acceptance_eligible:
+        raise RuntimeError("PARAPHRASE_POOL_FINAL_BENCHMARK_NOT_ACCEPTANCE_ELIGIBLE")
+    output = args.output_dir.resolve()
+    if output.exists() and any(output.iterdir()):
+        raise SystemExit(f"Refusing to overwrite non-empty directory: {output}")
+    output.mkdir(parents=True, exist_ok=True)
+    paraphrase_output = output / "paraphrases.json"
+    paraphrase_output.write_bytes(canonical_json_bytes(final_paraphrases))
+    extraction_output = output / "extraction_responses.jsonl"
+    _write_jsonl(
+        extraction_output,
+        [validated[item.world_id][3] for item in selected_final],
+    )
+    selection_output = output / "selection_manifest.json"
+    selection_payload = {
+        "schema_version": "trial-opt-paraphrase-final-selection-v1",
+        "benchmark_sha256": hashlib.sha256(args.benchmark.read_bytes()).hexdigest(),
+        "selection_policy": "fixed-seed candidate order; invalid paraphrases discarded",
+        "target_validated_count": target_count,
+        "language_counts": language_counts,
+        "selected_worlds": [
+            {"world_id": item.world_id, "language": item.language} for item in selected_final
+        ],
+    }
+    selection_output.write_bytes(canonical_json_bytes(selection_payload))
+    manifest = {
+        "schema_version": "trial-opt-paraphrase-pool-finalization-v1",
+        "status": "COMPLETE",
+        "benchmark_sha256": hashlib.sha256(args.benchmark.read_bytes()).hexdigest(),
+        "candidate_bundle_sha256": bundle_hashes,
+        "validated_candidate_count": len(validated),
+        "selected_count": target_count,
+        "language_counts": language_counts,
+        "selection_sha256": hashlib.sha256(selection_output.read_bytes()).hexdigest(),
+        "paraphrases_sha256": hashlib.sha256(paraphrase_output.read_bytes()).hexdigest(),
+        "extraction_sha256": hashlib.sha256(extraction_output.read_bytes()).hexdigest(),
+    }
+    (output / "pool_manifest.json").write_bytes(canonical_json_bytes(manifest))
+    print(orjson.dumps({"output": str(output), **manifest}).decode())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prepare and validate fixed-seed Dataset A paraphrase batches"
@@ -376,6 +515,8 @@ def main() -> None:
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--benchmark", type=Path, required=True)
     prepare.add_argument("--output-dir", type=Path, required=True)
+    prepare.add_argument("--candidate-offset", type=int, default=0)
+    prepare.add_argument("--candidate-count", type=int)
     prepare.set_defaults(handler=_prepare)
 
     validate = subparsers.add_parser("prepare-validation")
@@ -407,6 +548,14 @@ def main() -> None:
     consolidate.add_argument("--extraction-output", type=Path, action="append", required=True)
     consolidate.add_argument("--output-dir", type=Path, required=True)
     consolidate.set_defaults(handler=_consolidate_validation)
+
+    finalize_pool = subparsers.add_parser("finalize-candidate-pool")
+    finalize_pool.add_argument("--benchmark", type=Path, required=True)
+    finalize_pool.add_argument("--selection-manifest", type=Path, action="append", required=True)
+    finalize_pool.add_argument("--paraphrases", type=Path, action="append", required=True)
+    finalize_pool.add_argument("--extraction-output", type=Path, action="append", required=True)
+    finalize_pool.add_argument("--output-dir", type=Path, required=True)
+    finalize_pool.set_defaults(handler=_finalize_candidate_pool)
 
     apply = subparsers.add_parser("apply")
     apply.add_argument("--benchmark", type=Path, required=True)

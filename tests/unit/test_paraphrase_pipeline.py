@@ -11,6 +11,7 @@ from backend.app.evaluation.paraphrases import (
     apply_validated_paraphrases,
     build_paraphrase_requests,
     inline_json_schema_references,
+    paraphrase_candidate_worlds,
     parse_paraphrase_responses,
     select_paraphrase_worlds,
 )
@@ -88,6 +89,18 @@ def test_fixed_seed_paraphrase_selection_and_batch_requests_are_exact() -> None:
     assert [item.language for item in selected] == ["ko", "en", "ko"]
     assert {row["id"] for row in requests} == {item.world_id for item in selected}
     assert all(row["request"]["generationConfig"]["temperature"] == 0.2 for row in requests)
+
+    candidates = paraphrase_candidate_worlds(benchmark)
+    alternate = candidates[len(selected) : len(selected) + 2]
+    alternate_requests, repeated_alternate = build_paraphrase_requests(
+        benchmark,
+        prompt_template=(
+            "lang={target_language}\nfacts={structured_facts_json}\ntext={template_narrative}"
+        ),
+        selected=alternate,
+    )
+    assert repeated_alternate == alternate
+    assert {row["id"] for row in alternate_requests} == {item.world_id for item in alternate}
 
 
 def test_paraphrase_is_applied_only_after_all_facts_are_recovered() -> None:

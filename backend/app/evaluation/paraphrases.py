@@ -64,13 +64,17 @@ def _selection_key(seed: int, world_id: str) -> tuple[str, str]:
 
 def select_paraphrase_worlds(benchmark: BenchmarkArtifact) -> list[SelectedWorld]:
     count = min(120, round(len(benchmark.worlds) * 0.30))
-    selected = sorted(
+    return paraphrase_candidate_worlds(benchmark)[:count]
+
+
+def paraphrase_candidate_worlds(benchmark: BenchmarkArtifact) -> list[SelectedWorld]:
+    ordered = sorted(
         benchmark.worlds,
         key=lambda world: _selection_key(benchmark.seed, world.world_id),
-    )[:count]
+    )
     return [
         SelectedWorld(world_id=world.world_id, language="ko" if index % 2 == 0 else "en")
-        for index, world in enumerate(selected)
+        for index, world in enumerate(ordered)
     ]
 
 
@@ -78,9 +82,10 @@ def build_paraphrase_requests(
     benchmark: BenchmarkArtifact,
     *,
     prompt_template: str,
+    selected: list[SelectedWorld] | None = None,
 ) -> tuple[list[dict[str, Any]], list[SelectedWorld]]:
     worlds = {world.world_id: world for world in benchmark.worlds}
-    selected = select_paraphrase_worlds(benchmark)
+    selected = selected or select_paraphrase_worlds(benchmark)
     requests: list[dict[str, Any]] = []
     response_schema = {
         "type": "OBJECT",
