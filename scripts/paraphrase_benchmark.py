@@ -32,6 +32,7 @@ from backend.app.evaluation.paraphrases import (  # noqa: E402
     parse_extraction_responses,
     parse_paraphrase_responses,
     select_paraphrase_worlds,
+    validate_paraphrase_spans,
 )
 from backend.app.infrastructure.cache import LocalModelResultCache  # noqa: E402
 from backend.app.infrastructure.circuit_breaker import CircuitOpenError  # noqa: E402
@@ -304,6 +305,69 @@ def _apply(args: argparse.Namespace) -> None:
     )
 
 
+def _consolidate_validation(args: argparse.Namespace) -> None:
+    benchmark = _load_benchmark(args.benchmark)
+    selected = _load_selection(args.selection_manifest, args.benchmark)
+    expected = {item.world_id for item in selected}
+    paraphrases = orjson.loads(args.paraphrases.read_bytes())
+    if (
+        not isinstance(paraphrases, dict)
+        or set(paraphrases) != expected
+        or not all(isinstance(value, str) for value in paraphrases.values())
+    ):
+        raise RuntimeError("PARAPHRASE_CONSOLIDATION_INPUT_SET_INVALID")
+    worlds = {world.world_id: world for world in benchmark.worlds}
+    accepted: dict[str, dict[str, Any]] = {}
+    rejected: list[dict[str, Any]] = []
+    for row in _jsonl_rows(args.extraction_output):
+        world_id = row.get("id")
+        if not isinstance(world_id, str) or world_id not in expected:
+            raise RuntimeError("PARAPHRASE_CONSOLIDATION_RESPONSE_ID_INVALID")
+        if world_id in accepted:
+            continue
+        try:
+            extraction = parse_extraction_responses([row], {world_id})[world_id]
+            validate_paraphrase_spans(worlds[world_id], str(paraphrases[world_id]), extraction)
+        except ValueError as error:
+            rejected.append(
+                {
+                    "id": world_id,
+                    "error_type": type(error).__name__,
+                    "error_code": str(error).split(":", 1)[0][:200],
+                }
+            )
+            continue
+        accepted[world_id] = row
+    output = args.output_dir.resolve()
+    if output.exists() and any(output.iterdir()):
+        raise SystemExit(f"Refusing to overwrite non-empty directory: {output}")
+    output.mkdir(parents=True, exist_ok=True)
+    response_path = output / "extraction_responses.jsonl"
+    _write_jsonl(response_path, [accepted[key] for key in sorted(accepted)])
+    rejection_path = output / "rejected_extractions.jsonl"
+    _write_jsonl(rejection_path, rejected)
+    missing = sorted(expected - set(accepted))
+    manifest = {
+        "schema_version": "trial-opt-paraphrase-consolidation-v1",
+        "status": "COMPLETE" if not missing else "INCOMPLETE",
+        "benchmark_sha256": hashlib.sha256(args.benchmark.read_bytes()).hexdigest(),
+        "selection_manifest_sha256": hashlib.sha256(
+            args.selection_manifest.read_bytes()
+        ).hexdigest(),
+        "paraphrases_sha256": hashlib.sha256(args.paraphrases.read_bytes()).hexdigest(),
+        "input_sha256": {
+            path.as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in args.extraction_output
+        },
+        "response_sha256": hashlib.sha256(response_path.read_bytes()).hexdigest(),
+        "accepted_count": len(accepted),
+        "rejected_attempt_count": len(rejected),
+        "missing_world_ids": missing,
+    }
+    (output / "consolidation_manifest.json").write_bytes(canonical_json_bytes(manifest))
+    print(orjson.dumps({"output": str(output), **manifest}).decode())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prepare and validate fixed-seed Dataset A paraphrase batches"
@@ -335,6 +399,14 @@ def main() -> None:
     )
     online.add_argument("--allow-live-validation", action="store_true")
     online.set_defaults(handler=_validate_online)
+
+    consolidate = subparsers.add_parser("consolidate-validation")
+    consolidate.add_argument("--benchmark", type=Path, required=True)
+    consolidate.add_argument("--selection-manifest", type=Path, required=True)
+    consolidate.add_argument("--paraphrases", type=Path, required=True)
+    consolidate.add_argument("--extraction-output", type=Path, action="append", required=True)
+    consolidate.add_argument("--output-dir", type=Path, required=True)
+    consolidate.set_defaults(handler=_consolidate_validation)
 
     apply = subparsers.add_parser("apply")
     apply.add_argument("--benchmark", type=Path, required=True)

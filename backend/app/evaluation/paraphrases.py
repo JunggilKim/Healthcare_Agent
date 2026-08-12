@@ -208,7 +208,7 @@ def _value_key(fact: WorldFact) -> bytes:
     )
 
 
-def _validated_spans(
+def validate_paraphrase_spans(
     world: PatientWorld,
     narrative: str,
     extraction: PatientExtractionResult,
@@ -270,7 +270,7 @@ def apply_validated_paraphrases(
         if extraction.language != item.language:
             raise ValueError(f"PARAPHRASE_LANGUAGE_MISMATCH:{world.world_id}")
         narrative = paraphrases[world.world_id]
-        spans = _validated_spans(world, narrative, extraction)
+        spans = validate_paraphrase_spans(world, narrative, extraction)
         artifact_hash = hashlib.sha256(
             canonical_json_bytes(
                 {
