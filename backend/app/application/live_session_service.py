@@ -551,7 +551,10 @@ class LiveSessionService:
         compiled_trials: dict[str, CompiledTrial] = {}
         reviews: dict[str, ProtocolReviewArtifact] = {}
         raw_trials: dict[str, RawTrialRecord] = {}
-        compilation_semaphore = asyncio.Semaphore(2)
+        # Compilation is external I/O. Four trials in flight keeps the
+        # eight-trial cold path within the release latency budget while the
+        # process-level guard still caps cold sessions at two.
+        compilation_semaphore = asyncio.Semaphore(4)
 
         async def compile_one(nct_id: str) -> tuple[str, CompilationWorkflowResult]:
             candidate = candidate_by_id[nct_id]

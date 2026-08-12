@@ -71,9 +71,10 @@ make demo-offline
 
 ## Optional Live Mode setup
 
-Live Mode is not part of the primary demo and must not be claimed validated until the pending GCP
-checks pass. This project uses Google Cloud first-party endpoints with ADC, not Google AI Studio
-billing or API keys.
+Live Mode is not part of the primary demo. The release deployment completed one explicit Live
+Mode smoke on Google Cloud; its observed cold analysis latency is recorded in the release evidence
+and is not substituted for the larger performance sample. This project uses Google Cloud
+first-party endpoints with ADC, not Google AI Studio billing or API keys.
 
 ```bash
 gcloud auth application-default login
@@ -138,8 +139,9 @@ Release evaluation additionally uses these non-imputable evidence stages:
 
 Committed Phase-6 numbers are explicitly `acceptance_eligible=false`: they are a one-trial S004
 structured engineering smoke, not Dataset A, stable-top-3 evidence, or clinical validation. The
-mandatory 24–36-trial reviewed corpus, complete-world annotation subset of at least 200 pairs, and
-paid B5/P0/P1 baselines are pending. No missing result is imputed.
+24-trial three-case corpus and 310-world Dataset A are prepared. Exact-hash snapshot review,
+complete-world annotation of at least 200 pairs, retrieval relevance review, and the review-bound
+B5/P0/P1 baselines remain pending external reviewer input. No missing result is imputed.
 
 ## GCP deployment summary
 
@@ -148,6 +150,11 @@ frozen production command uses Cloud Run in `asia-northeast3`, one Uvicorn worke
 two named Secret Manager mappings, and no service-account key. Run
 `scripts/smoke_test_deployment.sh --base-url URL`; `--live` is explicit and makes exactly one live
 session. Full instructions are in the scripts and `TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`.
+
+The current release candidate is deployed at
+`https://trial-opt-web-ubvr3b22dq-du.a.run.app`. Snapshot smoke, one explicit Live smoke, the
+frozen-model access probe, and an immutable Artifact Registry digest were validated on the release
+candidate commit. Commit-bound machine-readable evidence is written under `artifacts/release/`.
 
 ## Data sources and terms
 
@@ -164,11 +171,13 @@ budgets, not billing guarantees. Details are in [MODEL_AND_COST_CARD.md](MODEL_A
 
 ## Known limitations
 
-The full reviewed snapshot, mandatory Dataset A results, paid LLM baselines, Docker image build,
-GCP deployment, and current model lifecycle/cost smoke remain pending external validation. The
-bounded AST cannot formalize all protocol language; material unsupported text stays `OPAQUE`.
-ClinicalTrials.gov records, APIs, models, and prices can become stale. False positives and false
-negatives remain possible. See [SAFETY_AND_LIMITATIONS.md](SAFETY_AND_LIMITATIONS.md).
+The exact-hash snapshot review and Dataset A/retrieval reviewer labels remain pending external
+validation. Those labels are prerequisites for final P0/P1/B5 evidence and acceptance-eligible
+metrics. The one observed production cold Live analysis took 206.17 seconds, above the 90-second
+release target; it is reported as measured and is not imputed away. The bounded AST cannot
+formalize all protocol language; material unsupported text stays `OPAQUE`. ClinicalTrials.gov
+records, APIs, models, and prices can become stale. False positives and false negatives remain
+possible. See [SAFETY_AND_LIMITATIONS.md](SAFETY_AND_LIMITATIONS.md).
 
 ## References
 
@@ -179,8 +188,9 @@ negatives remain possible. See [SAFETY_AND_LIMITATIONS.md](SAFETY_AND_LIMITATION
 
 ## Release artifact identifiers
 
-- Source commit: run `git rev-parse HEAD`; final tagged commit is pending strict acceptance.
-- Snapshot hash: pending complete S004/S008/S001 freeze.
-- Docker image digest: pending Docker storage recovery and successful image build.
+- Source commit: run `git rev-parse HEAD`; final tag remains gated on strict acceptance.
+- Snapshot hash: `data/demo/current/manifest.json` (three cases; exact-hash review pending).
+- Docker image digest and production URL: `artifacts/release/IMAGE_DIGEST.txt` and
+  `artifacts/release/PRODUCTION_URL.txt` after deployment.
 - Evaluation run IDs: recorded in `artifacts/eval/latest/metrics.json` (fixture smoke only).
-- Production URL and tag `v1.0.0-challenge`: pending external validation; not fabricated here.
+- Tag `v1.0.0-challenge`: pending strict acceptance; not fabricated here.

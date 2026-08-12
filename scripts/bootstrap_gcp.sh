@@ -28,6 +28,8 @@ command -v gcloud >/dev/null || { echo "gcloud is required" >&2; exit 1; }
 
 BUCKET="${PROJECT_ID}-trial-opt-artifacts"
 RUNTIME_SA="trial-opt-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+BUILD_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 APIS=(
   run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com
   firestore.googleapis.com storage.googleapis.com aiplatform.googleapis.com
@@ -48,6 +50,12 @@ gcloud services enable "${APIS[@]}" --project "$PROJECT_ID"
 if ! gcloud artifacts repositories describe trial-opt --location "$REGION" --project "$PROJECT_ID" >/dev/null 2>&1; then
   gcloud artifacts repositories create trial-opt --repository-format=docker --location "$REGION" --project "$PROJECT_ID" --description="TRIAL-OPT challenge images"
 fi
+gcloud artifacts repositories add-iam-policy-binding trial-opt \
+  --location "$REGION" --project "$PROJECT_ID" \
+  --member="serviceAccount:${BUILD_SA}" --role=roles/artifactregistry.writer >/dev/null
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:${BUILD_SA}" --role=roles/logging.logWriter \
+  --condition=None >/dev/null
 
 if ! gcloud storage buckets describe "gs://${BUCKET}" --project "$PROJECT_ID" >/dev/null 2>&1; then
   gcloud storage buckets create "gs://${BUCKET}" --project "$PROJECT_ID" --location "$REGION" --uniform-bucket-level-access --public-access-prevention
@@ -77,7 +85,8 @@ for SECRET in "${SECRETS[@]}"; do
   fi
   ENABLED_VERSION="$(gcloud secrets versions list "$SECRET" --project "$PROJECT_ID" --filter='state=ENABLED' --limit=1 --format='value(name)')"
   if [[ -z "$ENABLED_VERSION" ]]; then
-    openssl rand 32 | gcloud secrets versions add "$SECRET" --data-file=- --project "$PROJECT_ID" >/dev/null
+    openssl rand -base64 48 | tr -d '\n' | \
+      gcloud secrets versions add "$SECRET" --data-file=- --project "$PROJECT_ID" >/dev/null
     echo "Created the first enabled version for ${SECRET}; value was not printed."
   fi
   gcloud secrets add-iam-policy-binding "$SECRET" --project "$PROJECT_ID" --member="serviceAccount:${RUNTIME_SA}" --role=roles/secretmanager.secretAccessor >/dev/null
