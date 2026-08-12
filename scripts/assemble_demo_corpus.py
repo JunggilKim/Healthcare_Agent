@@ -84,6 +84,18 @@ def _case_source_spec(value: str) -> tuple[str, str, Path]:
     return case_id, nct_id, root
 
 
+def _case_selection_spec(value: str) -> tuple[str, list[str]]:
+    case_id, separator, ids = value.partition(":")
+    selected = ids.split(",") if ids else []
+    if not separator or case_id not in CASE_IDS or any(
+        not nct_id.startswith("NCT") for nct_id in selected
+    ):
+        raise argparse.ArgumentTypeError(
+            "case selection must be CASE_ID:NCT########,NCT########"
+        )
+    return case_id, selected
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Assemble an exact multi-source 24-trial snapshot corpus"
@@ -97,6 +109,13 @@ def main() -> None:
         type=_case_source_spec,
         default=[],
         help="override a non-S004 case source as CASE_ID:NCT########=compilation-root",
+    )
+    parser.add_argument(
+        "--case-selection",
+        action="append",
+        type=_case_selection_spec,
+        default=[],
+        help="select exact non-S004 base trials as CASE_ID:NCT########,...",
     )
     parser.add_argument("--trials-per-case", type=int, choices=range(8, 13), default=8)
     parser.add_argument("--output", type=Path, required=True)
@@ -113,10 +132,18 @@ def main() -> None:
             raise RuntimeError("DEMO_CORPUS_S004_USE_DEDICATED_SOURCE_ARGUMENT")
         case_sources.setdefault(case_id, []).append((nct_id, root))
     for case_id, sources in case_sources.items():
-        if len(sources) != args.trials_per_case:
-            raise RuntimeError(f"DEMO_CORPUS_CASE_SOURCE_COUNT_INVALID:{case_id}")
         if len({nct_id for nct_id, _ in sources}) != len(sources):
             raise RuntimeError(f"DEMO_CORPUS_CASE_SOURCE_DUPLICATE:{case_id}")
+    case_selections = dict(args.case_selection)
+    if len(case_selections) != len(args.case_selection):
+        raise RuntimeError("DEMO_CORPUS_CASE_SELECTION_DUPLICATE")
+    for case_id, selected_ids in case_selections.items():
+        if case_id == "S004":
+            raise RuntimeError("DEMO_CORPUS_S004_USE_DEDICATED_SOURCE_ARGUMENT")
+        if len(selected_ids) != args.trials_per_case or len(set(selected_ids)) != len(
+            selected_ids
+        ):
+            raise RuntimeError(f"DEMO_CORPUS_CASE_SELECTION_INVALID:{case_id}")
 
     acquisition = orjson.loads((args.acquisition / "acquisition.json").read_bytes())
     case_acquisition = {
@@ -167,22 +194,10 @@ def main() -> None:
                     for nct_id, root in args.s004_source
                 }
             )
-        elif case_id in case_sources:
-            sources = case_sources[case_id]
-            selected_ids = [nct_id for nct_id, _ in sources]
-            sourced = [
-                _compiled_source(case_id, nct_id, root) for nct_id, root in sources
-            ]
-            compiled = [item[0] for item in sourced]
-            reviews = [item[1] for item in sourced]
-            source_records.update(
-                {
-                    nct_id: root.resolve().relative_to(REPOSITORY_ROOT).as_posix()
-                    for nct_id, root in sources
-                }
-            )
         else:
-            selected_ids = base_case_ids[case_id][: args.trials_per_case]
+            selected_ids = case_selections.get(
+                case_id, base_case_ids[case_id][: args.trials_per_case]
+            )
             base_root = args.base_corpus / "sessions" / case_id
             base_compiled = {
                 item.nct_id: item
@@ -198,14 +213,30 @@ def main() -> None:
                     for row in orjson.loads((base_root / "reviews.json").read_bytes())
                 )
             }
-            compiled = [base_compiled[nct_id] for nct_id in selected_ids]
-            reviews = [base_reviews[nct_id] for nct_id in selected_ids]
-            source_records.update(
-                {
-                    nct_id: args.base_corpus.resolve().relative_to(REPOSITORY_ROOT).as_posix()
-                    for nct_id in selected_ids
-                }
-            )
+            overrides = dict(case_sources.get(case_id, []))
+            if not set(overrides) <= set(selected_ids):
+                raise RuntimeError(f"DEMO_CORPUS_CASE_SOURCE_NOT_SELECTED:{case_id}")
+            compiled = []
+            reviews = []
+            for nct_id in selected_ids:
+                if nct_id in overrides:
+                    compiled_item, review_item, _ = _compiled_source(
+                        case_id, nct_id, overrides[nct_id]
+                    )
+                    compiled.append(compiled_item)
+                    reviews.append(review_item)
+                    source_records[nct_id] = (
+                        overrides[nct_id]
+                        .resolve()
+                        .relative_to(REPOSITORY_ROOT)
+                        .as_posix()
+                    )
+                else:
+                    compiled.append(base_compiled[nct_id])
+                    reviews.append(base_reviews[nct_id])
+                    source_records[nct_id] = (
+                        args.base_corpus.resolve().relative_to(REPOSITORY_ROOT).as_posix()
+                    )
         if not set(selected_ids) <= set(raw_pool):
             raise RuntimeError(f"DEMO_CORPUS_RAW_TRIAL_MISSING:{case_id}")
         if not set(selected_ids) <= set(screening_rows):
