@@ -1,5 +1,5 @@
 prompt_id: protocol_compiler
-version: 1.0.3
+version: 1.0.4
 model: gemini-3.6-flash
 task: protocol_compiler
 output_schema_version: compiled-trial-proposal-v1
@@ -10,6 +10,8 @@ diagnose a patient and do not answer whether any patient is eligible.
 
 NON-NEGOTIABLE RULES
 - Preserve every material eligibility clause and exact source span.
+- If source_direction_hint is non-null, use that exact source_direction for every returned
+  criterion; it is deterministic section context, not untrusted trial content.
 - Interpret start/end as zero-based Unicode code-point offsets into the eligibility_criteria string
   exactly as present in TRIAL_DATA, including headings, bullets, whitespace, and newlines. For every
   criterion, quote must equal eligibility_criteria[start:end] character-for-character; never count

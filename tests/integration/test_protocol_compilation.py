@@ -145,7 +145,7 @@ def test_approved_review_verifies_executable_subset_but_not_opaque_trial() -> No
         proposal=proposal,
         slot_catalog=load_slot_catalog(),
         compiler_model_id="gemini-3.6-flash",
-        compiler_prompt_version="1.0.3",
+        compiler_prompt_version="1.0.4",
         created_at=datetime(2026, 8, 12, tzinfo=UTC),
         evaluation_date=date(2026, 8, 12),
     )
@@ -170,7 +170,7 @@ def test_noncontiguous_model_ast_ids_become_source_bound_opaque() -> None:
         proposal=proposal,
         slot_catalog=load_slot_catalog(),
         compiler_model_id="gemini-3.6-flash",
-        compiler_prompt_version="1.0.3",
+        compiler_prompt_version="1.0.4",
         created_at=datetime(2026, 8, 12, tzinfo=UTC),
         evaluation_date=date(2026, 8, 12),
     )
@@ -193,7 +193,7 @@ def test_unique_exact_quote_is_deterministically_reanchored() -> None:
         proposal=proposal,
         slot_catalog=load_slot_catalog(),
         compiler_model_id="gemini-3.6-flash",
-        compiler_prompt_version="1.0.3",
+        compiler_prompt_version="1.0.4",
         created_at=datetime(2026, 8, 12, tzinfo=UTC),
         evaluation_date=date(2026, 8, 12),
     )
@@ -215,7 +215,7 @@ def test_ambiguous_quote_cannot_be_reanchored() -> None:
             proposal=proposal,
             slot_catalog=load_slot_catalog(),
             compiler_model_id="gemini-3.6-flash",
-            compiler_prompt_version="1.0.3",
+            compiler_prompt_version="1.0.4",
             created_at=datetime(2026, 8, 12, tzinfo=UTC),
             evaluation_date=date(2026, 8, 12),
         )
@@ -229,7 +229,7 @@ def test_missing_numeric_unit_uses_slot_single_canonical_unit() -> None:
         proposal=proposal,
         slot_catalog=load_slot_catalog(),
         compiler_model_id="gemini-3.6-flash",
-        compiler_prompt_version="1.0.3",
+        compiler_prompt_version="1.0.4",
         created_at=datetime(2026, 8, 12, tzinfo=UTC),
         evaluation_date=date(2026, 8, 12),
     )
@@ -248,7 +248,7 @@ def test_numeric_node_unit_is_moved_to_typed_value() -> None:
         proposal=proposal,
         slot_catalog=load_slot_catalog(),
         compiler_model_id="gemini-3.6-flash",
-        compiler_prompt_version="1.0.3",
+        compiler_prompt_version="1.0.4",
         created_at=datetime(2026, 8, 12, tzinfo=UTC),
         evaluation_date=date(2026, 8, 12),
     )
@@ -266,7 +266,7 @@ def test_invalid_criterion_ast_becomes_source_bound_opaque_only() -> None:
         proposal=proposal,
         slot_catalog=load_slot_catalog(),
         compiler_model_id="gemini-3.6-flash",
-        compiler_prompt_version="1.0.3",
+        compiler_prompt_version="1.0.4",
         created_at=datetime(2026, 8, 12, tzinfo=UTC),
         evaluation_date=date(2026, 8, 12),
     )
@@ -336,7 +336,7 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     initial_compile = generator.arguments[0]
     repair_compile = generator.arguments[2]
     reviewer_call = generator.arguments[1]
-    assert initial_compile["prompt_version"] == "1.0.3"
+    assert initial_compile["prompt_version"] == "1.0.4"
     assert initial_compile["primary_thinking_level"] is None
     assert initial_compile["fallback_thinking_level"] is None
     assert initial_compile["primary_thinking_budget"] == 1024
@@ -386,7 +386,7 @@ async def test_offline_reviewer_chunks_merge_without_changing_live_default() -> 
         proposal=compiler_proposal,
         slot_catalog=load_slot_catalog(),
         compiler_model_id="gemini-3.6-flash",
-        compiler_prompt_version="1.0.3",
+        compiler_prompt_version="1.0.4",
         created_at=datetime(2026, 8, 12, tzinfo=UTC),
         evaluation_date=date(2026, 8, 12),
     )
@@ -398,6 +398,83 @@ async def test_offline_reviewer_chunks_merge_without_changing_live_default() -> 
         "protocol_reviewer_chunk_001",
     ]
     assert all(len(call["normalized_input"]["criteria"]) == 1 for call in generator.calls)
+
+
+@pytest.mark.asyncio
+async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() -> None:
+    raw, _proposal = _trial_and_proposal()
+    source = (
+        "Inclusion Criteria:\n"
+        "* Patients must be at least 18 years of age.\n"
+        "* ECOG performance status 0-2.\n"
+        "Exclusion Criteria:\n"
+        "* Pregnant or breastfeeding.\n"
+    )
+    raw = raw.model_copy(update={"eligibility_criteria": source})
+
+    class ChunkCompilerGenerator:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def generate_primary_with_lite_fallback(self, **kwargs):
+            self.calls.append(kwargs)
+            normalized = kwargs["normalized_input"]
+            chunk = normalized["trial"]["eligibility_criteria"]
+            direction = normalized["source_direction_hint"]
+            digest = hashlib.sha256(chunk.encode()).hexdigest()
+            proposal = CompiledTrialProposal.model_validate(
+                {
+                    "nct_id": raw.nct_id,
+                    "criteria": [
+                        {
+                            "source_direction": direction,
+                            "source_order": 1,
+                            "start": 0,
+                            "end": len(chunk),
+                            "quote": chunk,
+                            "normalized_summary": "qualified review",
+                            "ast": {
+                                "root_node_id": "n0",
+                                "nodes": [
+                                    {
+                                        "node_id": "n0",
+                                        "op": "OPAQUE",
+                                        "metadata": {
+                                            "reason_code": "TEST_CHUNK",
+                                            "residual_source_sha256": digest,
+                                        },
+                                    }
+                                ],
+                            },
+                            "required_slots": [],
+                            "compiler_confidence": 0,
+                            "opaque": True,
+                        }
+                    ],
+                }
+            )
+            return proposal, SimpleNamespace(used_fallback=False)
+
+    generator = ChunkCompilerGenerator()
+    service = ProtocolCompilationService(
+        generator,
+        load_slot_catalog(),
+        offline_compiler_chunk_size=2,
+    )
+    proposal, used_fallback = await service._generate_offline_compilation(
+        raw,
+        session_id="offline-compiler-test",
+    )
+    assert used_fallback is False
+    assert len(generator.calls) == 2
+    assert [item.source_direction.value for item in proposal.criteria] == [
+        "INCLUSION",
+        "EXCLUSION",
+    ]
+    assert [item.source_order for item in proposal.criteria] == [1, 1]
+    assert all(source[item.start : item.end] == item.quote for item in proposal.criteria)
+    assert all(call["prompt_version"] == "1.0.4" for call in generator.calls)
+    assert all(call["primary_thinking_budget"] == 1024 for call in generator.calls)
 
 
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:

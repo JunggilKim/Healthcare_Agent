@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -7,13 +9,20 @@ from backend.app.agents.prompts import render_prompt
 from backend.app.agents.protocol_compiler import (
     ProtocolCompilationError,
     TrustedCompilation,
+    _anchor_proposal_source_spans,
     construct_trusted_compilation,
     opaque_fallback_compilation,
 )
 from backend.app.agents.protocol_reviewer import ReviewedCompilation, bind_semantic_review
 from backend.app.application.catalog import SlotCatalog
+from backend.app.domain.ast import AstNode, AstOperator, CriterionAst
 from backend.app.domain.canonical import canonical_json_bytes
-from backend.app.domain.model_outputs import CompiledTrialProposal, ProtocolReviewProposal
+from backend.app.domain.enums import SourceDirection
+from backend.app.domain.model_outputs import (
+    CompiledTrialProposal,
+    CriterionCompilationProposal,
+    ProtocolReviewProposal,
+)
 from backend.app.domain.trials import ProtocolReviewArtifact, RawTrialRecord
 from backend.app.infrastructure.structured_generation import (
     StructuredGenerationUnavailable,
@@ -30,6 +39,17 @@ class CompilationWorkflowResult:
     degradation_codes: list[str]
 
 
+@dataclass(frozen=True)
+class _OfflineSourceItem:
+    start: int
+    end: int
+    direction: SourceDirection
+
+
+_HEADING = re.compile(r"^\s*(inclusion|exclusion)\s+criteria\s*:?\s*$", re.IGNORECASE)
+_LIST_MARKER = re.compile(r"^\s*(?:[-*•°]|\d+[.)])\s+")
+
+
 class ProtocolCompilationService:
     def __init__(
         self,
@@ -37,14 +57,23 @@ class ProtocolCompilationService:
         slot_catalog: SlotCatalog,
         *,
         offline_reviewer_chunk_size: int | None = None,
+        offline_compiler_chunk_size: int | None = None,
     ) -> None:
         if offline_reviewer_chunk_size is not None and offline_reviewer_chunk_size < 1:
             raise ValueError("offline_reviewer_chunk_size must be positive")
+        if offline_compiler_chunk_size is not None and offline_compiler_chunk_size < 1:
+            raise ValueError("offline_compiler_chunk_size must be positive")
         self.generator = generator
         self.slot_catalog = slot_catalog
         self.offline_reviewer_chunk_size = offline_reviewer_chunk_size
+        self.offline_compiler_chunk_size = offline_compiler_chunk_size
 
-    def _compiler_prompt(self, trial: RawTrialRecord, repair_issues: object | None = None) -> str:
+    def _compiler_prompt(
+        self,
+        trial: RawTrialRecord,
+        repair_issues: object | None = None,
+        source_direction_hint: SourceDirection | None = None,
+    ) -> str:
         payload = {
             "nct_id": trial.nct_id,
             "eligibility_criteria": trial.eligibility_criteria,
@@ -56,6 +85,9 @@ class ProtocolCompilationService:
             "overall_status": trial.overall_status,
             "conditions": trial.conditions,
             "repair_issues": repair_issues,
+            "source_direction_hint": (
+                source_direction_hint.value if source_direction_hint is not None else None
+            ),
         }
         operators = (
             "ALL ANY NOT IMPLIES EXISTS EQ IN GTE GT LTE LT BETWEEN_INCLUSIVE "
@@ -73,20 +105,24 @@ class ProtocolCompilationService:
         trial: RawTrialRecord,
         *,
         repair_issues: object | None = None,
+        source_direction_hint: SourceDirection | None = None,
         session_id: str = "unscoped",
     ) -> tuple[CompiledTrialProposal, bool]:
-        prompt = self._compiler_prompt(trial, repair_issues)
+        prompt = self._compiler_prompt(trial, repair_issues, source_direction_hint)
         proposal, record = await self.generator.generate_primary_with_lite_fallback(
             primary_model_id="gemini-3.6-flash",
             lite_model_id="gemini-3.5-flash-lite",
             task_name="protocol_compiler_repair" if repair_issues else "protocol_compiler",
             prompt=prompt,
-            prompt_version="1.0.3",
+            prompt_version="1.0.4",
             output_schema_version="compiled-trial-proposal-v1",
             slot_catalog_version=self.slot_catalog.version,
             normalized_input={
                 "trial": trial.model_dump(mode="json"),
                 "repair_issues": repair_issues,
+                "source_direction_hint": (
+                    source_direction_hint.value if source_direction_hint is not None else None
+                ),
             },
             output_model=CompiledTrialProposal,
             primary_thinking_level=None,
@@ -98,6 +134,171 @@ class ProtocolCompilationService:
             session_id=session_id,
         )
         return proposal, record.used_fallback
+
+    @staticmethod
+    def _offline_source_items(source: str) -> list[_OfflineSourceItem]:
+        items: list[_OfflineSourceItem] = []
+        direction = SourceDirection.REGISTRY_FIELD
+        current_start: int | None = None
+        current_direction = direction
+        offset = 0
+        for line in source.splitlines(keepends=True):
+            content = line.rstrip("\r\n")
+            heading = _HEADING.fullmatch(content)
+            if heading is not None:
+                if current_start is not None and current_start < offset:
+                    items.append(_OfflineSourceItem(current_start, offset, current_direction))
+                direction = (
+                    SourceDirection.INCLUSION
+                    if heading.group(1).lower() == "inclusion"
+                    else SourceDirection.EXCLUSION
+                )
+                current_start = None
+            elif content.strip():
+                if _LIST_MARKER.match(content) and current_start is not None:
+                    items.append(_OfflineSourceItem(current_start, offset, current_direction))
+                    current_start = offset
+                    current_direction = direction
+                elif current_start is None:
+                    current_start = offset
+                    current_direction = direction
+            offset += len(line)
+        if current_start is not None and current_start < len(source):
+            items.append(_OfflineSourceItem(current_start, len(source), current_direction))
+        return [item for item in items if source[item.start : item.end].strip()]
+
+    @staticmethod
+    def _opaque_item_proposal(
+        trial: RawTrialRecord, item: _OfflineSourceItem, source_order: int
+    ) -> CriterionCompilationProposal:
+        source = trial.eligibility_criteria or ""
+        quote = source[item.start : item.end]
+        residual_hash = hashlib.sha256(quote.encode()).hexdigest()
+        return CriterionCompilationProposal(
+            source_direction=item.direction,
+            source_order=source_order,
+            start=item.start,
+            end=item.end,
+            quote=quote,
+            normalized_summary="Source criterion requires qualified review.",
+            ast=CriterionAst(
+                root_node_id="n0",
+                nodes=[
+                    AstNode(
+                        node_id="n0",
+                        op=AstOperator.OPAQUE,
+                        metadata={
+                            "reason_code": "OFFLINE_CHUNK_COMPILATION_FAILED",
+                            "residual_source_sha256": residual_hash,
+                        },
+                    )
+                ],
+            ),
+            required_slots=[],
+            compiler_confidence=0,
+            opaque=True,
+            warnings=["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"],
+        )
+
+    async def _generate_offline_compilation(
+        self,
+        trial: RawTrialRecord,
+        *,
+        repair_issues: list[dict[str, object]] | None = None,
+        session_id: str,
+    ) -> tuple[CompiledTrialProposal, bool]:
+        source = trial.eligibility_criteria or ""
+        items = self._offline_source_items(source)
+        if not items:
+            raise ProtocolCompilationError("offline compiler found no source items")
+        assert self.offline_compiler_chunk_size is not None
+        groups: list[list[_OfflineSourceItem]] = []
+        for item in items:
+            if (
+                not groups
+                or groups[-1][-1].direction != item.direction
+                or len(groups[-1]) >= self.offline_compiler_chunk_size
+            ):
+                groups.append([])
+            groups[-1].append(item)
+
+        merged: list[CriterionCompilationProposal] = []
+        compiler_warnings: list[str] = []
+        used_fallback = False
+        for chunk_index, group in enumerate(groups):
+            chunk_start = group[0].start
+            chunk_end = group[-1].end
+            chunk_text = source[chunk_start:chunk_end]
+            relevant_issues = [
+                issue
+                for issue in repair_issues or []
+                if isinstance(issue.get("source_quote"), str)
+                and str(issue["source_quote"]) in chunk_text
+            ]
+            chunk_trial = trial.model_copy(update={"eligibility_criteria": chunk_text})
+            try:
+                proposal, chunk_fallback = await self._generate_compilation(
+                    chunk_trial,
+                    repair_issues=(relevant_issues if repair_issues is not None else None),
+                    source_direction_hint=group[0].direction,
+                    session_id=f"{session_id}:compiler-chunk:{chunk_index:03d}",
+                )
+                proposal = _anchor_proposal_source_spans(chunk_text, proposal)
+                for criterion in proposal.criteria:
+                    merged.append(
+                        criterion.model_copy(
+                            update={
+                                "source_direction": group[0].direction,
+                                "start": criterion.start + chunk_start,
+                                "end": criterion.end + chunk_start,
+                            }
+                        )
+                    )
+                for span in proposal.unassigned_source_spans:
+                    compiler_warnings.append(
+                        f"UNASSIGNED_CHUNK_SPAN:{chunk_index}:{span.reason_code}"
+                    )
+                compiler_warnings.extend(proposal.compiler_warnings)
+                used_fallback = used_fallback or chunk_fallback
+            except (StructuredGenerationUnavailable, ProtocolCompilationError, ValueError):
+                merged.extend(
+                    self._opaque_item_proposal(trial, item, source_order=1) for item in group
+                )
+                compiler_warnings.append(f"OFFLINE_CHUNK_OPAQUE_FALLBACK:{chunk_index:03d}")
+
+        ordered: list[CriterionCompilationProposal] = []
+        direction_orders: dict[SourceDirection, int] = {}
+        for criterion in sorted(merged, key=lambda item: (item.start, item.end)):
+            next_order = direction_orders.get(criterion.source_direction, 0) + 1
+            direction_orders[criterion.source_direction] = next_order
+            ordered.append(criterion.model_copy(update={"source_order": next_order}))
+        return (
+            CompiledTrialProposal(
+                nct_id=trial.nct_id,
+                criteria=ordered,
+                compiler_warnings=sorted(set(compiler_warnings)),
+            ),
+            used_fallback,
+        )
+
+    async def _compile_proposal(
+        self,
+        trial: RawTrialRecord,
+        *,
+        repair_issues: list[dict[str, object]] | None = None,
+        session_id: str,
+    ) -> tuple[CompiledTrialProposal, bool]:
+        if self.offline_compiler_chunk_size is not None:
+            return await self._generate_offline_compilation(
+                trial,
+                repair_issues=repair_issues,
+                session_id=session_id,
+            )
+        return await self._generate_compilation(
+            trial,
+            repair_issues=repair_issues,
+            session_id=session_id,
+        )
 
     async def _review(
         self, compilation: TrustedCompilation, *, session_id: str = "unscoped"
@@ -166,9 +367,7 @@ class ProtocolCompilationService:
         degradation_codes: list[str] = []
         review_attempts: list[ProtocolReviewProposal] = []
         try:
-            proposal, compiler_fallback = await self._generate_compilation(
-                trial, session_id=session_id
-            )
+            proposal, compiler_fallback = await self._compile_proposal(trial, session_id=session_id)
             compilation = construct_trusted_compilation(
                 trial=trial,
                 proposal=proposal,
@@ -176,7 +375,7 @@ class ProtocolCompilationService:
                 compiler_model_id=(
                     "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                 ),
-                compiler_prompt_version="1.0.3",
+                compiler_prompt_version="1.0.4",
                 created_at=now,
                 evaluation_date=evaluation_date,
             )
@@ -184,9 +383,10 @@ class ProtocolCompilationService:
             review_attempts.append(review)
             if not review.approved or any(issue.severity == "BLOCKING" for issue in review.issues):
                 repair_attempted = True
-                proposal, compiler_fallback = await self._generate_compilation(
+                repair_issue_rows = [issue.model_dump(mode="json") for issue in review.issues]
+                proposal, compiler_fallback = await self._compile_proposal(
                     trial,
-                    repair_issues=[issue.model_dump(mode="json") for issue in review.issues],
+                    repair_issues=repair_issue_rows,
                     session_id=session_id,
                 )
                 compilation = construct_trusted_compilation(
@@ -196,7 +396,7 @@ class ProtocolCompilationService:
                     compiler_model_id=(
                         "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                     ),
-                    compiler_prompt_version="1.0.3",
+                    compiler_prompt_version="1.0.4",
                     created_at=now,
                     evaluation_date=evaluation_date,
                 )

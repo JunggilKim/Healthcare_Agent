@@ -197,7 +197,7 @@ async def test_explicit_thinking_budget_is_sent_and_cache_bound(tmp_path: Path) 
         model_id="gemini-3.6-flash",
         task_name="protocol_compiler",
         prompt="return compact json",
-        prompt_version="1.0.3",
+        prompt_version="1.0.4",
         output_schema_version="test-v1",
         slot_catalog_version="slot-catalog-v1",
         normalized_input={"x": 1},

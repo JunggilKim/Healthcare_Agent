@@ -5307,6 +5307,7 @@ Compile public ClinicalTrials.gov eligibility source text into the bounded AST s
 
 NON-NEGOTIABLE RULES
 - Preserve every material eligibility clause and exact source span.
+- When deterministic offline chunking supplies source_direction_hint, use that exact section direction for every returned criterion.
 - Use zero-based Unicode code-point start/end offsets into the exact eligibility_criteria string, including headings, bullets, whitespace, and newlines; quote must equal eligibility_criteria[start:end] character-for-character.
 - Never add a threshold, diagnosis, exception, time window, or clinical assumption not present.
 - Preserve AND/OR/NOT scope.
