@@ -84,5 +84,5 @@ for SECRET in "${SECRETS[@]}"; do
 done
 
 echo "Bootstrap complete without service-account keys, quota changes, or paid-account activation."
-echo "Model smoke (one authorized call only): ALLOW_LIVE_MODEL_CALLS=true GOOGLE_CLOUD_PROJECT=${PROJECT_ID} uv run pytest -m live tests/live/test_model_access.py"
+echo "Model smoke (one minimal call per frozen model): ALLOW_LIVE_MODEL_CALLS=true uv run python scripts/validate_model_access.py --project ${PROJECT_ID}"
 echo "Budget alert: create a USD 200 project budget with 25%, 50%, 75%, 90%, and 100% actual/forecast notifications in Cloud Billing if your identity cannot automate billing budgets."

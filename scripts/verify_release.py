@@ -74,6 +74,7 @@ REQUIRED_FILES = (
     "scripts/prepare_retrieval_evidence.py",
     "scripts/submit_gemini_batch.py",
     "scripts/validate_annotations.py",
+    "scripts/validate_model_access.py",
     "scripts/validate_performance_evidence.py",
     "scripts/validate_snapshot.py",
     "scripts/verify_release.py",
