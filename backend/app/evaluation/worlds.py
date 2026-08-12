@@ -203,7 +203,6 @@ def _truth(
             missing_slot_ids=result.missing_slot_ids,
         )
         for criterion in fixture.compiled_trial.criteria
-        if not criterion.opaque
         for result in [evaluate_criterion(criterion, context, evaluation_date)]
     ]
 
@@ -370,6 +369,8 @@ def _observations(worlds: list[PatientWorld], seed: int) -> list[MissingnessObse
     observations: list[MissingnessObservation] = []
     for world in worlds:
         unique_slots = sorted({fact.slot_id for fact in world.facts})
+        if not unique_slots:
+            continue
         for rate in (0.2, 0.4, 0.6):
             count = max(1, min(len(unique_slots) - 1, round(len(unique_slots) * rate)))
             for pattern in ("MCAR", "REALISTIC"):

@@ -16,11 +16,15 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from backend.app.domain.canonical import canonical_json_bytes  # noqa: E402
+from backend.app.domain.trials import RawTrialRecord  # noqa: E402
 from backend.app.infrastructure.genai_client import (  # noqa: E402
     create_google_cloud_genai_client,
 )
 from backend.app.infrastructure.local_artifacts import LocalArtifactStore  # noqa: E402
-from backend.app.retrieval.ctgov_client import ClinicalTrialsGovClient  # noqa: E402
+from backend.app.retrieval.ctgov_client import (  # noqa: E402
+    ClinicalTrialsGovClient,
+    CtgovResponse,
+)
 from backend.app.retrieval.ctgov_parser import parse_study, validate_single_study  # noqa: E402
 from backend.app.retrieval.embeddings import GeminiEmbeddingProvider  # noqa: E402
 from backend.app.retrieval.models import ConditionQuery, RetrievalQuery  # noqa: E402
@@ -28,7 +32,15 @@ from backend.app.retrieval.retriever import HybridRetriever  # noqa: E402
 from backend.app.settings import Settings  # noqa: E402
 
 CASE_QUERIES = {
-    "S004": (["bladder cancer"], "bladder cancer urothelial carcinoma"),
+    "S004": (
+        [
+            "bladder cancer",
+            "urothelial carcinoma",
+            "muscle invasive bladder cancer",
+            "non-muscle invasive bladder cancer",
+        ],
+        "bladder cancer urothelial carcinoma",
+    ),
     "S008": (
         ["idiopathic pulmonary fibrosis", "interstitial lung disease"],
         "interstitial lung disease pulmonary fibrosis honeycombing",
@@ -93,7 +105,7 @@ async def acquire(
             raise RuntimeError(f"RELEASE_CASE_TRIAL_COUNT_INSUFFICIENT:{case_id}:{len(selected)}")
         used_nct_ids.update(item.nct_id for item in selected)
 
-        async def fetch_full(nct_id: str):
+        async def fetch_full(nct_id: str) -> tuple[CtgovResponse, RawTrialRecord]:
             async with semaphore:
                 response = await ctgov.study(nct_id)
             study = validate_single_study(response.content)

@@ -118,7 +118,23 @@ def _is_resumable(result_path: Path, binding: dict[str, object], output_root: Pa
         return False
     try:
         result = orjson.loads(result_path.read_bytes())
-        if result.get("schema_version") != SCHEMA_VERSION or result.get("binding") != binding:
+        stored_binding = result.get("binding")
+        if not isinstance(stored_binding, dict):
+            return False
+        semantic_binding = {
+            key: value
+            for key, value in binding.items()
+            if key not in {"compiler_chunk_size", "reviewer_chunk_size"}
+        }
+        stored_semantic_binding = {
+            key: value
+            for key, value in stored_binding.items()
+            if key not in {"compiler_chunk_size", "reviewer_chunk_size"}
+        }
+        if (
+            result.get("schema_version") != SCHEMA_VERSION
+            or stored_semantic_binding != semantic_binding
+        ):
             return False
         for relative, expected in result.get("artifact_sha256", {}).items():
             path = output_root / relative
@@ -139,23 +155,32 @@ async def _compile_one(
     binding: dict[str, object],
     output_root: Path,
     semaphore: asyncio.Semaphore,
+    retry_statuses: frozenset[str],
 ) -> dict[str, object]:
     case_root = output_root / "sessions" / case_id
     artifact_root = case_root / "artifacts" / trial.nct_id
     result_path = case_root / "results" / f"{trial.nct_id}.json"
     if _is_resumable(result_path, binding, output_root):
-        result = orjson.loads(result_path.read_bytes())
-        print(
-            orjson.dumps(
-                {"nct_id": trial.nct_id, "status": result["status"], "resume": True}
-            ).decode(),
-            flush=True,
-        )
-        return result
+        resumed_result = orjson.loads(result_path.read_bytes())
+        if not isinstance(resumed_result, dict):
+            raise ValueError("RELEASE_COMPILATION_RESULT_INVALID")
+        if resumed_result.get("status") not in retry_statuses:
+            print(
+                orjson.dumps(
+                    {
+                        "nct_id": trial.nct_id,
+                        "status": resumed_result["status"],
+                        "resume": True,
+                    }
+                ).decode(),
+                flush=True,
+            )
+            return dict(resumed_result)
 
     session_id = f"release-compilation:{case_id}:{trial.nct_id}"
     started_at = datetime.now(UTC)
     artifact_hashes: dict[str, str] = {}
+    result: dict[str, object]
     try:
         async with semaphore:
             workflow = await service.compile_and_review(
@@ -210,7 +235,7 @@ async def _compile_one(
         else:
             status = "REVIEW_REQUIRED"
         usage = usage_guard.snapshot(session_id)
-        result: dict[str, object] = {
+        result = {
             "schema_version": SCHEMA_VERSION,
             "case_id": case_id,
             "nct_id": trial.nct_id,
@@ -269,6 +294,7 @@ def _materialize_aggregates(
     input_root: Path,
     project: str,
 ) -> dict[str, object]:
+    resolved_input_root = input_root.resolve()
     fully_verified_count = 0
     executable_subset_count = 0
     review_required_count = 0
@@ -326,14 +352,21 @@ def _materialize_aggregates(
             continue
         relative = path.relative_to(output_root).as_posix()
         artifact_hashes[relative] = _sha256(path)
+
+    def cost(item: dict[str, object]) -> float:
+        value = item.get("estimated_cost_usd", 0.0)
+        if not isinstance(value, (int, float)):
+            raise ValueError("RELEASE_COMPILATION_COST_INVALID")
+        return float(value)
+
     manifest = {
         "schema_version": "trial-opt-release-compilation-manifest-v1",
         "status": "PENDING_PROJECT_SCREENING",
         "project_id": project,
         "git_sha": _git_sha(),
         "created_at": datetime.now(UTC).isoformat(),
-        "source_acquisition_path": input_root.relative_to(REPOSITORY_ROOT).as_posix(),
-        "source_acquisition_sha256": _sha256(input_root / "acquisition.json"),
+        "source_acquisition_path": resolved_input_root.relative_to(REPOSITORY_ROOT).as_posix(),
+        "source_acquisition_sha256": _sha256(resolved_input_root / "acquisition.json"),
         "case_ids": list(CASE_IDS),
         "trial_count": len(results),
         "fully_verified_count": fully_verified_count,
@@ -341,9 +374,7 @@ def _materialize_aggregates(
         "dataset_a_candidate_count": fully_verified_count + executable_subset_count,
         "review_required_count": review_required_count,
         "error_count": error_count,
-        "estimated_cost_usd": round(
-            sum(float(item.get("estimated_cost_usd", 0.0)) for item in results), 8
-        ),
+        "estimated_cost_usd": round(sum(cost(item) for item in results), 8),
         "cases": case_summaries,
         "result_hash": canonical_sha256(
             [
@@ -369,6 +400,13 @@ async def compile_corpus(args: argparse.Namespace) -> dict[str, object]:
     if any(case_id not in CASE_IDS for case_id in selected_cases):
         raise ValueError("RELEASE_COMPILATION_CASE_INVALID")
     work = _load_trials(args.input, selected_cases)
+    if args.nct:
+        selected_nct_ids = set(args.nct)
+        work = [(case_id, trial) for case_id, trial in work if trial.nct_id in selected_nct_ids]
+        found = {trial.nct_id for _, trial in work}
+        missing = selected_nct_ids - found
+        if missing:
+            raise ValueError(f"RELEASE_COMPILATION_NCT_NOT_FOUND:{','.join(sorted(missing))}")
     if args.limit is not None:
         work = work[: args.limit]
     if not work:
@@ -423,6 +461,7 @@ async def compile_corpus(args: argparse.Namespace) -> dict[str, object]:
             ),
             output_root=args.output,
             semaphore=semaphore,
+            retry_statuses=frozenset(args.retry_status),
         )
         for case_id, trial in work
     ]
@@ -456,6 +495,18 @@ def main() -> None:
     parser.add_argument("--reviewer-chunk-size", type=int, default=4)
     parser.add_argument("--compiler-chunk-size", type=int, default=4)
     parser.add_argument("--case", action="append")
+    parser.add_argument(
+        "--nct",
+        action="append",
+        help="limit paid compilation to an exact NCT ID; repeat for multiple trials",
+    )
+    parser.add_argument(
+        "--retry-status",
+        action="append",
+        choices=("FULLY_VERIFIED", "VERIFIED_EXECUTABLE_SUBSET", "REVIEW_REQUIRED", "ERROR"),
+        default=[],
+        help="re-run resumable records with this status instead of accepting their artifacts",
+    )
     parser.add_argument("--limit", type=int)
     parser.add_argument("--allow-live-compilation", action="store_true")
     args = parser.parse_args()

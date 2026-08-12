@@ -165,48 +165,84 @@ def _leaf_plans(
         threshold = node.value
         if node.op is AstOperator.GTE:
             comparison_values = (
-                [threshold, _alternative_value(threshold, slot)]
+                [
+                    threshold,
+                    _alternative_value(threshold, slot),
+                    _alternative_value(threshold, slot, delta=Decimal(2)),
+                ]
                 if desired is CriterionVerdict.PASS
-                else [_alternative_value(threshold, slot, delta=Decimal(-1))]
+                else [
+                    _alternative_value(threshold, slot, delta=Decimal(-1)),
+                    _alternative_value(threshold, slot, delta=Decimal(-2)),
+                ]
             )
         elif node.op is AstOperator.GT:
             comparison_values = (
-                [_alternative_value(threshold, slot)]
+                [
+                    _alternative_value(threshold, slot),
+                    _alternative_value(threshold, slot, delta=Decimal(2)),
+                    _alternative_value(threshold, slot, delta=Decimal(3)),
+                ]
                 if desired is CriterionVerdict.PASS
-                else [threshold]
+                else [threshold, _alternative_value(threshold, slot, delta=Decimal(-1))]
             )
         elif node.op is AstOperator.LTE:
             comparison_values = (
-                [threshold, _alternative_value(threshold, slot, delta=Decimal(-1))]
+                [
+                    threshold,
+                    _alternative_value(threshold, slot, delta=Decimal(-1)),
+                    _alternative_value(threshold, slot, delta=Decimal(-2)),
+                ]
                 if desired is CriterionVerdict.PASS
-                else [_alternative_value(threshold, slot)]
+                else [
+                    _alternative_value(threshold, slot),
+                    _alternative_value(threshold, slot, delta=Decimal(2)),
+                ]
             )
         else:
             comparison_values = (
-                [_alternative_value(threshold, slot, delta=Decimal(-1))]
+                [
+                    _alternative_value(threshold, slot, delta=Decimal(-1)),
+                    _alternative_value(threshold, slot, delta=Decimal(-2)),
+                    _alternative_value(threshold, slot, delta=Decimal(-3)),
+                ]
                 if desired is CriterionVerdict.PASS
-                else [threshold]
+                else [threshold, _alternative_value(threshold, slot)]
             )
         return [{node.slot_id: value} for value in comparison_values]
     if node.op is AstOperator.BETWEEN_INCLUSIVE:
         assert isinstance(node.value, RangeValue)
         assert node.value.lower is not None and node.value.upper is not None
         if desired is CriterionVerdict.PASS:
+            midpoint = (node.value.lower + node.value.upper) / Decimal(2)
+            lower_middle = (node.value.lower + midpoint) / Decimal(2)
             range_values: list[TypedValue] = [
                 NumberValue(kind="number", value=node.value.lower, unit=node.value.unit),
                 NumberValue(kind="number", value=node.value.upper, unit=node.value.unit),
+                NumberValue(kind="number", value=midpoint, unit=node.value.unit),
+                NumberValue(kind="number", value=lower_middle, unit=node.value.unit),
             ]
         else:
             range_values = [
                 NumberValue(
                     kind="number", value=node.value.lower - Decimal(1), unit=node.value.unit
-                )
+                ),
+                NumberValue(
+                    kind="number", value=node.value.upper + Decimal(1), unit=node.value.unit
+                ),
             ]
         return [{node.slot_id: value} for value in range_values]
     if node.op is AstOperator.DURATION_AT_LEAST_DAYS:
         assert isinstance(node.value, DurationValue)
-        days = node.value.days if desired is CriterionVerdict.PASS else max(0, node.value.days - 1)
-        return [{node.slot_id: DurationValue(kind="duration", days=days)}]
+        days = (
+            [node.value.days, node.value.days + 1, node.value.days + 2]
+            if desired is CriterionVerdict.PASS
+            else [max(0, node.value.days - 1), max(0, node.value.days - 2)]
+        )
+        return [
+            {node.slot_id: DurationValue(kind="duration", days=value)}
+            for value in dict.fromkeys(days)
+        ]
     if node.op is AstOperator.IS_A:
         if desired is CriterionVerdict.FAIL or not isinstance(node.value, CategoricalValue):
             return []
@@ -445,7 +481,6 @@ def _make_world(
             missing_slot_ids=result.missing_slot_ids,
         )
         for criterion in trial.criteria
-        if not criterion.opaque
         for result in [evaluate_criterion(criterion, context, evaluation_date)]
     ]
     narrative, fact_span_map = _render_narrative(world_id, facts)
@@ -504,19 +539,33 @@ def generate_trial_worlds(
         )
         coverage[world_type] += 1
 
-    add("FULL_PASS", full[0], "pass-1")
-    if len(full) > 1:
-        add("FULL_PASS", full[1], "pass-2")
+    boundary_plan = (
+        full[0]
+        if len(full) >= 3
+        and any(
+            isinstance(value, (NumberValue, DateValue, DurationValue)) for value in full[0].values()
+        )
+        else None
+    )
+    passing_plans = full[1:] if boundary_plan is not None else full
+    add("FULL_PASS", passing_plans[0], "pass-1")
+    if len(passing_plans) > 1:
+        add("FULL_PASS", passing_plans[1], "pass-2")
 
     failed_criteria: list[str] = []
+    single_fail_count = 0
     for criterion in critical:
         targets = dict(pass_targets)
         targets[criterion.criterion_id] = CriterionVerdict.FAIL
-        solutions = _solve(critical, targets, evaluation_date=evaluation_date, max_solutions=1)
+        solutions = _solve(critical, targets, evaluation_date=evaluation_date, max_solutions=2)
         if solutions:
             failed_criteria.append(criterion.criterion_id)
-            add("SINGLE_FAIL", solutions[0], f"fail-{len(failed_criteria)}")
-        if len(failed_criteria) == 2:
+            for solution in solutions:
+                if single_fail_count == 2:
+                    break
+                single_fail_count += 1
+                add("SINGLE_FAIL", solution, f"fail-{single_fail_count}")
+        if single_fail_count == 2 and len(failed_criteria) >= 2:
             break
     if len(failed_criteria) >= 2:
         targets = dict(pass_targets)
@@ -526,25 +575,32 @@ def generate_trial_worlds(
         if solutions:
             add("MULTI_FAIL", solutions[0], "multi-fail")
 
-    for index, criterion in enumerate(critical[:2], start=1):
+    unknown_count = 0
+    for criterion in critical:
         missing = sorted(set(criterion.required_slots))
         unknown_plan = {slot: value for slot, value in full[0].items() if slot not in missing}
-        candidate = _make_world(
-            trial,
-            world_id=f"dataset-a-{trial.nct_id}-unknown-{index}",
-            world_type="UNKNOWN",
-            plan=unknown_plan,
-            evaluation_date=evaluation_date,
-            unavailable_slots=missing,
-        )
-        result = next(
-            item
-            for item in candidate.criterion_truth
-            if item.criterion_id == criterion.criterion_id
-        )
-        if result.verdict is CriterionVerdict.UNKNOWN:
-            worlds.append(candidate)
-            coverage["UNKNOWN"] += 1
+        for unavailable in (missing, []):
+            unknown_count += 1
+            candidate = _make_world(
+                trial,
+                world_id=f"dataset-a-{trial.nct_id}-unknown-{unknown_count}",
+                world_type="UNKNOWN",
+                plan=unknown_plan,
+                evaluation_date=evaluation_date,
+                unavailable_slots=unavailable,
+            )
+            result = next(
+                item
+                for item in candidate.criterion_truth
+                if item.criterion_id == criterion.criterion_id
+            )
+            if result.verdict is CriterionVerdict.UNKNOWN:
+                worlds.append(candidate)
+                coverage["UNKNOWN"] += 1
+            if coverage["UNKNOWN"] == 2:
+                break
+        if coverage["UNKNOWN"] == 2:
+            break
 
     used_slots = [
         slot for criterion in critical for slot in criterion.required_slots if slot in full[0]
@@ -566,17 +622,6 @@ def generate_trial_worlds(
             coverage["CONFLICT"] += 1
             break
 
-    boundary_plan = next(
-        (
-            plan
-            for plan in full[2:]
-            if any(
-                isinstance(value, (NumberValue, DateValue, DurationValue))
-                for value in plan.values()
-            )
-        ),
-        None,
-    )
     if boundary_plan is not None:
         add("BOUNDARY", boundary_plan, "boundary")
     if not 5 <= len(worlds) <= 10:

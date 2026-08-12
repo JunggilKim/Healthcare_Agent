@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from pydantic import ValidationError
+
 from backend.app.application.catalog import SlotDefinition
 from backend.app.domain.enums import (
     AcquisitionAction,
@@ -188,8 +190,8 @@ def generate_slot_candidates(
             conflict.slot_id == slot_id and conflict.status == "OPEN"
             for conflict in aggregate.conflicts
         )
-        candidates.append(
-            QuestionCandidate(
+        try:
+            candidate = QuestionCandidate(
                 question_id=question_id,
                 slot_id=slot_id,
                 action=AcquisitionAction(slot.default_action),
@@ -207,7 +209,20 @@ def generate_slot_candidates(
                 sensitivity_penalty=_SENSITIVITY[slot.sensitivity_class],
                 utility_components=None,
             )
-        )
+        except ValidationError as error:
+            value_kinds = sorted(
+                {
+                    node.value.kind
+                    for criterion in criteria
+                    for node in criterion.ast.nodes
+                    if node.slot_id == slot_id and node.value is not None
+                }
+            )
+            raise ValueError(
+                f"QUESTION_CANDIDATE_INVALID:{slot_id}:"
+                f"answer_type={slot.value_type}:ast_value_kinds={value_kinds}"
+            ) from error
+        candidates.append(candidate)
     return candidates
 
 

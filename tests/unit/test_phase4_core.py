@@ -11,12 +11,13 @@ from backend.app.agents.report_renderer import (
 from backend.app.application.catalog import load_slot_catalog
 from backend.app.application.interactive_loop import InteractiveTrialOptLoop
 from backend.app.application.vertical_slice import load_vertical_slice
+from backend.app.domain.ast import AstNode, AstOperator, CriterionAst
 from backend.app.domain.enums import AcquisitionAction, CriterionVerdict, TrialDecision
 from backend.app.domain.evidence import EligibilityContext, PatientFact
 from backend.app.domain.questions import OptimizerRuntimeConfig
 from backend.app.domain.rendering import QuestionRenderProposal, TrialReportProposal
 from backend.app.domain.sessions import SessionAggregate
-from backend.app.domain.values import NumberValue
+from backend.app.domain.values import CategoricalValue, NumberValue, StringValue
 from backend.app.engine.branch_builder import build_branches, deterministic_question_id
 from backend.app.engine.incremental import build_reverse_slot_index, reevaluate_for_answered_slot
 from backend.app.engine.multi_trial_optimizer import (
@@ -197,6 +198,36 @@ def test_branch_builder_covers_boolean_numeric_and_uniform_weights() -> None:
     values = [branch.synthetic_value for branch in numeric if branch.synthetic_value]
     assert any(isinstance(value, NumberValue) and value.value == 18 for value in values)
     assert abs(sum(branch.weight for branch in numeric) - 1.0) <= 1e-9
+
+
+def test_branch_builder_normalizes_canonical_string_ast_values_for_categorical_slot() -> None:
+    fixture = load_vertical_slice()
+    criterion = fixture.compiled_trial.criteria[0].model_copy(
+        update={
+            "required_slots": ["pregnancy.status"],
+            "ast": CriterionAst(
+                root_node_id="n0",
+                nodes=[
+                    AstNode(
+                        node_id="n0",
+                        op=AstOperator.EQ,
+                        slot_id="pregnancy.status",
+                        value=StringValue(kind="string", value="pregnant"),
+                    )
+                ],
+            ),
+        }
+    )
+    branches = build_branches(
+        question_id=deterministic_question_id(SESSION_ID, 0, "pregnancy.status"),
+        slot=load_slot_catalog().by_id()["pregnancy.status"],
+        affected_criteria=[criterion],
+        evaluation_date=date(2026, 8, 11),
+    )
+
+    values = [item.synthetic_value for item in branches if item.synthetic_value is not None]
+    assert values
+    assert all(isinstance(item, CategoricalValue) for item in values)
 
 
 def test_branch_discrimination_exactly_distinguishes_decisions() -> None:

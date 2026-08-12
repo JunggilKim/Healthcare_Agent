@@ -264,6 +264,18 @@ def build_branches(
         ]
     elif slot.value_type in {"categorical", "categorical_free_string"}:
         referenced = _categorical_values(nodes)
+        if slot.value_type == "categorical":
+            normalized_referenced: list[CategoricalValue | StringValue] = []
+            for value in referenced:
+                canonical = (
+                    value.value
+                    if isinstance(value, CategoricalValue)
+                    else (value.normalized or value.value)
+                )
+                if slot.canonical_values and canonical not in slot.canonical_values:
+                    continue
+                normalized_referenced.append(CategoricalValue(kind="categorical", value=canonical))
+            referenced = normalized_referenced
         values = [
             (
                 value.value,

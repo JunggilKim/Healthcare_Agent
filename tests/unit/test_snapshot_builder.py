@@ -68,6 +68,16 @@ def _write_live_source(root: Path) -> Path:
         (branch_root / "q1-b0.json").write_bytes(canonical_json_bytes({"depth": 1}))
         if case_id == "S004":
             (branch_root / "q2-b0.json").write_bytes(canonical_json_bytes({"depth": 2}))
+        raw_api_root = case_root / "raw_api"
+        raw_api_root.mkdir()
+        case_offset = {"S004": 0, "S008": 8, "S001": 16}[case_id]
+        for index in range(8):
+            nct_id = f"NCT{case_offset + index + 1:08d}"
+            (raw_api_root / f"{nct_id}.json").write_bytes(
+                canonical_json_bytes(
+                    {"protocolSection": {"identificationModule": {"nctId": nct_id}}}
+                )
+            )
         for path in case_root.rglob("*"):
             if path.is_file():
                 artifact_hashes[path.relative_to(root).as_posix()] = hashlib.sha256(

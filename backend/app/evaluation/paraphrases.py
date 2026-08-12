@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -19,6 +20,42 @@ PARAPHRASE_PROMPT_VERSION = "synthetic-paraphrase-v1"
 class SelectedWorld:
     world_id: str
     language: Literal["ko", "en"]
+
+
+def inline_json_schema_references(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline local Pydantic refs so Vertex batch JSONL has no `$` field names."""
+
+    result = deepcopy(schema)
+    definitions = result.pop("$defs", {})
+    if not isinstance(definitions, dict):
+        raise ValueError("JSON_SCHEMA_DEFINITIONS_INVALID")
+
+    def visit(value: Any, stack: tuple[str, ...] = ()) -> Any:
+        if isinstance(value, list):
+            return [visit(item, stack) for item in value]
+        if not isinstance(value, dict):
+            return value
+        reference = value.get("$ref")
+        if reference is not None:
+            if not isinstance(reference, str) or not reference.startswith("#/$defs/"):
+                raise ValueError("JSON_SCHEMA_REFERENCE_UNSUPPORTED")
+            name = reference.removeprefix("#/$defs/")
+            if name in stack or name not in definitions:
+                raise ValueError("JSON_SCHEMA_REFERENCE_INVALID")
+            target = definitions[name]
+            if not isinstance(target, dict):
+                raise ValueError("JSON_SCHEMA_DEFINITION_INVALID")
+            merged = {
+                **deepcopy(target),
+                **{key: item for key, item in value.items() if key != "$ref"},
+            }
+            return visit(merged, (*stack, name))
+        return {key: visit(item, stack) for key, item in value.items()}
+
+    inlined = visit(result)
+    if not isinstance(inlined, dict):
+        raise ValueError("JSON_SCHEMA_ROOT_INVALID")
+    return inlined
 
 
 def _selection_key(seed: int, world_id: str) -> tuple[str, str]:
@@ -126,6 +163,7 @@ def build_extraction_requests(
     patient_prompt_template: str,
     response_schema: dict[str, Any],
 ) -> list[dict[str, Any]]:
+    response_schema = inline_json_schema_references(response_schema)
     return [
         {
             "id": world_id,
@@ -142,7 +180,7 @@ def build_extraction_requests(
                     "temperature": 0,
                     "maxOutputTokens": 2048,
                     "responseMimeType": "application/json",
-                    "responseSchema": response_schema,
+                    "responseJsonSchema": response_schema,
                 },
             },
         }

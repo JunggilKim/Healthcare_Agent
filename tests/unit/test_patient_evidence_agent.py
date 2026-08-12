@@ -56,6 +56,17 @@ def test_backend_assigns_fact_contract_and_hypothesis_stays_firewalled() -> None
     assert hypothesis.grade.value == "H"
     assert hypothesis.admissible_for_eligibility is False
     assert hypothesis.source_fact_ids == [materialized.state.confirmed_facts[1].fact_id]
+    repeated = materialize_patient_extraction(
+        patient_text=text,
+        source_id="patient:test",
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        asserted_at=datetime(2026, 8, 11, tzinfo=UTC),
+    )
+    assert [item.fact_id for item in repeated.state.confirmed_facts] == [
+        item.fact_id for item in materialized.state.confirmed_facts
+    ]
+    assert repeated.state.retrieval_hypotheses[0].hypothesis_id == hypothesis.hypothesis_id
 
 
 def test_mismatched_source_span_and_model_supplied_extra_field_are_rejected() -> None:

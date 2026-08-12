@@ -29,6 +29,7 @@ REQUIRED_CASE_ARTIFACTS = (
     "embeddings.json",
     "embeddings.npz",
     "compiled_trials.json",
+    "reviews.json",
     "proofs.json",
     "ranking.json",
     "questions.json",
@@ -54,6 +55,11 @@ def _validate_source(case_root: Path) -> list[Path]:
     branches = (
         list((case_root / "branches").rglob("*.json")) if (case_root / "branches").is_dir() else []
     )
+    raw_api = (
+        list((case_root / "raw_api").glob("NCT*.json")) if (case_root / "raw_api").is_dir() else []
+    )
+    if not raw_api:
+        missing.append("raw_api/NCT*.json")
     if not branches:
         missing.append("branches/**/*.json")
     if missing:
@@ -75,7 +81,11 @@ def _validate_source(case_root: Path) -> list[Path]:
         int(item.get("depth", 1)) >= 2 for item in questions.get("branches", [])
     ):
         raise RuntimeError("SNAPSHOT_S004_SEQUENTIAL_BRANCH_MISSING")
-    return [*(case_root / name for name in REQUIRED_CASE_ARTIFACTS), *sorted(branches)]
+    return [
+        *(case_root / name for name in REQUIRED_CASE_ARTIFACTS),
+        *sorted(raw_api),
+        *sorted(branches),
+    ]
 
 
 def _sha256(path: Path) -> str:

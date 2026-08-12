@@ -10,9 +10,25 @@ from backend.app.evaluation.models import BenchmarkArtifact
 from backend.app.evaluation.paraphrases import (
     apply_validated_paraphrases,
     build_paraphrase_requests,
+    inline_json_schema_references,
     parse_paraphrase_responses,
     select_paraphrase_worlds,
 )
+
+
+def test_batch_json_schema_inlines_pydantic_references() -> None:
+    schema = {
+        "$defs": {"Item": {"type": "object", "properties": {"name": {"type": "string"}}}},
+        "type": "array",
+        "items": {"$ref": "#/$defs/Item"},
+    }
+    inlined = inline_json_schema_references(schema)
+    assert inlined["items"] == {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+    }
+    assert "$defs" not in orjson.dumps(inlined).decode()
+    assert "$ref" not in orjson.dumps(inlined).decode()
 
 
 def _benchmark() -> BenchmarkArtifact:

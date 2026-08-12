@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Literal
-from uuid import uuid4
 
 from backend.app.agents.prompts import render_prompt
 from backend.app.application.catalog import SlotCatalog, SlotDefinition
@@ -95,7 +94,7 @@ def materialize_patient_extraction(
 ) -> MaterializedPatientExtraction:
     slots = slot_catalog.by_id()
     facts: list[PatientFact] = []
-    for fact_proposal in proposal.facts:
+    for fact_index, fact_proposal in enumerate(proposal.facts):
         _validate_span(
             patient_text,
             fact_proposal.start,
@@ -109,7 +108,15 @@ def materialize_patient_extraction(
         quote_hash = hashlib.sha256(fact_proposal.quote.encode()).hexdigest()
         facts.append(
             PatientFact(
-                fact_id=f"fact_{uuid4()}",
+                fact_id=(
+                    "fact_"
+                    + hashlib.sha256(
+                        (
+                            f"{source_id}:fact:{fact_index}:{fact_proposal.slot_id}:"
+                            f"{fact_proposal.start}:{fact_proposal.end}:{quote_hash}"
+                        ).encode()
+                    ).hexdigest()[:24]
+                ),
                 slot_id=fact_proposal.slot_id,
                 value=fact_proposal.value,
                 grade=EvidenceGrade.A_DIRECT,
@@ -133,14 +140,22 @@ def materialize_patient_extraction(
         )
 
     hypotheses: list[RetrievalHypothesis] = []
-    for hypothesis in proposal.retrieval_hypotheses:
+    for hypothesis_index, hypothesis in enumerate(proposal.retrieval_hypotheses):
         if not hypothesis.source_proposal_indexes or any(
             index < 0 or index >= len(facts) for index in hypothesis.source_proposal_indexes
         ):
             raise PatientExtractionValidationError("hypothesis source index is invalid")
         hypotheses.append(
             RetrievalHypothesis(
-                hypothesis_id=f"hyp_{uuid4()}",
+                hypothesis_id=(
+                    "hyp_"
+                    + hashlib.sha256(
+                        (
+                            f"{source_id}:hypothesis:{hypothesis_index}:"
+                            f"{hypothesis.normalized_concept}"
+                        ).encode()
+                    ).hexdigest()[:24]
+                ),
                 concept=hypothesis.concept,
                 normalized_concept=hypothesis.normalized_concept,
                 source_fact_ids=[
@@ -153,7 +168,7 @@ def materialize_patient_extraction(
         )
 
     conflicts: list[FactConflict] = []
-    for conflict in proposal.possible_conflicts:
+    for conflict_index, conflict in enumerate(proposal.possible_conflicts):
         if any(index < 0 or index >= len(facts) for index in conflict.proposal_indexes):
             raise PatientExtractionValidationError("conflict source index is invalid")
         referenced = [facts[index] for index in conflict.proposal_indexes]
@@ -161,7 +176,15 @@ def materialize_patient_extraction(
             raise PatientExtractionValidationError("conflict facts must share the declared slot")
         conflicts.append(
             FactConflict(
-                conflict_id=f"conflict_{uuid4()}",
+                conflict_id=(
+                    "conflict_"
+                    + hashlib.sha256(
+                        (
+                            f"{source_id}:conflict:{conflict_index}:{conflict.slot_id}:"
+                            + ":".join(item.fact_id for item in referenced)
+                        ).encode()
+                    ).hexdigest()[:24]
+                ),
                 slot_id=conflict.slot_id,
                 fact_ids=[fact.fact_id for fact in referenced],
                 conflict_type=conflict.conflict_type,

@@ -532,6 +532,17 @@ class Verifier:
                 continue
             if str(relative).startswith(("data/seeds/", "data/fixtures/retrieval/")):
                 continue
+            relative_path = Path(relative)
+            is_manifest_bound_registry_response = (
+                relative_path.parts[:2] == ("data", "demo")
+                and "raw_api" in relative_path.parts
+                and re.fullmatch(r"NCT\d{8}\.json", relative_path.name) is not None
+            )
+            if is_manifest_bound_registry_response:
+                # Official CTGov responses can contain public trial-team contact numbers.
+                # Their byte hashes are checked by snapshot/acquisition integrity gates;
+                # they are not patient input or application-generated fixtures.
+                continue
             path = REPOSITORY_ROOT / relative
             if path.is_file() and path.suffix in {".json", ".txt", ".jsonl"}:
                 text = path.read_text(encoding="utf-8", errors="ignore")
