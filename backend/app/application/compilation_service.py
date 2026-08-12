@@ -50,7 +50,11 @@ class _OfflineSourceItem:
     isolation_required: bool = False
 
 
-_HEADING = re.compile(r"^\s*(inclusion|exclusion)\s+criteria\s*:?\s*$", re.IGNORECASE)
+_HEADING = re.compile(
+    r"^\s*(?:cohort\s+\w+\s+)?(?:key\s+)?(inclusion|exclusion)\s+criteria"
+    r"(?:\s*\([^)]*\))?\s*:?\s*$",
+    re.IGNORECASE,
+)
 _LIST_MARKER = re.compile(r"^\s*(?:[-*•°]|\d+\\?[.)])\s+")
 _EXPLICIT_MUSCLE_PHRASE = re.compile(
     r"(?:(?:non[- ]muscle[- ]invasive|muscle[- ]invasive)\s+"

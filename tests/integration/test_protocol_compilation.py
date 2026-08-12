@@ -600,6 +600,21 @@ def test_offline_compiler_splits_ctgov_escaped_numbered_items() -> None:
     assert all(item.direction.value == "EXCLUSION" for item in items)
 
 
+def test_offline_compiler_recognizes_cohort_and_key_direction_headings() -> None:
+    source = (
+        "Cohort A Key Inclusion Criteria:\n\n"
+        "* First inclusion.\n\n"
+        "Key Exclusion Criteria (Both Cohorts):\n\n"
+        "* First exclusion.\n"
+    )
+    items = ProtocolCompilationService._offline_source_items(source)
+    assert [item.direction.value for item in items] == ["INCLUSION", "EXCLUSION"]
+    assert [source[item.start : item.end].strip() for item in items] == [
+        "* First inclusion.",
+        "* First exclusion.",
+    ]
+
+
 def test_offline_compiler_isolates_one_explicit_positive_mibc_phrase() -> None:
     source = (
         "Inclusion Criteria:\n"
