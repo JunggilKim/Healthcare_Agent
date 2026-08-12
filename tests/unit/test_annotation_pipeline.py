@@ -21,7 +21,7 @@ from backend.app.evaluation.models import BenchmarkArtifact
 
 def _benchmark() -> BenchmarkArtifact:
     return BenchmarkArtifact.model_validate(
-        orjson.loads(open("data/eval/generated/benchmark.json", "rb").read())
+        orjson.loads(open("tests/fixtures/evaluation/benchmark.json", "rb").read())
     )
 
 
