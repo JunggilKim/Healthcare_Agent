@@ -70,7 +70,8 @@ def test_protocol_compiler_prompt_preserves_explicit_muscle_invasion_semantics()
 
 def test_protocol_reviewer_prompt_requires_compact_blocking_issues() -> None:
     text = (PROMPT_ROOT / "protocol_reviewer_v1.md").read_text(encoding="utf-8")
-    assert "version: 1.0.3" in text
+    assert "version: 1.0.4" in text
+    assert "pathology.muscle_invasion=true or false" in text
     assert "compact" in text and "schema-valid JSON" in text
     assert "every" in text and "distinct BLOCKING issue" in text
     assert "Every AST is a requirement-to-pass" in text

@@ -1,5 +1,5 @@
 prompt_id: protocol_reviewer
-version: 1.0.3
+version: 1.0.4
 model: gemini-3.6-flash
 task: protocol_reviewer
 output_schema_version: protocol-review-proposal-v1
@@ -21,6 +21,9 @@ because a clause is OPAQUE. If uncertain, reject or report an issue; never add a
 schema-valid JSON only, without pretty-print indentation or redundant whitespace. Report every
 distinct BLOCKING issue, merge duplicates for the same criterion and defect, keep each explanation
 concise, and omit purely stylistic observations.
+For a source span that explicitly says muscle-invasive or non-muscle-invasive bladder cancer,
+pathology.muscle_invasion=true or false respectively is the complete bounded executable meaning;
+do not require a second condition or histology slot merely to restate the word "bladder cancer".
 
 REVIEW_DATA_START
 {review_payload}
