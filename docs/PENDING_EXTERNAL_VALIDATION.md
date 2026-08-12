@@ -5,44 +5,37 @@ local infrastructure state. They are not represented as completed.
 
 ## Google Cloud and Gemini
 
-- Status: pending.
-- Blocker: no approved Google Cloud project, Application Default Credentials, billing/quota, or
-  explicit authorization to make paid model calls was supplied in the current implementation run.
+- Status: first-party model access and one bounded production Live smoke completed on
+  `project-5ff8dae0-85cf-4767-acd`; final human corpus review remains pending.
+- Confirmed: Application Default Credentials, billing, `gemini-3.6-flash`,
+  `gemini-3.5-flash-lite`, and 768-dimensional `gemini-embedding-001` access all passed using the
+  global v1 first-party endpoint and Standard PayGo. The application cost ledger recorded less
+  than $5 of reconciled model usage at the final controlled run checkpoint.
 - Completed independently: first-party `google-genai==2.17.0` enterprise client construction,
   API v1 selection, fixed model routing, structured schemas, retry/circuit/fallback behavior,
   local and Firestore shared model caches, usage metadata parsing, transactional session/day/total
   cost reservations, Firestore fixed-window rate limits, price estimation, trusted proposal
-  validation, GCS offload for session state above 750 KiB, and opaque safety fallback. The full
-  first-party Live orchestrator is wired but has not dispatched a paid request in this run.
-- Required external proof later: model-access smoke test for `gemini-3.6-flash`,
-  `gemini-3.5-flash-lite`, and `gemini-embedding-001`; paid compilation/review of the final curated
-  corpus; quota and cost-guard validation. The current S004 top-8 compiled cache is deliberately
-  opaque/review-required because no model output was available. Therefore the specification's
-  full-corpus S004/S008/S001 first-question golden assertions cannot yet be represented as passed;
-  only the frozen S004 vertical-slice question contract and credential-independent S001/S008
-  evidence-firewall/domain-path tests are confirmed.
-- Snapshot consequence: `scripts/build_demo_snapshot.py --mode live` is implemented, but requires
-  `data/demo/prepared/acquisition.json`, 8–12 hash-bound raw/compiled trials per case (24–36 unique),
-  embeddings, complete first branches plus an S004 second branch, and an `APPROVED` exact-hash
-  `data/demo/manual_review.yaml`. The committed review manifest remains
-  `PENDING_EXTERNAL_REVIEW`, so the command refuses to freeze incomplete or unreviewed artifacts.
-  Phase 5's complete three-case snapshot exit criterion and Phase 6's final experiment evidence
-  remain pending until those inputs exist.
+  validation, GCS offload for session state above 750 KiB, opaque safety fallback, live corpus
+  acquisition/compilation, and production orchestration.
+- Performance boundary: the final controlled steady-state Live measurement passed the warm target
+  (20 runs, p95 below 1 second), but the one commit-bound Cloud Run cold Live smoke took 159.67
+  seconds and therefore missed the 90-second cold target. The request still completed with HTTP
+  200 and retained visible conservative degradation codes. This release must not claim the cold
+  Live latency gate passed.
+- Snapshot consequence: a complete three-case, 24-trial, 77-file hash-verified snapshot is
+  committed. Its exact-hash manual-review manifest deliberately remains
+  `PENDING_EXTERNAL_REVIEW`; no reviewer identity, approval, or assessment was imputed.
 
 ## Docker Desktop
 
-- Status: pending.
-- Blocker: Docker Desktop's internal image storage was full while pulling the base image
-  (`no space left on device`). Host storage had free capacity, but Docker reported reclaimable
-  images belonging to the user; they were not deleted without approval.
-- Completed independently: dependency bootstrap, native lint/typecheck/tests, production frontend
-  build, Uvicorn API run, and Chromium E2E.
-- Required external proof later: recover Docker storage, build the release image, run it with
-  outbound networking disabled in Snapshot Mode, and record its digest.
+- Status: completed for the current release path.
+- Confirmed: the image builds successfully, the full Snapshot flow passes in a container with
+  outbound networking disabled, and an immutable Artifact Registry digest is recorded after each
+  deployment. No user Docker data was deleted by the release workflow.
 
 ## Dataset A, manual adjudication, and paid baselines
 
-- Status: pending.
+- Status: human input pending; deterministic fixture evaluation refreshed.
 - Blocker: the exact-hash reviewed 24–36-trial Dataset A corpus, at least 200 project-reviewer
   criterion annotations, 50 dual reviews, and adjudication metadata do not yet exist. Paid direct
   LLM baselines B5/P0/P1 also require approved Google Cloud execution.
@@ -71,14 +64,13 @@ local infrastructure state. They are not represented as completed.
 
 Perform these only after approving the named billing/project and Docker cleanup scope:
 
-1. Recover enough Docker Desktop internal storage, then run the strict verifier's Docker/offline
-   container gates and record the immutable image digest.
-2. Supply the approved Free Trial GCP project/billing account, run `scripts/bootstrap_gcp.sh`, and
-   execute the one-call model-access smoke for all three frozen model IDs.
-3. Acquire, manually review, and exact-hash freeze the S004/S008/S001 24–36-trial snapshot within
-   48 hours of release. Populate the live acquisition manifest and replace only the pending fields
-   in `data/demo/manual_review.yaml`, then run the exact Section 33 build command.
-4. Complete the Dataset A 200-pair/50-dual-review adjudication and rerun all evaluation suites.
-5. Deploy the verified commit, run `scripts/smoke_test_deployment.sh --live` exactly once, record
-   three rehearsals including the network-disabled container, and rerun
-   `uv run python scripts/verify_release.py --strict` from a clean worktree.
+1. Have project reviewers inspect the exact committed S004/S008/S001 snapshot hashes and populate
+   only the pending identity, timestamp, checks, and approval fields in
+   `data/demo/manual_review.yaml`.
+2. Complete the Dataset A 200-pair/50-dual-review adjudication and supply the paid B5/P0/P1 result
+   files; then rerun all release evaluation suites.
+3. Resolve or explicitly accept the measured 159.67-second cold Cloud Run Live latency miss before
+   claiming Section 101 performance acceptance.
+4. Rebuild the reviewed snapshot within the required 48-hour release window, rerun the strict
+   verifier, create the release tag only after it passes, and then build the final submission
+   package.
