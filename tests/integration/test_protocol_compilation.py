@@ -760,6 +760,30 @@ def test_offline_compiler_isolates_positive_histology_phrase_with_residuals() ->
     ] == ["muscle-invasive urothelial carcinoma of the bladder"]
 
 
+def test_offline_compiler_isolates_explicit_acute_pancreatitis_diagnosis() -> None:
+    service = ProtocolCompilationService
+    source = (
+        "Inclusion Criteria:\n"
+        "* Diagnosis of mild or moderately severe acute pancreatitis.\n"
+    )
+    items = service._isolate_explicit_acute_pancreatitis_phrases(
+        source, service._offline_source_items(source)
+    )
+    assert "".join(source[item.start : item.end] for item in items) == source[20:]
+    assert [
+        source[item.start : item.end]
+        for item in items
+        if "acute pancreatitis" in source[item.start : item.end]
+    ] == ["acute pancreatitis"]
+
+    history = (
+        "Inclusion Criteria:\n"
+        "* Prior treatment after a history of acute pancreatitis is permitted.\n"
+    )
+    original = service._offline_source_items(history)
+    assert service._isolate_explicit_acute_pancreatitis_phrases(history, original) == original
+
+
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:
     root = Path("data/fixtures/compiled/S004")
     manifest = orjson.loads((root / "manifest.json").read_bytes())

@@ -66,6 +66,7 @@ _EXPLICIT_MUSCLE_PHRASE = re.compile(
 _EXPLICIT_HISTOLOGY_PHRASE = re.compile(
     r"(?:transitional[- ]cell|urothelial)\s+(?:cancer|carcinoma)", re.IGNORECASE
 )
+_EXPLICIT_ACUTE_PANCREATITIS_PHRASE = re.compile(r"acute\s+pancreatitis", re.IGNORECASE)
 _POSITIVE_DIAGNOSIS_CUE = re.compile(
     r"(?:diagnos|confirm|proven|must\s+have|has\s+)", re.IGNORECASE
 )
@@ -274,6 +275,44 @@ class ProtocolCompilationService:
         return isolated
 
     @staticmethod
+    def _isolate_explicit_acute_pancreatitis_phrases(
+        source: str, items: list[_OfflineSourceItem]
+    ) -> list[_OfflineSourceItem]:
+        """Isolate one explicitly diagnosed acute-pancreatitis disease phrase."""
+
+        isolated: list[_OfflineSourceItem] = []
+        for item in items:
+            text = source[item.start : item.end]
+            matches = list(_EXPLICIT_ACUTE_PANCREATITIS_PHRASE.finditer(text))
+            if (
+                item.direction is not SourceDirection.INCLUSION
+                or item.isolation_required
+                or len(matches) != 1
+            ):
+                isolated.append(item)
+                continue
+            match = matches[0]
+            context = text[: match.start()]
+            if not _POSITIVE_DIAGNOSIS_CUE.search(context) or _NON_DIAGNOSIS_CONTEXT.search(
+                context
+            ):
+                isolated.append(item)
+                continue
+            boundaries = (0, match.start(), match.end(), len(text))
+            for start, end in pairwise(boundaries):
+                if start == end or not text[start:end].strip():
+                    continue
+                isolated.append(
+                    _OfflineSourceItem(
+                        start=item.start + start,
+                        end=item.start + end,
+                        direction=item.direction,
+                        isolation_required=True,
+                    )
+                )
+        return isolated
+
+    @staticmethod
     def _opaque_item_proposal(
         trial: RawTrialRecord, item: _OfflineSourceItem, source_order: int
     ) -> CriterionCompilationProposal:
@@ -317,6 +356,7 @@ class ProtocolCompilationService:
         source = trial.eligibility_criteria or ""
         items = self._isolate_explicit_muscle_phrases(source, self._offline_source_items(source))
         items = self._isolate_explicit_histology_phrases(source, items)
+        items = self._isolate_explicit_acute_pancreatitis_phrases(source, items)
         if not items:
             raise ProtocolCompilationError("offline compiler found no source items")
         assert self.offline_compiler_chunk_size is not None
