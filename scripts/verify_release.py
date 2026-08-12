@@ -59,6 +59,7 @@ REQUIRED_FILES = (
     "docs/DEMO_RUNBOOK.md",
     "presentation/demo_script.md",
     "presentation/submission_checklist.md",
+    "scripts/acquire_release_corpus.py",
     "scripts/bootstrap_gcp.sh",
     "scripts/deploy.sh",
     "scripts/smoke_test_deployment.sh",
