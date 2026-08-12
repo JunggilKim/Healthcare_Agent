@@ -688,6 +688,21 @@ def test_offline_compiler_isolates_positive_histology_phrase_with_residuals() ->
     original = service._offline_source_items(treatment)
     assert service._isolate_explicit_histology_phrases(treatment, original) == original
 
+    combined = (
+        "Inclusion Criteria:\n"
+        "* Histologically confirmed muscle-invasive urothelial carcinoma of the bladder "
+        "defined as T2-T3, N0, M0 stage.\n"
+    )
+    muscle_items = service._isolate_explicit_muscle_phrases(
+        combined, service._offline_source_items(combined)
+    )
+    items = service._isolate_explicit_histology_phrases(combined, muscle_items)
+    assert [
+        combined[item.start : item.end]
+        for item in items
+        if "muscle-invasive" in combined[item.start : item.end]
+    ] == ["muscle-invasive urothelial carcinoma of the bladder"]
+
 
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:
     root = Path("data/fixtures/compiled/S004")

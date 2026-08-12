@@ -245,7 +245,11 @@ class ProtocolCompilationService:
         for item in items:
             text = source[item.start : item.end]
             matches = list(_EXPLICIT_HISTOLOGY_PHRASE.finditer(text))
-            if item.direction is not SourceDirection.INCLUSION or len(matches) != 1:
+            if (
+                item.direction is not SourceDirection.INCLUSION
+                or item.isolation_required
+                or len(matches) != 1
+            ):
                 isolated.append(item)
                 continue
             match = matches[0]
