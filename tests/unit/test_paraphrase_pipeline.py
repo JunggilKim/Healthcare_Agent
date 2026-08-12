@@ -36,7 +36,7 @@ def test_batch_json_schema_inlines_pydantic_references() -> None:
 
 def _benchmark() -> BenchmarkArtifact:
     return BenchmarkArtifact.model_validate(
-        orjson.loads(open("data/eval/generated/benchmark.json", "rb").read())
+        orjson.loads(open("tests/fixtures/evaluation/benchmark.json", "rb").read())
     )
 
 
