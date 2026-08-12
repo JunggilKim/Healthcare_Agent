@@ -116,7 +116,7 @@ class ProtocolCompilationService:
             lite_model_id="gemini-3.5-flash-lite",
             task_name="protocol_compiler_repair" if repair_issues else "protocol_compiler",
             prompt=prompt,
-            prompt_version="1.0.5",
+            prompt_version="1.0.6",
             output_schema_version="compiled-trial-proposal-v1",
             slot_catalog_version=self.slot_catalog.version,
             normalized_input={
@@ -521,7 +521,7 @@ class ProtocolCompilationService:
                 compiler_model_id=(
                     "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                 ),
-                compiler_prompt_version="1.0.5",
+                compiler_prompt_version="1.0.6",
                 created_at=now,
                 evaluation_date=evaluation_date,
             )
@@ -551,7 +551,7 @@ class ProtocolCompilationService:
                     compiler_model_id=(
                         "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                     ),
-                    compiler_prompt_version="1.0.5",
+                    compiler_prompt_version="1.0.6",
                     created_at=now,
                     evaluation_date=evaluation_date,
                 )
