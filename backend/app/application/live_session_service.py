@@ -23,6 +23,7 @@ from backend.app.application.compilation_service import (
 from backend.app.application.interactive_loop import InteractiveTrialOptLoop
 from backend.app.domain.canonical import canonical_json_bytes, canonical_sha256, load_yaml
 from backend.app.domain.evidence import EligibilityContext
+from backend.app.domain.model_outputs import PatientExtractionResult
 from backend.app.domain.proof import ProofPacket
 from backend.app.domain.questions import (
     OptimizerRuntimeConfig,
@@ -65,6 +66,79 @@ def _seed_text(case_id: str) -> str:
         if item["num"] == case_id:
             return str(item["title"])
     raise ValueError(f"seed case not found: {case_id}")
+
+
+def _pinned_seed_proposal(case_id: str | None, patient_text: str) -> PatientExtractionResult | None:
+    """Load the exact release-snapshot extraction permitted for a known seed case."""
+
+    if not case_id:
+        return None
+    path = REPOSITORY_ROOT / "data" / "demo" / "current" / "sessions" / case_id / "initial.json"
+    if not path.exists():
+        return None
+    pinned = json.loads(path.read_text(encoding="utf-8"))
+    if pinned.get("patient_text") != patient_text or pinned.get("seed_case_id") != case_id:
+        return None
+
+    facts = pinned.get("facts", [])
+    fact_indexes: dict[str, int] = {}
+    proposals: list[dict[str, Any]] = []
+    for index, fact in enumerate(facts):
+        spans = fact.get("source_spans", [])
+        if fact.get("grade") != "A" or len(spans) != 1 or fact.get("derived_from_fact_ids"):
+            raise ValueError(f"pinned seed extraction contains a non-direct fact: {case_id}")
+        span = spans[0]
+        proposals.append(
+            {
+                "slot_id": fact["slot_id"],
+                "value": fact["value"],
+                "start": span["start"],
+                "end": span["end"],
+                "quote": span["quote"],
+                "effective_date": fact.get("effective_date"),
+                "confidence": fact.get("confidence"),
+            }
+        )
+        fact_indexes[str(fact["fact_id"])] = index
+
+    hypotheses = []
+    for hypothesis in pinned.get("retrieval_hypotheses", []):
+        try:
+            source_indexes = [fact_indexes[item] for item in hypothesis["source_fact_ids"]]
+        except KeyError as error:
+            raise ValueError(f"pinned seed hypothesis has an unknown fact: {case_id}") from error
+        hypotheses.append(
+            {
+                "concept": hypothesis["concept"],
+                "normalized_concept": hypothesis["normalized_concept"],
+                "source_proposal_indexes": source_indexes,
+                "rationale_code": hypothesis["rationale_code"],
+            }
+        )
+
+    conflicts = []
+    for conflict in pinned.get("conflicts", []):
+        try:
+            proposal_indexes = [fact_indexes[item] for item in conflict["fact_ids"]]
+        except KeyError as error:
+            raise ValueError(f"pinned seed conflict has an unknown fact: {case_id}") from error
+        conflicts.append(
+            {
+                "slot_id": conflict["slot_id"],
+                "proposal_indexes": proposal_indexes,
+                "conflict_type": conflict["conflict_type"],
+            }
+        )
+
+    return PatientExtractionResult.model_validate(
+        {
+            "facts": proposals,
+            "retrieval_hypotheses": hypotheses,
+            "possible_conflicts": conflicts,
+            "unparsed_spans": [],
+            "language": pinned["language"],
+        }
+    )
 
 
 def _optimizer_config() -> OptimizerRuntimeConfig:
@@ -444,16 +518,29 @@ class LiveSessionService:
             {},
         )
         yield "stage_started", {**event, "stage": "Patient Evidence"}
+        pinned_proposal = _pinned_seed_proposal(
+            payload.get("seed_case_id"), payload["patient_text"]
+        )
+        extraction_source_id = (
+            f"seed:{payload['seed_case_id']}"
+            if pinned_proposal is not None
+            else f"session:{session_id}:input"
+        )
         materialized, extraction_degraded = await self.patient_agent.extract(
             patient_text=payload["patient_text"],
-            source_id=f"session:{session_id}:input",
+            source_id=extraction_source_id,
             language_hint=payload["language"],
             evaluation_date=date.fromisoformat(payload["evaluation_date"]),
             asserted_at=now,
+            pinned_fallback=pinned_proposal,
             session_id=session_id,
         )
         if extraction_degraded:
-            payload["degradation_codes"].append("PATIENT_EXTRACTION_DETERMINISTIC_FALLBACK")
+            payload["degradation_codes"].append(
+                "PATIENT_EXTRACTION_PINNED_FALLBACK"
+                if pinned_proposal is not None
+                else "PATIENT_EXTRACTION_DETERMINISTIC_FALLBACK"
+            )
             yield (
                 "degraded",
                 {
@@ -470,7 +557,7 @@ class LiveSessionService:
                     item.model_dump(mode="json") for item in patient_state.retrieval_hypotheses
                 ],
                 "conflicts": [item.model_dump(mode="json") for item in patient_state.conflicts],
-                "source_texts": {f"session:{session_id}:input": payload["patient_text"]},
+                "source_texts": {extraction_source_id: payload["patient_text"]},
             }
         )
         state = SessionState.PATIENT_EXTRACTING

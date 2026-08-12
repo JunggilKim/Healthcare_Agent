@@ -128,7 +128,7 @@ def materialize_patient_extraction(
                     "fact_"
                     + hashlib.sha256(
                         (
-                            f"{source_id}:fact:{fact_index}:{fact_proposal.slot_id}:"
+                            f"fact:{fact_index}:{fact_proposal.slot_id}:"
                             f"{fact_proposal.start}:{fact_proposal.end}:{quote_hash}"
                         ).encode()
                     ).hexdigest()[:24]
@@ -166,10 +166,7 @@ def materialize_patient_extraction(
                 hypothesis_id=(
                     "hyp_"
                     + hashlib.sha256(
-                        (
-                            f"{source_id}:hypothesis:{hypothesis_index}:"
-                            f"{hypothesis.normalized_concept}"
-                        ).encode()
+                        (f"hypothesis:{hypothesis_index}:{hypothesis.normalized_concept}").encode()
                     ).hexdigest()[:24]
                 ),
                 concept=hypothesis.concept,
@@ -196,7 +193,7 @@ def materialize_patient_extraction(
                     "conflict_"
                     + hashlib.sha256(
                         (
-                            f"{source_id}:conflict:{conflict_index}:{conflict.slot_id}:"
+                            f"conflict:{conflict_index}:{conflict.slot_id}:"
                             + ":".join(item.fact_id for item in referenced)
                         ).encode()
                     ).hexdigest()[:24]
@@ -398,6 +395,7 @@ class PatientEvidenceAgent:
         language_hint: Literal["ko", "en", "auto"],
         evaluation_date: date,
         asserted_at: datetime,
+        pinned_fallback: PatientExtractionResult | None = None,
         session_id: str = "unscoped",
     ) -> tuple[MaterializedPatientExtraction, bool]:
         normalized_input = {
@@ -433,14 +431,17 @@ class PatientEvidenceAgent:
             )
         except StructuredGenerationUnavailable:
             degraded = True
-            language: Literal["ko", "en", "other"]
-            if language_hint == "ko":
-                language = "ko"
-            elif language_hint == "en":
-                language = "en"
+            if pinned_fallback is not None:
+                proposal = pinned_fallback
             else:
-                language = "other"
-            proposal = deterministic_surface_fallback(patient_text, language=language)
+                language: Literal["ko", "en", "other"]
+                if language_hint == "ko":
+                    language = "ko"
+                elif language_hint == "en":
+                    language = "en"
+                else:
+                    language = "other"
+                proposal = deterministic_surface_fallback(patient_text, language=language)
         materialized = materialize_patient_extraction(
             patient_text=patient_text,
             source_id=source_id,

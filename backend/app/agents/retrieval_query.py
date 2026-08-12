@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from backend.app.agents.prompts import render_prompt
 from backend.app.domain.canonical import canonical_json_bytes
 from backend.app.domain.evidence import PatientState
@@ -9,6 +11,17 @@ from backend.app.infrastructure.structured_generation import (
 )
 from backend.app.retrieval.models import RetrievalQuery
 from backend.app.retrieval.query_builder import build_deterministic_query
+
+
+def retrieval_query_semantic_payload(state: PatientState) -> dict[str, Any]:
+    """Keep clinical semantics and stable evidence IDs, not session-local provenance."""
+
+    payload = state.model_dump(mode="json")
+    for fact in payload["confirmed_facts"]:
+        fact.pop("asserted_at", None)
+        for span in fact["source_spans"]:
+            span.pop("source_id", None)
+    return payload
 
 
 class RetrievalQueryAgent:
@@ -22,7 +35,7 @@ class RetrievalQueryAgent:
         *,
         session_id: str = "unscoped",
     ) -> RetrievalQuery:
-        payload = state.model_dump(mode="json")
+        payload = retrieval_query_semantic_payload(state)
         prompt = render_prompt(
             "retrieval_query_v1.md",
             patient_state=canonical_json_bytes(payload).decode(),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -68,9 +69,24 @@ def test_backend_assigns_fact_contract_and_hypothesis_stays_firewalled() -> None
     ]
     assert repeated.state.retrieval_hypotheses[0].hypothesis_id == hypothesis.hypothesis_id
 
+    different_session = materialize_patient_extraction(
+        patient_text=text,
+        source_id="patient:another-session",
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        asserted_at=datetime(2026, 8, 12, tzinfo=UTC),
+    )
+    assert [item.fact_id for item in different_session.state.confirmed_facts] == [
+        item.fact_id for item in materialized.state.confirmed_facts
+    ]
+    assert different_session.state.retrieval_hypotheses[0].hypothesis_id == hypothesis.hypothesis_id
+    assert different_session.state.confirmed_facts[0].source_spans[0].source_id != (
+        materialized.state.confirmed_facts[0].source_spans[0].source_id
+    )
+
 
 def test_mismatched_source_span_and_model_supplied_extra_field_are_rejected() -> None:
-    base = {
+    base: dict[str, Any] = {
         "facts": [
             {
                 "slot_id": "demographics.age",
