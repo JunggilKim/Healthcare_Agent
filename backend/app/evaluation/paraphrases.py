@@ -22,6 +22,124 @@ class SelectedWorld:
     language: Literal["ko", "en"]
 
 
+def patient_extraction_batch_response_schema() -> dict[str, Any]:
+    """Return a Vertex Batch-compatible schema for patient extraction.
+
+    Vertex Batch currently rejects the discriminated `oneOf` emitted by
+    Pydantic for ``TypedValue`` after converting absent schema fields to JSON
+    nulls. The value object is therefore constrained by its discriminator here
+    and validated against ``PatientExtractionResult`` after generation.
+    """
+
+    typed_value = {
+        "type": "object",
+        "properties": {
+            "kind": {
+                "type": "string",
+                "enum": [
+                    "boolean",
+                    "number",
+                    "string",
+                    "categorical",
+                    "date",
+                    "duration",
+                    "range",
+                    "unknown",
+                ],
+            }
+        },
+        "required": ["kind"],
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "facts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "slot_id": {"type": "string"},
+                        "value": typed_value,
+                        "start": {"type": "integer", "minimum": 0},
+                        "end": {"type": "integer", "minimum": 1},
+                        "quote": {"type": "string", "minLength": 1},
+                        "effective_date": {"type": "string"},
+                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    },
+                    "required": ["slot_id", "value", "start", "end", "quote"],
+                },
+            },
+            "retrieval_hypotheses": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "concept": {"type": "string"},
+                        "normalized_concept": {"type": "string"},
+                        "source_proposal_indexes": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                        },
+                        "rationale_code": {"type": "string"},
+                    },
+                    "required": [
+                        "concept",
+                        "normalized_concept",
+                        "source_proposal_indexes",
+                        "rationale_code",
+                    ],
+                },
+            },
+            "possible_conflicts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "slot_id": {"type": "string"},
+                        "proposal_indexes": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "minItems": 2,
+                        },
+                        "conflict_type": {
+                            "type": "string",
+                            "enum": [
+                                "VALUE_MISMATCH",
+                                "TEMPORAL_OVERLAP",
+                                "NEGATION_MISMATCH",
+                                "UNIT_INCOMPATIBLE",
+                                "SOURCE_AMBIGUITY",
+                            ],
+                        },
+                    },
+                    "required": ["slot_id", "proposal_indexes", "conflict_type"],
+                },
+            },
+            "unparsed_spans": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "start": {"type": "integer", "minimum": 0},
+                        "end": {"type": "integer", "minimum": 1},
+                        "quote": {"type": "string", "minLength": 1},
+                        "reason_code": {"type": "string"},
+                    },
+                    "required": ["start", "end", "quote", "reason_code"],
+                },
+            },
+            "language": {"type": "string", "enum": ["ko", "en", "other"]},
+        },
+        "required": [
+            "facts",
+            "retrieval_hypotheses",
+            "possible_conflicts",
+            "unparsed_spans",
+            "language",
+        ],
+    }
+
+
 def inline_json_schema_references(schema: dict[str, Any]) -> dict[str, Any]:
     """Inline local Pydantic refs so Vertex batch JSONL has no `$` field names."""
 

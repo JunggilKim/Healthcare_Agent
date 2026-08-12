@@ -14,6 +14,7 @@ from backend.app.evaluation.paraphrases import (
     inline_json_schema_references,
     paraphrase_candidate_worlds,
     parse_paraphrase_responses,
+    patient_extraction_batch_response_schema,
     select_paraphrase_worlds,
 )
 
@@ -112,12 +113,15 @@ def test_extraction_batch_requests_use_frozen_medium_thinking_without_temperatur
     requests = build_extraction_requests(
         {"world-1": "Patient narrative."},
         patient_prompt_template="Extract from {patient_text}",
-        response_schema=PatientExtractionResult.model_json_schema(),
+        response_schema=patient_extraction_batch_response_schema(),
     )
 
     generation_config = requests[0]["request"]["generationConfig"]
     assert generation_config["thinkingConfig"] == {"thinkingLevel": "MEDIUM"}
     assert "temperature" not in generation_config
+    schema_text = orjson.dumps(generation_config["responseJsonSchema"]).decode()
+    assert "oneOf" not in schema_text
+    assert "anyOf" not in schema_text
 
 
 def test_paraphrase_is_applied_only_after_all_facts_are_recovered() -> None:

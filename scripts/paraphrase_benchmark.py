@@ -32,6 +32,7 @@ from backend.app.evaluation.paraphrases import (  # noqa: E402
     paraphrase_candidate_worlds,
     parse_extraction_responses,
     parse_paraphrase_responses,
+    patient_extraction_batch_response_schema,
     select_paraphrase_worlds,
     validate_paraphrase_spans,
 )
@@ -129,11 +130,15 @@ def _prepare_validation(args: argparse.Namespace) -> None:
     if selected != expected:
         raise RuntimeError("PARAPHRASE_SELECTION_NOT_REPRODUCIBLE")
     paraphrases = parse_paraphrase_responses(_jsonl_rows(args.paraphrase_output), selected)
-    prompt = (REPOSITORY_ROOT / "prompts" / "patient_extraction_v1.md").read_text(encoding="utf-8")
+    prompt = render_prompt(
+        "patient_extraction_v1.md",
+        patient_text="{patient_text}",
+        slot_catalog=compact_patient_slot_catalog(load_slot_catalog()),
+    )
     requests = build_extraction_requests(
         paraphrases,
         patient_prompt_template=prompt,
-        response_schema=PatientExtractionResult.model_json_schema(),
+        response_schema=patient_extraction_batch_response_schema(),
     )
     output = args.output_dir.resolve()
     if output.exists() and any(output.iterdir()):
