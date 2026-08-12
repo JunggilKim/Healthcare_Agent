@@ -51,7 +51,9 @@ def _git_sha() -> str:
     ).stdout.strip()
 
 
-async def acquire(*, project: str, output: Path, trials_per_case: int) -> None:
+async def acquire(
+    *, project: str, output: Path, trials_per_case: int, candidate_pool: bool = False
+) -> None:
     if output.exists():
         raise RuntimeError("OUTPUT_MUST_BE_A_FRESH_DIRECTORY")
     output.mkdir(parents=True)
@@ -166,17 +168,23 @@ async def acquire(*, project: str, output: Path, trials_per_case: int) -> None:
         )
         print(orjson.dumps({"case_id": case_id, "selected": len(selected)}).decode())
 
-    if not 24 <= len(used_nct_ids) <= 36:
-        raise RuntimeError(f"RELEASE_UNIQUE_TRIAL_COUNT_INVALID:{len(used_nct_ids)}")
+    maximum = 60 if candidate_pool else 36
+    if not 24 <= len(used_nct_ids) <= maximum:
+        raise RuntimeError(f"RELEASE_ACQUISITION_TRIAL_COUNT_INVALID:{len(used_nct_ids)}")
     manifest = {
         "schema_version": "trial-opt-live-corpus-acquisition-v1",
-        "status": "PENDING_PROJECT_SCREENING",
+        "status": (
+            "PENDING_PROJECT_SCREENING_CANDIDATE_POOL"
+            if candidate_pool
+            else "PENDING_PROJECT_SCREENING"
+        ),
         "mode": "LIVE",
         "project_id": project,
         "git_sha": _git_sha(),
         "acquired_at": datetime.now(UTC).isoformat(),
         "case_ids": list(CASE_QUERIES),
         "unique_trial_count": len(used_nct_ids),
+        "candidate_pool": candidate_pool,
         "embedding_model": "gemini-embedding-001",
         "embedding_dimensions": 768,
         "cases": case_manifests,
@@ -200,7 +208,12 @@ def main() -> None:
     )
     parser.add_argument("--project", required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--trials-per-case", type=int, default=8, choices=range(8, 13))
+    parser.add_argument("--trials-per-case", type=int, default=8, choices=range(8, 21))
+    parser.add_argument(
+        "--candidate-pool",
+        action="store_true",
+        help="allow a screening pool above the final 12-per-case release cap",
+    )
     parser.add_argument("--allow-live-acquisition", action="store_true")
     args = parser.parse_args()
     if not args.allow_live_acquisition:
@@ -214,6 +227,7 @@ def main() -> None:
             project=args.project,
             output=args.output.resolve(),
             trials_per_case=args.trials_per_case,
+            candidate_pool=args.candidate_pool,
         )
     )
 
