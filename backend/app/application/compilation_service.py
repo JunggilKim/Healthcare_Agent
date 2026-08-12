@@ -205,6 +205,7 @@ class ProtocolCompilationService:
         trial: RawTrialRecord,
         *,
         repair_issues: list[dict[str, object]] | None = None,
+        base_proposal: CompiledTrialProposal | None = None,
         session_id: str,
     ) -> tuple[CompiledTrialProposal, bool]:
         source = trial.eligibility_criteria or ""
@@ -235,6 +236,13 @@ class ProtocolCompilationService:
                 if isinstance(issue.get("source_quote"), str)
                 and str(issue["source_quote"]) in chunk_text
             ]
+            if repair_issues is not None and not relevant_issues and base_proposal is not None:
+                merged.extend(
+                    criterion.model_copy(deep=True)
+                    for criterion in base_proposal.criteria
+                    if chunk_start <= criterion.start < chunk_end
+                )
+                continue
             chunk_trial = trial.model_copy(update={"eligibility_criteria": chunk_text})
             try:
                 proposal, chunk_fallback = await self._generate_compilation(
@@ -286,12 +294,14 @@ class ProtocolCompilationService:
         trial: RawTrialRecord,
         *,
         repair_issues: list[dict[str, object]] | None = None,
+        base_proposal: CompiledTrialProposal | None = None,
         session_id: str,
     ) -> tuple[CompiledTrialProposal, bool]:
         if self.offline_compiler_chunk_size is not None:
             return await self._generate_offline_compilation(
                 trial,
                 repair_issues=repair_issues,
+                base_proposal=base_proposal,
                 session_id=session_id,
             )
         return await self._generate_compilation(
@@ -387,6 +397,7 @@ class ProtocolCompilationService:
                 proposal, compiler_fallback = await self._compile_proposal(
                     trial,
                     repair_issues=repair_issue_rows,
+                    base_proposal=proposal,
                     session_id=session_id,
                 )
                 compilation = construct_trusted_compilation(

@@ -93,6 +93,8 @@ def _binding(
     models_config_sha256: str,
     slots_config_sha256: str,
     implementation_sha256: str,
+    compiler_chunk_size: int,
+    reviewer_chunk_size: int,
 ) -> dict[str, object]:
     eligibility = trial.eligibility_criteria or ""
     return {
@@ -105,6 +107,8 @@ def _binding(
         "models_config_sha256": models_config_sha256,
         "slots_config_sha256": slots_config_sha256,
         "implementation_sha256": implementation_sha256,
+        "compiler_chunk_size": compiler_chunk_size,
+        "reviewer_chunk_size": reviewer_chunk_size,
         "ast_schema_version": "criterion-ast-v1",
     }
 
@@ -414,6 +418,8 @@ async def compile_corpus(args: argparse.Namespace) -> dict[str, object]:
                 models_config_sha256=models_hash,
                 slots_config_sha256=slots_hash,
                 implementation_sha256=implementation_hash,
+                compiler_chunk_size=args.compiler_chunk_size,
+                reviewer_chunk_size=args.reviewer_chunk_size,
             ),
             output_root=args.output,
             semaphore=semaphore,

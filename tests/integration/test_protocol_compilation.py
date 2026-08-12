@@ -476,6 +476,25 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert all(call["prompt_version"] == "1.0.4" for call in generator.calls)
     assert all(call["primary_thinking_budget"] == 1024 for call in generator.calls)
 
+    repaired, _ = await service._generate_offline_compilation(
+        raw,
+        repair_issues=[
+            {
+                "criterion_id": "test",
+                "issue_type": "MISSING_CLAUSE",
+                "severity": "BLOCKING",
+                "source_quote": "* Pregnant or breastfeeding.\n",
+                "explanation": "test repair",
+            }
+        ],
+        base_proposal=proposal,
+        session_id="offline-compiler-repair-test",
+    )
+    assert len(generator.calls) == 3
+    assert repaired.criteria[0] == proposal.criteria[0]
+    assert generator.calls[-1]["task_name"] == "protocol_compiler_repair"
+    assert generator.calls[-1]["primary_max_output_tokens"] == 2500
+
 
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:
     root = Path("data/fixtures/compiled/S004")
