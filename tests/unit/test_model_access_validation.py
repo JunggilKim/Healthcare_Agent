@@ -8,9 +8,11 @@ from scripts import validate_model_access
 class _Models:
     def __init__(self) -> None:
         self.generated: list[str] = []
+        self.configs = []
 
     def generate_content(self, *, model, contents, config):
         self.generated.append(model)
+        self.configs.append(config)
         return SimpleNamespace(
             text="ACCESS_OK",
             usage_metadata=SimpleNamespace(
@@ -39,6 +41,11 @@ def test_run_probes_uses_every_frozen_model_once(monkeypatch) -> None:
     )
 
     assert models.generated == ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    assert [config.max_output_tokens for config in models.configs] == [256, 256]
+    assert [config.thinking_config.thinking_level for config in models.configs] == [
+        "MEDIUM",
+        "LOW",
+    ]
     assert result["models"] == [
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",

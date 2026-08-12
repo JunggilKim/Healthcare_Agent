@@ -65,14 +65,20 @@ def run_probes(*, project: str, location: str, config_path: Path) -> dict[str, o
         )
     )
     probes: list[dict[str, object]] = []
-    for model_id in (primary, lite):
+    generation_probes = ((primary, "MEDIUM"), (lite, "LOW"))
+    for model_id, thinking_level in generation_probes:
         response = client.models.generate_content(
             model=model_id,
             contents="Return exactly ACCESS_OK.",
             config=types.GenerateContentConfig(
-                max_output_tokens=16,
+                # Thinking tokens share the output-token budget. A 16-token probe can
+                # therefore prove routing while returning an empty visible response.
+                max_output_tokens=256,
                 temperature=0,
                 response_mime_type="text/plain",
+                thinking_config=types.ThinkingConfig(
+                    thinking_level=types.ThinkingLevel(thinking_level)
+                ),
             ),
         )
         if not response.text:
@@ -81,6 +87,7 @@ def run_probes(*, project: str, location: str, config_path: Path) -> dict[str, o
             {
                 "model_id": model_id,
                 "probe_type": "GENERATE_CONTENT",
+                "thinking_level": thinking_level,
                 "response_nonempty": True,
                 "usage": _usage(response),
             }
