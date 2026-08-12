@@ -46,7 +46,22 @@ def patient_extraction_batch_response_schema() -> dict[str, Any]:
                     "range",
                     "unknown",
                 ],
-            }
+            },
+            # These optional fields are intentionally flattened instead of a
+            # discriminated oneOf. Empty schemas preserve the JSON scalar type
+            # emitted for `value`/range bounds; the strict Pydantic model then
+            # enforces the exact field set and type selected by `kind`.
+            "value": {},
+            "unit": {"type": "string"},
+            "normalized": {"type": "string"},
+            "system": {"type": "string"},
+            "precision": {"type": "string", "enum": ["DAY", "MONTH", "YEAR"]},
+            "days": {"type": "integer"},
+            "lower": {},
+            "upper": {},
+            "lower_inclusive": {"type": "boolean"},
+            "upper_inclusive": {"type": "boolean"},
+            "reason": {"type": "string"},
         },
         "required": ["kind"],
     }

@@ -122,6 +122,17 @@ def test_extraction_batch_requests_use_frozen_medium_thinking_without_temperatur
     schema_text = orjson.dumps(generation_config["responseJsonSchema"]).decode()
     assert "oneOf" not in schema_text
     assert "anyOf" not in schema_text
+    typed_value = generation_config["responseJsonSchema"]["properties"]["facts"]["items"][
+        "properties"
+    ]["value"]
+    assert set(typed_value["properties"]) >= {
+        "kind",
+        "value",
+        "days",
+        "lower",
+        "upper",
+        "reason",
+    }
 
 
 def test_paraphrase_is_applied_only_after_all_facts_are_recovered() -> None:
