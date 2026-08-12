@@ -16,7 +16,7 @@ from backend.app.agents.protocol_compiler import (
 from backend.app.agents.protocol_reviewer import ReviewedCompilation, bind_semantic_review
 from backend.app.application.catalog import SlotCatalog
 from backend.app.domain.ast import AstNode, AstOperator, CriterionAst
-from backend.app.domain.canonical import canonical_json_bytes
+from backend.app.domain.canonical import canonical_json_bytes, canonical_sha256
 from backend.app.domain.enums import SourceDirection
 from backend.app.domain.model_outputs import (
     CompiledTrialProposal,
@@ -24,6 +24,7 @@ from backend.app.domain.model_outputs import (
     ProtocolReviewProposal,
 )
 from backend.app.domain.trials import ProtocolReviewArtifact, RawTrialRecord
+from backend.app.engine.boundary_tests import run_boundary_tests
 from backend.app.infrastructure.structured_generation import (
     StructuredGenerationUnavailable,
     StructuredGenerator,
@@ -365,6 +366,80 @@ class ProtocolCompilationService:
             used_fallback,
         )
 
+    @staticmethod
+    def _quarantine_blocking_criteria(
+        compilation: TrustedCompilation,
+        review: ProtocolReviewProposal,
+        *,
+        evaluation_date: date,
+    ) -> TrustedCompilation:
+        blocking_ids = {
+            issue.criterion_id for issue in review.issues if issue.severity == "BLOCKING"
+        }
+        criteria = []
+        for criterion in compilation.compiled_trial.criteria:
+            if criterion.criterion_id not in blocking_ids:
+                criteria.append(criterion)
+                continue
+            node_id = f"{criterion.criterion_id}:node:0"
+            criteria.append(
+                criterion.model_copy(
+                    update={
+                        "ast": CriterionAst(
+                            root_node_id=node_id,
+                            nodes=[
+                                AstNode(
+                                    node_id=node_id,
+                                    op=AstOperator.OPAQUE,
+                                    metadata={
+                                        "reason_code": "SEMANTIC_REVIEW_REJECTED_AFTER_REPAIR",
+                                        "residual_source_sha256": criterion.source_text_sha256,
+                                    },
+                                )
+                            ],
+                        ),
+                        "required_slots": [],
+                        "protocol_verified": False,
+                        "opaque": True,
+                        "warnings": sorted(
+                            set(
+                                [
+                                    *criterion.warnings,
+                                    "SEMANTIC_REVIEW_REJECTED_AFTER_REPAIR_OPAQUE",
+                                ]
+                            )
+                        ),
+                    }
+                )
+            )
+        boundary_reports = {
+            criterion.criterion_id: run_boundary_tests(criterion, evaluation_date)
+            for criterion in criteria
+        }
+        draft = compilation.compiled_trial.model_copy(
+            update={
+                "criteria": criteria,
+                "protocol_verified": False,
+                "review_artifact_id": None,
+                "boundary_tests_passed": all(report.passed for report in boundary_reports.values()),
+                "warnings": sorted(
+                    set(
+                        [
+                            *compilation.compiled_trial.warnings,
+                            "SEMANTIC_REVIEW_REJECTED_CRITERIA_QUARANTINED",
+                        ]
+                    )
+                ),
+                "content_hash": "0" * 64,
+            }
+        )
+        content_hash = canonical_sha256(draft.model_dump(mode="json", exclude={"content_hash"}))
+        return TrustedCompilation(
+            compiled_trial=draft.model_copy(update={"content_hash": content_hash}),
+            coverage_report=compilation.coverage_report,
+            boundary_reports=boundary_reports,
+        )
+
     async def compile_and_review(
         self,
         *,
@@ -416,19 +491,49 @@ class ProtocolCompilationService:
                 if not review.approved or any(
                     issue.severity == "BLOCKING" for issue in review.issues
                 ):
-                    return CompilationWorkflowResult(
-                        compilation=opaque_fallback_compilation(
-                            trial=trial,
-                            slot_catalog=self.slot_catalog,
-                            created_at=now,
-                            evaluation_date=evaluation_date,
-                            reason_code="SEMANTIC_REVIEW_REJECTED_AFTER_REPAIR",
-                        ),
-                        review_artifact=None,
-                        review_attempts=review_attempts,
-                        repair_attempted=True,
-                        degradation_codes=["PROTOCOL_REVIEW_OPAQUE_AFTER_SINGLE_REPAIR"],
+                    if self.offline_reviewer_chunk_size is None:
+                        return CompilationWorkflowResult(
+                            compilation=opaque_fallback_compilation(
+                                trial=trial,
+                                slot_catalog=self.slot_catalog,
+                                created_at=now,
+                                evaluation_date=evaluation_date,
+                                reason_code="SEMANTIC_REVIEW_REJECTED_AFTER_REPAIR",
+                            ),
+                            review_artifact=None,
+                            review_attempts=review_attempts,
+                            repair_attempted=True,
+                            degradation_codes=["PROTOCOL_REVIEW_OPAQUE_AFTER_SINGLE_REPAIR"],
+                        )
+                    compilation = self._quarantine_blocking_criteria(
+                        compilation,
+                        review,
+                        evaluation_date=evaluation_date,
                     )
+                    degradation_codes.append("REVIEW_REJECTED_CRITERIA_QUARANTINED_OPAQUE")
+                    review, reviewer_fallback = await self._review(
+                        compilation, session_id=session_id
+                    )
+                    review_attempts.append(review)
+                    if not review.approved or any(
+                        issue.severity == "BLOCKING" for issue in review.issues
+                    ):
+                        return CompilationWorkflowResult(
+                            compilation=opaque_fallback_compilation(
+                                trial=trial,
+                                slot_catalog=self.slot_catalog,
+                                created_at=now,
+                                evaluation_date=evaluation_date,
+                                reason_code="SEMANTIC_REVIEW_REJECTED_AFTER_OPAQUE_QUARANTINE",
+                            ),
+                            review_artifact=None,
+                            review_attempts=review_attempts,
+                            repair_attempted=True,
+                            degradation_codes=[
+                                *degradation_codes,
+                                "PROTOCOL_REVIEW_OPAQUE_AFTER_SINGLE_REPAIR",
+                            ],
+                        )
             reviewed: ReviewedCompilation = bind_semantic_review(
                 compiled_trial=compilation.compiled_trial,
                 proposal=review,
@@ -450,9 +555,9 @@ class ProtocolCompilationService:
                 review_attempts=review_attempts,
                 repair_attempted=repair_attempted,
                 degradation_codes=(
-                    ["DOUBLE_LITE_FALLBACK_UNVERIFIED"]
+                    [*degradation_codes, "DOUBLE_LITE_FALLBACK_UNVERIFIED"]
                     if compiler_fallback and reviewer_fallback
-                    else []
+                    else degradation_codes
                 ),
             )
         except (StructuredGenerationUnavailable, ProtocolCompilationError, ValueError):

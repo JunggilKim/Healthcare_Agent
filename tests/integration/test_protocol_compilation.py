@@ -161,6 +161,47 @@ def test_approved_review_verifies_executable_subset_but_not_opaque_trial() -> No
     assert approved.compiled_trial.criteria[0].protocol_verified is False
 
 
+def test_post_repair_blocking_criterion_is_hash_bound_opaque_quarantine() -> None:
+    raw, proposal = _trial_and_proposal()
+    compilation = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.4",
+        created_at=datetime(2026, 8, 12, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 12),
+    )
+    criterion = compilation.compiled_trial.criteria[0]
+    review = ProtocolReviewProposal.model_validate(
+        {
+            "approved": False,
+            "issues": [
+                {
+                    "criterion_id": criterion.criterion_id,
+                    "issue_type": "MISSING_CLAUSE",
+                    "severity": "BLOCKING",
+                    "source_quote": criterion.source_span.quote,
+                    "explanation": "recorded issue",
+                }
+            ],
+        }
+    )
+    quarantined = ProtocolCompilationService._quarantine_blocking_criteria(
+        compilation,
+        review,
+        evaluation_date=date(2026, 8, 12),
+    )
+    quarantined_criterion = quarantined.compiled_trial.criteria[0]
+    node = quarantined_criterion.ast.nodes[0]
+    assert quarantined_criterion.opaque is True
+    assert quarantined_criterion.protocol_verified is False
+    assert node.metadata["residual_source_sha256"] == criterion.source_text_sha256
+    assert quarantined.compiled_trial.content_hash == canonical_sha256(
+        quarantined.compiled_trial.model_dump(mode="json", exclude={"content_hash"})
+    )
+
+
 def test_noncontiguous_model_ast_ids_become_source_bound_opaque() -> None:
     raw, proposal = _trial_and_proposal()
     proposal.criteria[0].ast.nodes[0].node_id = "n1"
