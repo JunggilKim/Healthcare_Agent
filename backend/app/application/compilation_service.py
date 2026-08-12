@@ -106,6 +106,7 @@ class ProtocolCompilationService:
         criterion_rows = [
             {
                 "criterion_id": criterion.criterion_id,
+                "source_direction": criterion.source_direction.value,
                 "source_quote": criterion.source_span.quote,
                 "ast": criterion.ast.model_dump(mode="json"),
             }
@@ -132,7 +133,7 @@ class ProtocolCompilationService:
                     else f"protocol_reviewer_chunk_{chunk_index:03d}"
                 ),
                 prompt=prompt,
-                prompt_version="1.0.2",
+                prompt_version="1.0.3",
                 output_schema_version="protocol-review-proposal-v1",
                 slot_catalog_version=self.slot_catalog.version,
                 normalized_input=review_payload,
@@ -223,7 +224,7 @@ class ProtocolCompilationService:
                 reviewer_model_id=(
                     "gemini-3.5-flash-lite" if reviewer_fallback else "gemini-3.6-flash"
                 ),
-                reviewer_prompt_version="1.0.2",
+                reviewer_prompt_version="1.0.3",
                 reviewed_at=now,
                 compiler_used_fallback=compiler_fallback,
                 reviewer_used_fallback=reviewer_fallback,

@@ -5334,7 +5334,11 @@ Compare each compiled criterion against its exact source. Do not repair or rewri
 Report blocking issues for missing clauses, added assumptions, polarity errors, AND/OR/NOT scope
 errors, numeric boundary errors, and temporal reference errors. Approve only when the executable
 meaning is supported by the source. Return compact JSON without pretty-print indentation, merge
-duplicate reports of the same defect, and keep explanations concise.
+duplicate reports of the same defect, and keep explanations concise. Interpret every AST as a
+requirement-to-pass: inclusion conditions are preserved and exclusion conditions are negated, so
+the exact logical complement of an exclusion is not a polarity error. Accept a schema-valid,
+exact-source-hash-bound OPAQUE node as the required safe representation for unsupported semantics;
+do not report a missing clause merely because it is OPAQUE.
 ```
 
 ## 134. Answer Interpreter Prompt Contract

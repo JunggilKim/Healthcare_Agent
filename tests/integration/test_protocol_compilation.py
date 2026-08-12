@@ -153,7 +153,7 @@ def test_approved_review_verifies_executable_subset_but_not_opaque_trial() -> No
         compiled_trial=compilation.compiled_trial,
         proposal=ProtocolReviewProposal(approved=True),
         reviewer_model_id="gemini-3.6-flash",
-        reviewer_prompt_version="1.0.2",
+        reviewer_prompt_version="1.0.3",
         reviewed_at=datetime(2026, 8, 12, tzinfo=UTC),
     )
     assert approved.review_artifact.approved is True
@@ -344,11 +344,16 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     assert initial_compile["primary_max_output_tokens"] == 4000
     assert repair_compile["primary_thinking_budget"] == 1024
     assert repair_compile["primary_max_output_tokens"] == 2500
-    assert reviewer_call["prompt_version"] == "1.0.2"
+    assert reviewer_call["prompt_version"] == "1.0.3"
     reviewer_input = reviewer_call["normalized_input"]
     assert isinstance(reviewer_input, dict)
     assert set(reviewer_input) == {"nct_id", "criteria"}
-    assert set(reviewer_input["criteria"][0]) == {"criterion_id", "source_quote", "ast"}
+    assert set(reviewer_input["criteria"][0]) == {
+        "criterion_id",
+        "source_direction",
+        "source_quote",
+        "ast",
+    }
 
 
 @pytest.mark.asyncio

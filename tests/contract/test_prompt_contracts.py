@@ -59,6 +59,9 @@ def test_protocol_compiler_prompt_requires_compact_json_and_opaque_metadata() ->
 
 def test_protocol_reviewer_prompt_requires_compact_blocking_issues() -> None:
     text = (PROMPT_ROOT / "protocol_reviewer_v1.md").read_text(encoding="utf-8")
-    assert "version: 1.0.2" in text
+    assert "version: 1.0.3" in text
     assert "compact" in text and "schema-valid JSON" in text
     assert "every" in text and "distinct BLOCKING issue" in text
+    assert "Every AST is a requirement-to-pass" in text
+    assert "EXCLUSION condition is negated" in text
+    assert "schema-valid OPAQUE" in text
