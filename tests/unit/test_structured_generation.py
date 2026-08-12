@@ -23,12 +23,13 @@ class _Output(StrictModel):
 class _FakeModels:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.prompts: list[str] = []
         self.thinking_budgets: list[int | None] = []
         self.thinking_levels: list[object | None] = []
 
     async def generate_content(self, *, model, contents, config):
-        del contents
         self.calls.append(model)
+        self.prompts.append(contents)
         self.thinking_budgets.append(config.thinking_config.thinking_budget)
         self.thinking_levels.append(config.thinking_config.thinking_level)
         text = "not json" if len(self.calls) == 1 else '{"value":"ok"}'
@@ -136,6 +137,8 @@ async def test_schema_failure_retries_then_exact_cache_prevents_second_dispatch(
     second, second_record = await generator.generate(**arguments)
     assert first.value == second.value == "ok"
     assert client.aio.models.calls == ["gemini-3.6-flash", "gemini-3.6-flash"]
+    assert "VALIDATION_RETRY_ISSUE\n$:json_invalid" in client.aio.models.prompts[1]
+    assert "complete compact JSON object" in client.aio.models.prompts[1]
     assert first_record.usage.cache_hit is False
     assert second_record.usage.cache_hit is True
     assert first_record.usage.estimated_cost_usd > 0

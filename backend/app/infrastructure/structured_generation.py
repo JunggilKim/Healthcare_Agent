@@ -204,9 +204,15 @@ class StructuredGenerator:
                 last_error = error
                 if attempt < max_attempts - 1:
                     issue = (
-                        str(error) if isinstance(error, ValidationError) else type(error).__name__
+                        self._validation_issue_text(error)
+                        if isinstance(error, ValidationError)
+                        else type(error).__name__
                     )
-                    retry_prompt = f"{prompt}\n\nVALIDATION_RETRY_ISSUE\n{issue[:1000]}"
+                    retry_prompt = (
+                        f"{prompt}\n\nVALIDATION_RETRY_ISSUE\n{issue[:1000]}\n"
+                        "Return one complete compact JSON object immediately. "
+                        "Do not add prose or markdown."
+                    )
                     delay = (1, 2, 4)[min(attempt, 2)] + float(self._jitter(0.0, 0.5))
                     await self._sleep(delay)
         circuit.record_failure()
@@ -226,6 +232,14 @@ class StructuredGenerator:
             location = ".".join(str(item) for item in issue["loc"]) or "$"
             issues.append(f"{location}:{issue['type']}")
         return f"; issues={','.join(issues)}"
+
+    @staticmethod
+    def _validation_issue_text(error: ValidationError) -> str:
+        issues = []
+        for issue in error.errors(include_input=False, include_url=False)[:8]:
+            location = ".".join(str(item) for item in issue["loc"]) or "$"
+            issues.append(f"{location}:{issue['type']}")
+        return ",".join(issues)
 
     @staticmethod
     def _thinking_config(
