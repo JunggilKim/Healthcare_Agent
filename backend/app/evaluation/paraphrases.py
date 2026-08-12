@@ -49,15 +49,12 @@ def patient_extraction_batch_response_schema() -> dict[str, Any]:
             },
             # These optional fields are intentionally flattened instead of a
             # discriminated oneOf. Scalar unions avoid Vertex's invalid null
-            # property expansion. Decimal/date/text values use their canonical
-            # string representation while booleans remain JSON booleans; strict
-            # post-generation Pydantic validation remains authoritative.
-            "value": {
-                "anyOf": [
-                    {"type": "boolean"},
-                    {"type": "string"},
-                ]
-            },
+            # property expansion. The generated benchmark uses string-backed
+            # decimal/categorical/text values here. Any candidate containing a
+            # boolean value cannot pass the strict Pydantic parser through this
+            # narrowed Batch-API compatibility schema and is deterministically
+            # discarded from the oversized fixed-seed candidate pool.
+            "value": {"type": "string"},
             "unit": {"type": "string"},
             "normalized": {"type": "string"},
             "system": {"type": "string"},
@@ -69,7 +66,7 @@ def patient_extraction_batch_response_schema() -> dict[str, Any]:
             "upper_inclusive": {"type": "boolean"},
             "reason": {"type": "string"},
         },
-        "required": ["kind"],
+        "required": ["kind", "value"],
     }
     return {
         "type": "object",

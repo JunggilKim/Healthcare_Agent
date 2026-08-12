@@ -134,6 +134,8 @@ def test_extraction_batch_requests_use_frozen_medium_thinking_without_temperatur
         "upper",
         "reason",
     }
+    assert typed_value["properties"]["value"] == {"type": "string"}
+    assert typed_value["required"] == ["kind", "value"]
 
 
 def test_paraphrase_is_applied_only_after_all_facts_are_recovered() -> None:
