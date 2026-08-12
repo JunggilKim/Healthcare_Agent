@@ -5333,7 +5333,8 @@ The prompt supplies the current slot catalog and operator definitions in compact
 Compare each compiled criterion against its exact source. Do not repair or rewrite it.
 Report blocking issues for missing clauses, added assumptions, polarity errors, AND/OR/NOT scope
 errors, numeric boundary errors, and temporal reference errors. Approve only when the executable
-meaning is supported by the source. Output JSON only.
+meaning is supported by the source. Return compact JSON without pretty-print indentation, merge
+duplicate reports of the same defect, and keep explanations concise.
 ```
 
 ## 134. Answer Interpreter Prompt Contract

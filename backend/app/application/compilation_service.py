@@ -93,19 +93,30 @@ class ProtocolCompilationService:
         self, compilation: TrustedCompilation, *, session_id: str = "unscoped"
     ) -> tuple[ProtocolReviewProposal, bool]:
         compiled = compilation.compiled_trial
+        review_payload = {
+            "nct_id": compiled.nct_id,
+            "criteria": [
+                {
+                    "criterion_id": criterion.criterion_id,
+                    "source_quote": criterion.source_span.quote,
+                    "ast": criterion.ast.model_dump(mode="json"),
+                }
+                for criterion in compiled.criteria
+            ],
+        }
         prompt = render_prompt(
             "protocol_reviewer_v1.md",
-            review_payload=canonical_json_bytes(compiled).decode(),
+            review_payload=canonical_json_bytes(review_payload).decode(),
         )
         proposal, record = await self.generator.generate_primary_with_lite_fallback(
             primary_model_id="gemini-3.6-flash",
             lite_model_id="gemini-3.5-flash-lite",
             task_name="protocol_reviewer",
             prompt=prompt,
-            prompt_version="1.0.0",
+            prompt_version="1.0.2",
             output_schema_version="protocol-review-proposal-v1",
             slot_catalog_version=self.slot_catalog.version,
-            normalized_input=compiled.model_dump(mode="json"),
+            normalized_input=review_payload,
             output_model=ProtocolReviewProposal,
             primary_thinking_level="MEDIUM",
             fallback_thinking_level="HIGH",
@@ -181,7 +192,7 @@ class ProtocolCompilationService:
                 reviewer_model_id=(
                     "gemini-3.5-flash-lite" if reviewer_fallback else "gemini-3.6-flash"
                 ),
-                reviewer_prompt_version="1.0.0",
+                reviewer_prompt_version="1.0.2",
                 reviewed_at=now,
                 compiler_used_fallback=compiler_fallback,
                 reviewer_used_fallback=reviewer_fallback,

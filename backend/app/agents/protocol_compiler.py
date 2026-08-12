@@ -178,7 +178,7 @@ def construct_trusted_compilation(
                 source_direction=item.source_direction,
                 source_order=item.source_order,
                 source_span={
-                    "source_id": f"ctgov:{trial.nct_id}:{trial.source_json_sha256}",
+                    "source_id": f"ctgov:{trial.nct_id}:eligibility_criteria",
                     "start": item.start,
                     "end": item.end,
                     "quote": item.quote,

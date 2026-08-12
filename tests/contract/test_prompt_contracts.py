@@ -55,3 +55,10 @@ def test_protocol_compiler_prompt_requires_compact_json_and_opaque_metadata() ->
     assert "metadata.residual_source_sha256" in text
     assert "value=null" in text
     assert "values=[]" in text
+
+
+def test_protocol_reviewer_prompt_requires_compact_blocking_issues() -> None:
+    text = (PROMPT_ROOT / "protocol_reviewer_v1.md").read_text(encoding="utf-8")
+    assert "version: 1.0.2" in text
+    assert "compact" in text and "schema-valid JSON" in text
+    assert "every" in text and "distinct BLOCKING issue" in text

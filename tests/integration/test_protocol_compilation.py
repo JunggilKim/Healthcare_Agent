@@ -168,6 +168,7 @@ def test_unique_exact_quote_is_deterministically_reanchored() -> None:
         evaluation_date=date(2026, 8, 12),
     )
     span = result.compiled_trial.criteria[0].source_span
+    assert span.source_id == f"ctgov:{raw.nct_id}:eligibility_criteria"
     assert span.start == len(prefix)
     assert span.end == len(prefix) + len(criterion_text)
     assert raw.eligibility_criteria[span.start : span.end] == span.quote
@@ -262,6 +263,7 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     assert result.degradation_codes == ["PROTOCOL_REVIEW_OPAQUE_AFTER_SINGLE_REPAIR"]
     initial_compile = generator.arguments[0]
     repair_compile = generator.arguments[2]
+    reviewer_call = generator.arguments[1]
     assert initial_compile["prompt_version"] == "1.0.3"
     assert initial_compile["primary_thinking_level"] is None
     assert initial_compile["fallback_thinking_level"] is None
@@ -270,6 +272,11 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     assert initial_compile["primary_max_output_tokens"] == 4000
     assert repair_compile["primary_thinking_budget"] == 1024
     assert repair_compile["primary_max_output_tokens"] == 2500
+    assert reviewer_call["prompt_version"] == "1.0.2"
+    reviewer_input = reviewer_call["normalized_input"]
+    assert isinstance(reviewer_input, dict)
+    assert set(reviewer_input) == {"nct_id", "criteria"}
+    assert set(reviewer_input["criteria"][0]) == {"criterion_id", "source_quote", "ast"}
 
 
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:
