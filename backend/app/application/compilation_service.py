@@ -25,6 +25,7 @@ from backend.app.domain.model_outputs import (
     ProtocolReviewProposal,
 )
 from backend.app.domain.trials import ProtocolReviewArtifact, RawTrialRecord
+from backend.app.domain.values import BooleanValue
 from backend.app.engine.boundary_tests import run_boundary_tests
 from backend.app.engine.coverage import calculate_source_coverage
 from backend.app.infrastructure.structured_generation import (
@@ -353,6 +354,46 @@ class ProtocolCompilationService:
         return isolated
 
     @staticmethod
+    def _normalize_explicit_recurrent_pancreatitis_proposal(
+        proposal: CompiledTrialProposal,
+    ) -> CompiledTrialProposal:
+        criteria = []
+        for criterion in proposal.criteria:
+            if _EXPLICIT_RECURRENT_PANCREATITIS_PHRASE.fullmatch(criterion.quote.strip()):
+                criteria.append(
+                    criterion.model_copy(
+                        update={
+                            "normalized_summary": "Prior or recurrent pancreatitis is documented",
+                            "ast": CriterionAst(
+                                root_node_id="n0",
+                                nodes=[
+                                    AstNode(
+                                        node_id="n0",
+                                        op=AstOperator.EQ,
+                                        slot_id="medical_history.prior_pancreatitis",
+                                        value=BooleanValue(kind="boolean", value=True),
+                                    )
+                                ],
+                            ),
+                            "required_slots": ["medical_history.prior_pancreatitis"],
+                            "compiler_confidence": 1.0,
+                            "opaque": False,
+                            "warnings": sorted(
+                                set(
+                                    [
+                                        *criterion.warnings,
+                                        "DETERMINISTIC_EXPLICIT_HISTORY_NORMALIZATION",
+                                    ]
+                                )
+                            ),
+                        }
+                    )
+                )
+            else:
+                criteria.append(criterion)
+        return proposal.model_copy(update={"criteria": criteria})
+
+    @staticmethod
     def _opaque_item_proposal(
         trial: RawTrialRecord, item: _OfflineSourceItem, source_order: int
     ) -> CriterionCompilationProposal:
@@ -455,6 +496,7 @@ class ProtocolCompilationService:
                     session_id=f"{session_id}:compiler-chunk:{chunk_index:03d}",
                 )
                 proposal = _anchor_proposal_source_spans(chunk_text, proposal)
+                proposal = self._normalize_explicit_recurrent_pancreatitis_proposal(proposal)
                 # A model may return schema-valid JSON while silently omitting a
                 # clause inside a source item. In the offline release pipeline,
                 # keep only item-level compilations with complete character

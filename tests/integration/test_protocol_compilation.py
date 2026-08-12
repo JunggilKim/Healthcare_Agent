@@ -794,6 +794,23 @@ def test_offline_compiler_isolates_explicit_recurrent_pancreatitis_history() -> 
             if phrase.lower() == source[item.start : item.end].lower()
         ] == [phrase]
 
+
+def test_explicit_recurrent_pancreatitis_proposal_is_deterministically_typed() -> None:
+    service = ProtocolCompilationService
+    _raw, proposal = _trial_and_proposal("at least two episodes of acute pancreatitis")
+    normalized = ProtocolCompilationService._normalize_explicit_recurrent_pancreatitis_proposal(
+        proposal
+    )
+    criterion = normalized.criteria[0]
+    assert criterion.required_slots == ["medical_history.prior_pancreatitis"]
+    assert criterion.opaque is False
+    assert criterion.ast.nodes[0].op.value == "EQ"
+    assert criterion.ast.nodes[0].value is not None
+    assert criterion.ast.nodes[0].value.model_dump(mode="json") == {
+        "kind": "boolean",
+        "value": True,
+    }
+
     history = (
         "Inclusion Criteria:\n"
         "* Prior treatment after a history of acute pancreatitis is permitted.\n"
