@@ -185,15 +185,26 @@ async def _compile_one(
             review_relative = review_path.relative_to(output_root).as_posix()
             artifact_hashes[review_relative] = _sha256(review_path)
 
-        status = (
-            "VERIFIED"
-            if compiled.protocol_verified
-            and workflow.review_artifact is not None
-            and workflow.review_artifact.approved
+        approved_review = workflow.review_artifact is not None and workflow.review_artifact.approved
+        verified_executable_count = sum(
+            criterion.protocol_verified and not criterion.opaque for criterion in compiled.criteria
+        )
+        if (
+            compiled.protocol_verified
+            and approved_review
             and compiled.boundary_tests_passed
             and compiled.source_character_coverage >= 0.90
-            else "REVIEW_REQUIRED"
-        )
+        ):
+            status = "FULLY_VERIFIED"
+        elif (
+            approved_review
+            and verified_executable_count > 0
+            and compiled.boundary_tests_passed
+            and compiled.source_character_coverage >= 0.90
+        ):
+            status = "VERIFIED_EXECUTABLE_SUBSET"
+        else:
+            status = "REVIEW_REQUIRED"
         usage = usage_guard.snapshot(session_id)
         result: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
@@ -215,6 +226,7 @@ async def _compile_one(
             "boundary_tests_passed": compiled.boundary_tests_passed,
             "criteria_count": len(compiled.criteria),
             "opaque_criteria_count": sum(item.opaque for item in compiled.criteria),
+            "verified_executable_criteria_count": verified_executable_count,
             "repair_attempted": workflow.repair_attempted,
             "degradation_codes": workflow.degradation_codes,
             "estimated_cost_usd": float(usage.session_reconciled_usd),
@@ -250,7 +262,8 @@ def _materialize_aggregates(
     input_root: Path,
     project: str,
 ) -> dict[str, object]:
-    verified_count = 0
+    fully_verified_count = 0
+    executable_subset_count = 0
     review_required_count = 0
     error_count = 0
     case_summaries: list[dict[str, object]] = []
@@ -269,8 +282,11 @@ def _materialize_aggregates(
                 continue
             compiled_path = output_root / str(item["compiled_path"])
             compiled = orjson.loads(compiled_path.read_bytes())
-            if status == "VERIFIED":
-                verified_count += 1
+            if status in {"FULLY_VERIFIED", "VERIFIED_EXECUTABLE_SUBSET"}:
+                if status == "FULLY_VERIFIED":
+                    fully_verified_count += 1
+                else:
+                    executable_subset_count += 1
                 verified_trials.append(compiled)
                 review_path = output_root / str(item["review_path"])
                 reviews.append(orjson.loads(review_path.read_bytes()))
@@ -285,14 +301,22 @@ def _materialize_aggregates(
             {
                 "case_id": case_id,
                 "trial_count": len(case_results),
-                "verified_count": len(verified_trials),
+                "fully_verified_count": sum(
+                    item["status"] == "FULLY_VERIFIED" for item in case_results
+                ),
+                "executable_subset_count": sum(
+                    item["status"] == "VERIFIED_EXECUTABLE_SUBSET" for item in case_results
+                ),
+                "dataset_a_candidate_count": len(verified_trials),
                 "review_required_count": len(provisional_trials),
                 "error_count": sum(item["status"] == "ERROR" for item in case_results),
             }
         )
 
     artifact_hashes: dict[str, str] = {}
-    for path in sorted(output_root.glob("sessions/*/*.json")):
+    for path in sorted(output_root.rglob("*.json")):
+        if path == output_root / "manifest.json":
+            continue
         relative = path.relative_to(output_root).as_posix()
         artifact_hashes[relative] = _sha256(path)
     manifest = {
@@ -305,7 +329,9 @@ def _materialize_aggregates(
         "source_acquisition_sha256": _sha256(input_root / "acquisition.json"),
         "case_ids": list(CASE_IDS),
         "trial_count": len(results),
-        "verified_count": verified_count,
+        "fully_verified_count": fully_verified_count,
+        "executable_subset_count": executable_subset_count,
+        "dataset_a_candidate_count": fully_verified_count + executable_subset_count,
         "review_required_count": review_required_count,
         "error_count": error_count,
         "estimated_cost_usd": round(
@@ -429,7 +455,9 @@ def main() -> None:
             {
                 "output": str(args.output),
                 "trial_count": manifest["trial_count"],
-                "verified_count": manifest["verified_count"],
+                "fully_verified_count": manifest["fully_verified_count"],
+                "executable_subset_count": manifest["executable_subset_count"],
+                "dataset_a_candidate_count": manifest["dataset_a_candidate_count"],
                 "review_required_count": manifest["review_required_count"],
                 "error_count": manifest["error_count"],
                 "estimated_cost_usd": manifest["estimated_cost_usd"],

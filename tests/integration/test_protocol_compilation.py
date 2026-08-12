@@ -131,20 +131,50 @@ def test_semantic_review_is_hash_bound_and_double_lite_fallback_cannot_verify() 
     assert blocked.review_artifact.approved is False
 
 
-def test_noncontiguous_model_ast_ids_are_rejected() -> None:
+def test_approved_review_verifies_executable_subset_but_not_opaque_trial() -> None:
+    raw, proposal = _trial_and_proposal()
+    opaque = proposal.criteria[0].model_copy(deep=True)
+    opaque.source_order = 2
+    opaque.ast.nodes[0].slot_id = "unsupported.slot"
+    opaque.start = 0
+    opaque.end = len(raw.eligibility_criteria or "")
+    opaque.quote = raw.eligibility_criteria or ""
+    proposal.criteria = [opaque]
+    compilation = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.3",
+        created_at=datetime(2026, 8, 12, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 12),
+    )
+    approved = bind_semantic_review(
+        compiled_trial=compilation.compiled_trial,
+        proposal=ProtocolReviewProposal(approved=True),
+        reviewer_model_id="gemini-3.6-flash",
+        reviewer_prompt_version="1.0.2",
+        reviewed_at=datetime(2026, 8, 12, tzinfo=UTC),
+    )
+    assert approved.review_artifact.approved is True
+    assert approved.compiled_trial.protocol_verified is False
+    assert approved.compiled_trial.criteria[0].protocol_verified is False
+
+
+def test_noncontiguous_model_ast_ids_become_source_bound_opaque() -> None:
     raw, proposal = _trial_and_proposal()
     proposal.criteria[0].ast.nodes[0].node_id = "n1"
     proposal.criteria[0].ast.root_node_id = "n1"
-    with pytest.raises(ProtocolCompilationError, match="contiguous"):
-        construct_trusted_compilation(
-            trial=raw,
-            proposal=proposal,
-            slot_catalog=load_slot_catalog(),
-            compiler_model_id="gemini-3.6-flash",
-            compiler_prompt_version="1.0.0",
-            created_at=datetime(2026, 8, 11, tzinfo=UTC),
-            evaluation_date=date(2026, 8, 11),
-        )
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.3",
+        created_at=datetime(2026, 8, 12, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 12),
+    )
+    assert result.compiled_trial.criteria[0].opaque is True
 
 
 def test_unique_exact_quote_is_deterministically_reanchored() -> None:
@@ -206,6 +236,47 @@ def test_missing_numeric_unit_uses_slot_single_canonical_unit() -> None:
     value = result.compiled_trial.criteria[0].ast.nodes[0].value
     assert value is not None
     assert value.unit == "year"
+
+
+def test_numeric_node_unit_is_moved_to_typed_value() -> None:
+    raw, proposal = _trial_and_proposal()
+    node = proposal.criteria[0].ast.nodes[0]
+    node.value.unit = None
+    node.unit = "year"
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.3",
+        created_at=datetime(2026, 8, 12, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 12),
+    )
+    normalized = result.compiled_trial.criteria[0].ast.nodes[0]
+    assert normalized.unit is None
+    assert normalized.value is not None and normalized.value.unit == "year"
+
+
+def test_invalid_criterion_ast_becomes_source_bound_opaque_only() -> None:
+    raw, proposal = _trial_and_proposal()
+    proposal.criteria[0].ast.nodes[0].slot_id = "unsupported.slot"
+    proposal.criteria[0].opaque = False
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.3",
+        created_at=datetime(2026, 8, 12, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 12),
+    )
+    criterion = result.compiled_trial.criteria[0]
+    node = criterion.ast.nodes[0]
+    assert criterion.opaque is True
+    assert criterion.required_slots == []
+    assert node.op.value == "OPAQUE"
+    assert node.metadata["residual_source_sha256"] == criterion.source_text_sha256
+    assert "AST_TRUSTED_VALIDATION_OPAQUE_FALLBACK" in criterion.warnings
 
 
 @pytest.mark.asyncio

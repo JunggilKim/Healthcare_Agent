@@ -605,7 +605,13 @@ def generate_dataset_a_benchmark(
         raw = raw_by_id[nct_id]
         if raw.study_type != "INTERVENTIONAL":
             raise ValueError(f"DATASET_A_NON_INTERVENTIONAL_TRIAL:{nct_id}")
-        if not trial.protocol_verified or not trial.boundary_tests_passed:
+        has_verified_critical = any(
+            criterion.criticality == "CRITICAL"
+            and criterion.protocol_verified
+            and not criterion.opaque
+            for criterion in trial.criteria
+        )
+        if not has_verified_critical or not trial.boundary_tests_passed:
             raise ValueError(f"DATASET_A_UNVERIFIED_COMPILED_TRIAL:{nct_id}")
     worlds: list[PatientWorld] = []
     coverage: dict[str, dict[str, int]] = {}

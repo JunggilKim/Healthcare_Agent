@@ -36,16 +36,16 @@ def bind_semantic_review(
     double_fallback_block = compiler_used_fallback and reviewer_used_fallback
     approved = proposal.approved and not blocking_ids and not double_fallback_block
     review_id = f"review_{uuid4()}"
-    all_trial_conditions = (
+    reviewed_conditions = (
         approved
         and compiled_trial.source_character_coverage >= 0.90
         and compiled_trial.boundary_tests_passed
-        and not any(criterion.opaque for criterion in compiled_trial.criteria)
     )
     criteria = [
         criterion.model_copy(
             update={
-                "protocol_verified": all_trial_conditions
+                "protocol_verified": reviewed_conditions
+                and not criterion.opaque
                 and criterion.criterion_id not in blocking_ids
             }
         )
@@ -63,7 +63,8 @@ def bind_semantic_review(
     draft_compiled = compiled_trial.model_copy(
         update={
             "criteria": criteria,
-            "protocol_verified": all_trial_conditions,
+            "protocol_verified": reviewed_conditions
+            and all(criterion.protocol_verified for criterion in criteria),
             "review_artifact_id": review_id,
             "warnings": sorted(set(warnings)),
             "content_hash": "0" * 64,

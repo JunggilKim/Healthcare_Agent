@@ -98,16 +98,63 @@ def _normalize_single_allowed_numeric_unit(
             continue
         canonical_unit = slot.allowed_units[0]
         value = node.value
-        if isinstance(value, (NumberValue, RangeValue)) and value.unit is None:
-            value = value.model_copy(update={"unit": canonical_unit})
+        node_unit = node.unit
+        if isinstance(value, (NumberValue, RangeValue)):
+            if value.unit is None and node_unit in {None, canonical_unit}:
+                value = value.model_copy(update={"unit": canonical_unit})
+            if node_unit == canonical_unit and value.unit == canonical_unit:
+                node_unit = None
         values = [
             item.model_copy(update={"unit": canonical_unit})
             if isinstance(item, NumberValue) and item.unit is None
             else item
             for item in node.values
         ]
-        normalized_nodes.append(node.model_copy(update={"value": value, "values": values}))
+        normalized_nodes.append(
+            node.model_copy(update={"value": value, "values": values, "unit": node_unit})
+        )
     return ast.model_copy(update={"nodes": normalized_nodes})
+
+
+def _normalize_opaque_metadata(ast: CriterionAst, source_quote: str) -> CriterionAst:
+    residual_hash = hashlib.sha256(source_quote.encode()).hexdigest()
+    nodes = [
+        node.model_copy(
+            update={
+                "slot_id": None,
+                "value": None,
+                "values": [],
+                "child_ids": [],
+                "unit": None,
+                "metadata": {
+                    "reason_code": "UNSUPPORTED_SOURCE_SEMANTICS",
+                    "residual_source_sha256": residual_hash,
+                },
+            }
+        )
+        if node.op is AstOperator.OPAQUE
+        else node
+        for node in ast.nodes
+    ]
+    return ast.model_copy(update={"nodes": nodes})
+
+
+def _criterion_opaque_ast(criterion_id: str, source_quote: str) -> CriterionAst:
+    source_hash = hashlib.sha256(source_quote.encode()).hexdigest()
+    node_id = f"{criterion_id}:node:0"
+    return CriterionAst(
+        root_node_id=node_id,
+        nodes=[
+            AstNode(
+                node_id=node_id,
+                op=AstOperator.OPAQUE,
+                metadata={
+                    "reason_code": "AST_TRUSTED_VALIDATION_FAILED",
+                    "residual_source_sha256": source_hash,
+                },
+            )
+        ],
+    )
 
 
 def _required_slots(ast: CriterionAst) -> list[str]:
@@ -157,20 +204,21 @@ def construct_trusted_compilation(
             f"{trial.nct_id}:{item.source_direction.value}:{item.source_order:03d}:"
             f"{source_hash[:8]}"
         )
+        normalization_warnings: list[str] = []
         try:
             ast = _canonicalize_ast(criterion_id, item)
             ast = _normalize_single_allowed_numeric_unit(ast, slot_catalog)
+            ast = _normalize_opaque_metadata(ast, item.quote)
             validate_ast_shape(ast, slot_catalog.by_id())
-        except ProtocolCompilationError:
-            raise
-        except (KeyError, ValueError, AstValidationError) as error:
-            raise ProtocolCompilationError("criterion AST failed trusted validation") from error
+        except (KeyError, ValueError, AstValidationError, ProtocolCompilationError):
+            ast = _criterion_opaque_ast(criterion_id, item.quote)
+            normalization_warnings.append("AST_TRUSTED_VALIDATION_OPAQUE_FALLBACK")
         required_slots = _required_slots(ast)
-        if sorted(set(item.required_slots)) != required_slots:
-            raise ProtocolCompilationError("required_slots must equal AST and reference slots")
         contains_opaque = any(node.op is AstOperator.OPAQUE for node in ast.nodes)
+        if sorted(set(item.required_slots)) != required_slots:
+            normalization_warnings.append("MODEL_REQUIRED_SLOTS_NORMALIZED")
         if item.opaque != contains_opaque:
-            raise ProtocolCompilationError("opaque flag must match AST OPAQUE nodes")
+            normalization_warnings.append("MODEL_OPAQUE_FLAG_NORMALIZED")
         compiled_criteria.append(
             CompiledCriterion(
                 criterion_id=criterion_id,
@@ -192,8 +240,8 @@ def construct_trusted_compilation(
                 criticality=item.criticality,
                 compiler_confidence=item.compiler_confidence,
                 protocol_verified=False,
-                opaque=item.opaque,
-                warnings=item.warnings,
+                opaque=contains_opaque,
+                warnings=sorted(set([*item.warnings, *normalization_warnings])),
             )
         )
 
