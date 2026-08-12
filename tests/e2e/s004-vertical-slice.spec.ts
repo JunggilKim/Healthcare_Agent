@@ -65,7 +65,10 @@ test("unknown and failure-rehearsal paths remain usable", async ({ page }) => {
   await page.getByRole("button", { name: "잘 모르겠습니다" }).click();
   await expect(page.getByRole("heading", { name: /근육 침윤 여부/ })).toBeVisible();
   await page.getByRole("button", { name: "이 기록을 제공할 수 없습니다" }).click();
-  await expect(page.getByText("추가 질문 없이 현재 근거를 보고합니다.")).toBeVisible();
+  await expect(
+    page.getByText("pathology.muscle_invasion unavailable · 동일 질문을 다시 묻지 않음"),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: /근육 침윤 여부/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export report" })).toBeEnabled();
   await page.getByRole("button", { name: "Experiment Evidence" }).click();
   await expect(page.getByText(/Provisional fixture smoke/)).toBeVisible();
