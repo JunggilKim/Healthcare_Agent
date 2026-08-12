@@ -414,7 +414,7 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     initial_compile = generator.arguments[0]
     repair_compile = generator.arguments[2]
     reviewer_call = generator.arguments[1]
-    assert initial_compile["prompt_version"] == "1.0.7"
+    assert initial_compile["prompt_version"] == "1.0.8"
     assert initial_compile["primary_thinking_level"] is None
     assert initial_compile["fallback_thinking_level"] is None
     assert initial_compile["primary_thinking_budget"] == 1024
@@ -554,7 +554,7 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert proposal.criteria[0].warnings == ["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"]
     assert proposal.criteria[1].warnings == ["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"]
     assert all(source[item.start : item.end] == item.quote for item in proposal.criteria)
-    assert all(call["prompt_version"] == "1.0.7" for call in generator.calls)
+    assert all(call["prompt_version"] == "1.0.8" for call in generator.calls)
     assert all(call["primary_thinking_budget"] == 1024 for call in generator.calls)
     assert all(
         call["normalized_input"]["trial"]["minimum_age"] is None
