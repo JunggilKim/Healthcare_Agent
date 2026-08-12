@@ -231,6 +231,7 @@ class LiveSessionService:
                 client,
                 model=settings.gemini_embedding_model,
                 dimension=settings.embedding_dim,
+                cache_root=settings.local_store_dir / "embedding-cache",
             ),
             snapshot_root=REPOSITORY_ROOT / "data/fixtures/retrieval/S004",
             snapshot_embeddings=RecordedEmbeddingProvider(
@@ -684,7 +685,7 @@ class LiveSessionService:
         context = EligibilityContext(
             facts=patient_state.confirmed_facts, conflicts=patient_state.conflicts
         )
-        source_texts = {f"session:{session_id}:input": payload["patient_text"]}
+        source_texts = dict(payload["source_texts"])
         for nct_id, compiled in compiled_trials.items():
             packets = [
                 build_verified_proof(

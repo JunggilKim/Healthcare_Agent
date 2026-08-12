@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from itertools import pairwise
+from typing import cast
 
 from backend.app.agents.prompts import render_prompt
 from backend.app.agents.protocol_compiler import (
@@ -79,6 +80,33 @@ _POSITIVE_DIAGNOSIS_CUE = re.compile(
 _NON_DIAGNOSIS_CONTEXT = re.compile(r"(?:treatment|therapy|history\s+of)", re.IGNORECASE)
 
 
+def compiler_generation_input(
+    trial: RawTrialRecord,
+    *,
+    repair_issues: object | None = None,
+    source_direction_hint: SourceDirection | None = None,
+) -> dict[str, object]:
+    """Return exactly the registry semantics visible to the compiler prompt."""
+
+    return {
+        "trial": {
+            "nct_id": trial.nct_id,
+            "eligibility_criteria": trial.eligibility_criteria,
+            "sex": trial.sex,
+            "minimum_age": trial.minimum_age,
+            "maximum_age": trial.maximum_age,
+            "healthy_volunteers": trial.healthy_volunteers,
+            "study_type": trial.study_type,
+            "overall_status": trial.overall_status,
+            "conditions": trial.conditions,
+        },
+        "repair_issues": repair_issues,
+        "source_direction_hint": (
+            source_direction_hint.value if source_direction_hint is not None else None
+        ),
+    }
+
+
 class ProtocolCompilationService:
     def __init__(
         self,
@@ -103,20 +131,15 @@ class ProtocolCompilationService:
         repair_issues: object | None = None,
         source_direction_hint: SourceDirection | None = None,
     ) -> str:
+        generation_input = compiler_generation_input(
+            trial,
+            repair_issues=repair_issues,
+            source_direction_hint=source_direction_hint,
+        )
         payload = {
-            "nct_id": trial.nct_id,
-            "eligibility_criteria": trial.eligibility_criteria,
-            "sex": trial.sex,
-            "minimum_age": trial.minimum_age,
-            "maximum_age": trial.maximum_age,
-            "healthy_volunteers": trial.healthy_volunteers,
-            "study_type": trial.study_type,
-            "overall_status": trial.overall_status,
-            "conditions": trial.conditions,
-            "repair_issues": repair_issues,
-            "source_direction_hint": (
-                source_direction_hint.value if source_direction_hint is not None else None
-            ),
+            **cast(dict[str, object], generation_input["trial"]),
+            "repair_issues": generation_input["repair_issues"],
+            "source_direction_hint": generation_input["source_direction_hint"],
         }
         operators = (
             "ALL ANY NOT IMPLIES EXISTS EQ IN GTE GT LTE LT BETWEEN_INCLUSIVE "
@@ -146,13 +169,11 @@ class ProtocolCompilationService:
             prompt_version="1.0.8",
             output_schema_version="compiled-trial-proposal-v1",
             slot_catalog_version=self.slot_catalog.version,
-            normalized_input={
-                "trial": trial.model_dump(mode="json"),
-                "repair_issues": repair_issues,
-                "source_direction_hint": (
-                    source_direction_hint.value if source_direction_hint is not None else None
-                ),
-            },
+            normalized_input=compiler_generation_input(
+                trial,
+                repair_issues=repair_issues,
+                source_direction_hint=source_direction_hint,
+            ),
             output_model=CompiledTrialProposal,
             primary_thinking_level=None,
             fallback_thinking_level=None,

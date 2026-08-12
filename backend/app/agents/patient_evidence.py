@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Literal
 
+from pydantic import ValidationError
+
 from backend.app.agents.prompts import render_prompt
 from backend.app.application.catalog import SlotCatalog, SlotDefinition
-from backend.app.domain.canonical import canonical_json_bytes
+from backend.app.domain.canonical import canonical_json_bytes, canonical_sha256
 from backend.app.domain.enums import EvidenceGrade
 from backend.app.domain.evidence import (
     FactConflict,
@@ -386,6 +388,7 @@ class PatientEvidenceAgent:
     def __init__(self, generator: StructuredGenerator, slot_catalog: SlotCatalog) -> None:
         self.generator = generator
         self.slot_catalog = slot_catalog
+        self._failed_pinned_inputs: set[str] = set()
 
     async def extract(
         self,
@@ -406,12 +409,22 @@ class PatientEvidenceAgent:
             "existing_facts": [],
             "task": "initial_extraction",
         }
+        pinned_failure_key = (
+            canonical_sha256(
+                {
+                    "normalized_input": normalized_input,
+                    "pinned_fallback": pinned_fallback.model_dump(mode="json"),
+                }
+            )
+            if pinned_fallback is not None
+            else None
+        )
         prompt = render_prompt(
             "patient_extraction_v1.md",
             patient_text=patient_text,
             slot_catalog=compact_patient_slot_catalog(self.slot_catalog),
         )
-        degraded = False
+        degraded = pinned_failure_key in self._failed_pinned_inputs
 
         def fallback_proposal() -> PatientExtractionResult:
             if pinned_fallback is not None:
@@ -425,26 +438,31 @@ class PatientEvidenceAgent:
                 language = "other"
             return deterministic_surface_fallback(patient_text, language=language)
 
-        try:
-            proposal, _ = await self.generator.generate_primary_with_lite_fallback(
-                primary_model_id="gemini-3.6-flash",
-                lite_model_id="gemini-3.5-flash-lite",
-                task_name="patient_extraction",
-                prompt=prompt,
-                prompt_version="1.1.0",
-                output_schema_version="patient-extraction-v1",
-                slot_catalog_version=self.slot_catalog.version,
-                normalized_input=normalized_input,
-                output_model=PatientExtractionResult,
-                primary_thinking_level="MEDIUM",
-                fallback_thinking_level="HIGH",
-                primary_max_output_tokens=2000,
-                fallback_max_output_tokens=2000,
-                session_id=session_id,
-            )
-        except StructuredGenerationUnavailable:
-            degraded = True
+        if degraded:
             proposal = fallback_proposal()
+        else:
+            try:
+                proposal, _ = await self.generator.generate_primary_with_lite_fallback(
+                    primary_model_id="gemini-3.6-flash",
+                    lite_model_id="gemini-3.5-flash-lite",
+                    task_name="patient_extraction",
+                    prompt=prompt,
+                    prompt_version="1.1.0",
+                    output_schema_version="patient-extraction-v1",
+                    slot_catalog_version=self.slot_catalog.version,
+                    normalized_input=normalized_input,
+                    output_model=PatientExtractionResult,
+                    primary_thinking_level="MEDIUM",
+                    fallback_thinking_level="HIGH",
+                    primary_max_output_tokens=2000,
+                    fallback_max_output_tokens=2000,
+                    session_id=session_id,
+                )
+            except StructuredGenerationUnavailable as error:
+                degraded = True
+                if pinned_failure_key is not None and isinstance(error.__cause__, ValidationError):
+                    self._failed_pinned_inputs.add(pinned_failure_key)
+                proposal = fallback_proposal()
         try:
             materialized = materialize_patient_extraction(
                 patient_text=patient_text,
@@ -457,6 +475,8 @@ class PatientEvidenceAgent:
             if degraded:
                 raise
             degraded = True
+            if pinned_failure_key is not None:
+                self._failed_pinned_inputs.add(pinned_failure_key)
             materialized = materialize_patient_extraction(
                 patient_text=patient_text,
                 source_id=source_id,
