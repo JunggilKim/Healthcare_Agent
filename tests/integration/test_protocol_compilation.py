@@ -147,6 +147,66 @@ def test_noncontiguous_model_ast_ids_are_rejected() -> None:
         )
 
 
+def test_unique_exact_quote_is_deterministically_reanchored() -> None:
+    raw, proposal = _trial_and_proposal()
+    criterion_text = raw.eligibility_criteria
+    assert criterion_text is not None
+    prefix = "Eligibility Criteria:\n"
+    raw = raw.model_copy(
+        update={
+            "eligibility_criteria": prefix + criterion_text,
+            "source_json_sha256": hashlib.sha256((prefix + criterion_text).encode()).hexdigest(),
+        }
+    )
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.3",
+        created_at=datetime(2026, 8, 12, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 12),
+    )
+    span = result.compiled_trial.criteria[0].source_span
+    assert span.start == len(prefix)
+    assert span.end == len(prefix) + len(criterion_text)
+    assert raw.eligibility_criteria[span.start : span.end] == span.quote
+
+
+def test_ambiguous_quote_cannot_be_reanchored() -> None:
+    raw, proposal = _trial_and_proposal()
+    criterion_text = raw.eligibility_criteria
+    assert criterion_text is not None
+    raw = raw.model_copy(update={"eligibility_criteria": f"X{criterion_text} {criterion_text}"})
+    with pytest.raises(ProtocolCompilationError, match="not uniquely anchored"):
+        construct_trusted_compilation(
+            trial=raw,
+            proposal=proposal,
+            slot_catalog=load_slot_catalog(),
+            compiler_model_id="gemini-3.6-flash",
+            compiler_prompt_version="1.0.3",
+            created_at=datetime(2026, 8, 12, tzinfo=UTC),
+            evaluation_date=date(2026, 8, 12),
+        )
+
+
+def test_missing_numeric_unit_uses_slot_single_canonical_unit() -> None:
+    raw, proposal = _trial_and_proposal()
+    proposal.criteria[0].ast.nodes[0].value.unit = None
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.3",
+        created_at=datetime(2026, 8, 12, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 12),
+    )
+    value = result.compiled_trial.criteria[0].ast.nodes[0].value
+    assert value is not None
+    assert value.unit == "year"
+
+
 @pytest.mark.asyncio
 async def test_model_schema_failure_becomes_opaque_unknown_without_hard_verdict() -> None:
     class FailingGenerator:
@@ -179,9 +239,11 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     class RejectingReviewGenerator:
         def __init__(self) -> None:
             self.calls = 0
+            self.arguments: list[dict[str, object]] = []
 
         async def generate_primary_with_lite_fallback(self, **kwargs):
             self.calls += 1
+            self.arguments.append(kwargs)
             if kwargs["output_model"] is CompiledTrialProposal:
                 return compiler_proposal.model_copy(deep=True), SimpleNamespace(used_fallback=False)
             return ProtocolReviewProposal(approved=False), SimpleNamespace(used_fallback=False)
@@ -198,6 +260,16 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     assert result.review_artifact is None
     assert result.compilation.compiled_trial.criteria[0].opaque is True
     assert result.degradation_codes == ["PROTOCOL_REVIEW_OPAQUE_AFTER_SINGLE_REPAIR"]
+    initial_compile = generator.arguments[0]
+    repair_compile = generator.arguments[2]
+    assert initial_compile["prompt_version"] == "1.0.3"
+    assert initial_compile["primary_thinking_level"] is None
+    assert initial_compile["fallback_thinking_level"] is None
+    assert initial_compile["primary_thinking_budget"] == 1024
+    assert initial_compile["fallback_thinking_budget"] == 1024
+    assert initial_compile["primary_max_output_tokens"] == 4000
+    assert repair_compile["primary_thinking_budget"] == 1024
+    assert repair_compile["primary_max_output_tokens"] == 2500
 
 
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:

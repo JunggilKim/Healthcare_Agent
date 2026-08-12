@@ -71,7 +71,7 @@ class ProtocolCompilationService:
             lite_model_id="gemini-3.5-flash-lite",
             task_name="protocol_compiler_repair" if repair_issues else "protocol_compiler",
             prompt=prompt,
-            prompt_version="1.0.0",
+            prompt_version="1.0.3",
             output_schema_version="compiled-trial-proposal-v1",
             slot_catalog_version=self.slot_catalog.version,
             normalized_input={
@@ -79,10 +79,12 @@ class ProtocolCompilationService:
                 "repair_issues": repair_issues,
             },
             output_model=CompiledTrialProposal,
-            primary_thinking_level="HIGH",
-            fallback_thinking_level="HIGH",
+            primary_thinking_level=None,
+            fallback_thinking_level=None,
             primary_max_output_tokens=4000 if repair_issues is None else 2500,
             fallback_max_output_tokens=2500,
+            primary_thinking_budget=1024,
+            fallback_thinking_budget=1024,
             session_id=session_id,
         )
         return proposal, record.used_fallback
@@ -134,7 +136,7 @@ class ProtocolCompilationService:
                 compiler_model_id=(
                     "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                 ),
-                compiler_prompt_version="1.0.0",
+                compiler_prompt_version="1.0.3",
                 created_at=now,
                 evaluation_date=evaluation_date,
             )
@@ -153,7 +155,7 @@ class ProtocolCompilationService:
                     compiler_model_id=(
                         "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                     ),
-                    compiler_prompt_version="1.0.0",
+                    compiler_prompt_version="1.0.3",
                     created_at=now,
                     evaluation_date=evaluation_date,
                 )

@@ -23,10 +23,14 @@ class _Output(StrictModel):
 class _FakeModels:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.thinking_budgets: list[int | None] = []
+        self.thinking_levels: list[object | None] = []
 
     async def generate_content(self, *, model, contents, config):
-        del contents, config
+        del contents
         self.calls.append(model)
+        self.thinking_budgets.append(config.thinking_config.thinking_budget)
+        self.thinking_levels.append(config.thinking_config.thinking_level)
         text = "not json" if len(self.calls) == 1 else '{"value":"ok"}'
         usage = SimpleNamespace(
             prompt_token_count=100,
@@ -173,6 +177,65 @@ async def test_primary_schema_exhaustion_uses_single_lite_fallback(tmp_path: Pat
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
     ]
+
+
+async def test_explicit_thinking_budget_is_sent_and_cache_bound(tmp_path: Path) -> None:
+    client = _FakeClient()
+    generator = StructuredGenerator(
+        client=client,
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+        sleep=_no_sleep,
+        jitter=lambda _low, _high: 0,
+    )
+    output, _record = await generator.generate(
+        model_id="gemini-3.6-flash",
+        task_name="protocol_compiler",
+        prompt="return compact json",
+        prompt_version="1.0.3",
+        output_schema_version="test-v1",
+        slot_catalog_version="slot-catalog-v1",
+        normalized_input={"x": 1},
+        output_model=_Output,
+        thinking_level=None,
+        thinking_budget=1024,
+        max_output_tokens=4000,
+        max_attempts=2,
+    )
+    assert output.value == "ok"
+    assert client.aio.models.thinking_budgets == [1024, 1024]
+    assert client.aio.models.thinking_levels == [None, None]
+
+
+@pytest.mark.parametrize(
+    ("thinking_level", "thinking_budget"),
+    [(None, None), ("HIGH", 1024), (None, 0)],
+)
+async def test_thinking_configuration_requires_one_supported_mode(
+    tmp_path: Path,
+    thinking_level: str | None,
+    thinking_budget: int | None,
+) -> None:
+    generator = StructuredGenerator(
+        client=_FakeClient(),
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+    )
+    with pytest.raises(ValueError):
+        await generator.generate(
+            model_id="gemini-3.6-flash",
+            task_name="test",
+            prompt="return json",
+            prompt_version="1",
+            output_schema_version="test-v1",
+            slot_catalog_version="slot-catalog-v1",
+            normalized_input={},
+            output_model=_Output,
+            thinking_level=thinking_level,
+            thinking_budget=thinking_budget,
+            max_output_tokens=100,
+            max_attempts=1,
+        )
 
 
 @pytest.mark.parametrize("failure", ["timeout", "429"])

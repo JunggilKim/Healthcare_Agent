@@ -74,13 +74,18 @@ class StructuredGenerator:
         slot_catalog_version: str,
         normalized_input: object,
         output_model: type[OutputModel],
-        thinking_level: str,
+        thinking_level: str | None,
         max_output_tokens: int,
         max_attempts: int,
+        thinking_budget: int | None = None,
         session_id: str = "unscoped",
     ) -> tuple[OutputModel, StructuredGenerationRecord]:
+        thinking_config, thinking_cache_config = self._thinking_config(
+            thinking_level=thinking_level,
+            thinking_budget=thinking_budget,
+        )
         generation_config = {
-            "thinking_level": thinking_level,
+            **thinking_cache_config,
             "max_output_tokens": max_output_tokens,
         }
         cache_key = model_cache_key(
@@ -133,9 +138,7 @@ class StructuredGenerator:
                         max_output_tokens=max_output_tokens,
                         response_mime_type="application/json",
                         response_json_schema=output_model.model_json_schema(),
-                        thinking_config=types.ThinkingConfig(
-                            thinking_level=types.ThinkingLevel(thinking_level)
-                        ),
+                        thinking_config=thinking_config,
                     ),
                 )
                 parsed = output_model.model_validate_json(response.text or "")
@@ -204,6 +207,25 @@ class StructuredGenerator:
         ) from last_error
 
     @staticmethod
+    def _thinking_config(
+        *, thinking_level: str | None, thinking_budget: int | None
+    ) -> tuple[types.ThinkingConfig, dict[str, str | int]]:
+        if (thinking_level is None) == (thinking_budget is None):
+            raise ValueError("exactly one of thinking_level or thinking_budget is required")
+        if thinking_budget is not None:
+            if thinking_budget <= 0:
+                raise ValueError("thinking_budget must be positive")
+            return (
+                types.ThinkingConfig(thinking_budget=thinking_budget),
+                {"thinking_budget": thinking_budget},
+            )
+        assert thinking_level is not None
+        return (
+            types.ThinkingConfig(thinking_level=types.ThinkingLevel(thinking_level)),
+            {"thinking_level": thinking_level},
+        )
+
+    @staticmethod
     def _usage_log(
         record: StructuredGenerationRecord,
         *,
@@ -247,10 +269,12 @@ class StructuredGenerator:
         slot_catalog_version: str,
         normalized_input: object,
         output_model: type[OutputModel],
-        primary_thinking_level: str,
-        fallback_thinking_level: str,
+        primary_thinking_level: str | None,
+        fallback_thinking_level: str | None,
         primary_max_output_tokens: int,
         fallback_max_output_tokens: int,
+        primary_thinking_budget: int | None = None,
+        fallback_thinking_budget: int | None = None,
         session_id: str = "unscoped",
     ) -> tuple[OutputModel, StructuredGenerationRecord]:
         try:
@@ -264,6 +288,7 @@ class StructuredGenerator:
                 normalized_input=normalized_input,
                 output_model=output_model,
                 thinking_level=primary_thinking_level,
+                thinking_budget=primary_thinking_budget,
                 max_output_tokens=primary_max_output_tokens,
                 max_attempts=3,
                 session_id=session_id,
@@ -279,6 +304,7 @@ class StructuredGenerator:
                 normalized_input=normalized_input,
                 output_model=output_model,
                 thinking_level=fallback_thinking_level,
+                thinking_budget=fallback_thinking_budget,
                 max_output_tokens=fallback_max_output_tokens,
                 max_attempts=1,
                 session_id=session_id,

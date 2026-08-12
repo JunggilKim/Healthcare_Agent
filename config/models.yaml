@@ -17,10 +17,9 @@ forbidden_patterns: [preview, gemini-2.5, anthropic, claude, openai, partner]
 routing:
   patient_extraction: {model: primary, thinking: MEDIUM}
   retrieval_query: {model: lite, thinking: LOW}
-  protocol_compiler: {model: primary, thinking: HIGH}
+  protocol_compiler: {model: primary, thinking_budget: 1024}
   protocol_reviewer: {model: primary, thinking: MEDIUM}
   answer_interpreter: {model: lite, thinking: MINIMAL}
   question_renderer: {model: lite, thinking: MINIMAL}
   report_renderer: {model: lite, thinking: MINIMAL}
   synthetic_paraphrase: {model: lite, thinking: LOW, batch: true}
-

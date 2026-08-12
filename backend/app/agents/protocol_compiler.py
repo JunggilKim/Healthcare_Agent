@@ -9,6 +9,7 @@ from backend.app.domain.ast import AstNode, AstOperator, CriterionAst
 from backend.app.domain.canonical import canonical_sha256
 from backend.app.domain.model_outputs import CompiledTrialProposal, CriterionCompilationProposal
 from backend.app.domain.trials import CompiledCriterion, CompiledTrial, RawTrialRecord
+from backend.app.domain.values import NumberValue, RangeValue
 from backend.app.engine.ast_validator import AstValidationError, validate_ast_shape
 from backend.app.engine.boundary_tests import BoundaryReport, run_boundary_tests
 from backend.app.engine.coverage import CoverageReport, calculate_source_coverage
@@ -23,6 +24,44 @@ class TrustedCompilation:
     compiled_trial: CompiledTrial
     coverage_report: CoverageReport
     boundary_reports: dict[str, BoundaryReport]
+
+
+def _exact_source_offsets(source: str, *, start: int, end: int, quote: str) -> tuple[int, int]:
+    if 0 <= start < end <= len(source) and source[start:end] == quote:
+        return start, end
+    matches: list[int] = []
+    offset = source.find(quote)
+    while offset >= 0:
+        matches.append(offset)
+        offset = source.find(quote, offset + 1)
+    if len(matches) != 1:
+        raise ProtocolCompilationError("criterion quote is not uniquely anchored in source")
+    anchored_start = matches[0]
+    return anchored_start, anchored_start + len(quote)
+
+
+def _anchor_proposal_source_spans(
+    source: str, proposal: CompiledTrialProposal
+) -> CompiledTrialProposal:
+    criteria = []
+    for criterion in proposal.criteria:
+        start, end = _exact_source_offsets(
+            source,
+            start=criterion.start,
+            end=criterion.end,
+            quote=criterion.quote,
+        )
+        criteria.append(criterion.model_copy(update={"start": start, "end": end}))
+    unassigned = []
+    for span in proposal.unassigned_source_spans:
+        start, end = _exact_source_offsets(
+            source,
+            start=span.start,
+            end=span.end,
+            quote=span.quote,
+        )
+        unassigned.append(span.model_copy(update={"start": start, "end": end}))
+    return proposal.model_copy(update={"criteria": criteria, "unassigned_source_spans": unassigned})
 
 
 def _canonicalize_ast(criterion_id: str, proposal: CriterionCompilationProposal) -> CriterionAst:
@@ -45,6 +84,30 @@ def _canonicalize_ast(criterion_id: str, proposal: CriterionCompilationProposal)
         for node in sorted(proposal.ast.nodes, key=lambda item: int(item.node_id[1:]))
     ]
     return CriterionAst(root_node_id=mapping[proposal.ast.root_node_id], nodes=nodes)
+
+
+def _normalize_single_allowed_numeric_unit(
+    ast: CriterionAst, slot_catalog: SlotCatalog
+) -> CriterionAst:
+    slots = slot_catalog.by_id()
+    normalized_nodes: list[AstNode] = []
+    for node in ast.nodes:
+        slot = slots.get(node.slot_id or "")
+        if slot is None or slot.value_type != "number" or len(slot.allowed_units) != 1:
+            normalized_nodes.append(node)
+            continue
+        canonical_unit = slot.allowed_units[0]
+        value = node.value
+        if isinstance(value, (NumberValue, RangeValue)) and value.unit is None:
+            value = value.model_copy(update={"unit": canonical_unit})
+        values = [
+            item.model_copy(update={"unit": canonical_unit})
+            if isinstance(item, NumberValue) and item.unit is None
+            else item
+            for item in node.values
+        ]
+        normalized_nodes.append(node.model_copy(update={"value": value, "values": values}))
+    return ast.model_copy(update={"nodes": normalized_nodes})
 
 
 def _required_slots(ast: CriterionAst) -> list[str]:
@@ -72,14 +135,12 @@ def construct_trusted_compilation(
         raise ProtocolCompilationError("trial has no eligibility source text")
     if proposal.nct_id != trial.nct_id:
         raise ProtocolCompilationError("proposal NCT ID does not match source trial")
+    proposal = _anchor_proposal_source_spans(source, proposal)
     seen_order: set[tuple[str, int]] = set()
     occupied: set[int] = set()
     compiled_criteria: list[CompiledCriterion] = []
     for item in proposal.criteria:
-        if (
-            not 0 <= item.start < item.end <= len(source)
-            or source[item.start : item.end] != item.quote
-        ):
+        if source[item.start : item.end] != item.quote:
             raise ProtocolCompilationError("criterion span does not match eligibility source")
         order_key = (item.source_direction.value, item.source_order)
         if order_key in seen_order:
@@ -98,6 +159,7 @@ def construct_trusted_compilation(
         )
         try:
             ast = _canonicalize_ast(criterion_id, item)
+            ast = _normalize_single_allowed_numeric_unit(ast, slot_catalog)
             validate_ast_shape(ast, slot_catalog.by_id())
         except ProtocolCompilationError:
             raise
@@ -136,10 +198,7 @@ def construct_trusted_compilation(
         )
 
     for span in proposal.unassigned_source_spans:
-        if (
-            not 0 <= span.start < span.end <= len(source)
-            or source[span.start : span.end] != span.quote
-        ):
+        if source[span.start : span.end] != span.quote:
             raise ProtocolCompilationError("unassigned span does not match eligibility source")
     coverage = calculate_source_coverage(source, proposal.criteria)
     boundary_reports = {
