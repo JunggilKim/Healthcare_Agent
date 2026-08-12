@@ -36,8 +36,8 @@ CASE_QUERIES = {
         [
             "high risk non-muscle invasive bladder cancer",
             "muscle invasive bladder cancer",
-            "histologically confirmed muscle invasive bladder cancer",
-            "histologically confirmed non-muscle invasive bladder cancer",
+            "urothelial carcinoma",
+            "localized muscle invasive bladder urothelial carcinoma",
         ],
         "bladder cancer urothelial carcinoma",
     ),
