@@ -658,25 +658,49 @@ class ProtocolCompilationService:
                     *[issue.model_dump(mode="json") for issue in review.issues],
                     *validation_issues,
                 ]
-                proposal, compiler_fallback = await self._compile_proposal(
-                    trial,
-                    repair_issues=repair_issue_rows,
-                    base_proposal=proposal,
-                    session_id=session_id,
-                )
-                compilation = construct_trusted_compilation(
-                    trial=trial,
-                    proposal=proposal,
-                    slot_catalog=self.slot_catalog,
-                    compiler_model_id=(
-                        "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
-                    ),
-                    compiler_prompt_version="1.0.6",
-                    created_at=now,
-                    evaluation_date=evaluation_date,
-                )
-                review, reviewer_fallback = await self._review(compilation, session_id=session_id)
-                review_attempts.append(review)
+                try:
+                    proposal, compiler_fallback = await self._compile_proposal(
+                        trial,
+                        repair_issues=repair_issue_rows,
+                        base_proposal=proposal,
+                        session_id=session_id,
+                    )
+                    compilation = construct_trusted_compilation(
+                        trial=trial,
+                        proposal=proposal,
+                        slot_catalog=self.slot_catalog,
+                        compiler_model_id=(
+                            "gemini-3.5-flash-lite"
+                            if compiler_fallback
+                            else "gemini-3.6-flash"
+                        ),
+                        compiler_prompt_version="1.0.6",
+                        created_at=now,
+                        evaluation_date=evaluation_date,
+                    )
+                    review, reviewer_fallback = await self._review(
+                        compilation, session_id=session_id
+                    )
+                    review_attempts.append(review)
+                except (
+                    StructuredGenerationUnavailable,
+                    ProtocolCompilationError,
+                    ValueError,
+                ):
+                    if self.offline_reviewer_chunk_size is None:
+                        raise
+                    compilation = self._quarantine_blocking_criteria(
+                        compilation,
+                        review,
+                        evaluation_date=evaluation_date,
+                    )
+                    degradation_codes.append(
+                        "REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE"
+                    )
+                    review, reviewer_fallback = await self._review(
+                        compilation, session_id=session_id
+                    )
+                    review_attempts.append(review)
                 if not review.approved or any(
                     issue.severity == "BLOCKING" for issue in review.issues
                 ):

@@ -435,6 +435,62 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
 
 
 @pytest.mark.asyncio
+async def test_offline_repair_failure_quarantines_rejected_criterion() -> None:
+    raw, compiler_proposal = _trial_and_proposal()
+    rejection = ProtocolReviewProposal.model_validate(
+        {
+            "approved": False,
+            "issues": [
+                {
+                    "criterion_id": "placeholder",
+                    "issue_type": "ADDED_ASSUMPTION",
+                    "severity": "BLOCKING",
+                    "source_quote": raw.eligibility_criteria,
+                    "explanation": "reject exact criterion",
+                }
+            ],
+        }
+    )
+
+    class FailedRepairGenerator:
+        def __init__(self) -> None:
+            self.compiler_calls = 0
+            self.reviewer_calls = 0
+
+        async def generate_primary_with_lite_fallback(self, **kwargs):
+            if kwargs["output_model"] is CompiledTrialProposal:
+                self.compiler_calls += 1
+                if self.compiler_calls == 1:
+                    return compiler_proposal, SimpleNamespace(used_fallback=False)
+                raise StructuredGenerationUnavailable("repair schema failure")
+            self.reviewer_calls += 1
+            if self.reviewer_calls == 1:
+                criterion_id = kwargs["normalized_input"]["criteria"][0]["criterion_id"]
+                issue = rejection.issues[0].model_copy(update={"criterion_id": criterion_id})
+                return ProtocolReviewProposal(approved=False, issues=[issue]), SimpleNamespace(
+                    used_fallback=False
+                )
+            return ProtocolReviewProposal(approved=True), SimpleNamespace(used_fallback=False)
+
+    generator = FailedRepairGenerator()
+    service = ProtocolCompilationService(
+        generator,
+        load_slot_catalog(),
+        offline_reviewer_chunk_size=1,
+    )
+    result = await service.compile_and_review(
+        trial=raw,
+        evaluation_date=date(2026, 8, 11),
+        now=datetime(2026, 8, 11, tzinfo=UTC),
+    )
+    assert result.review_artifact is not None
+    assert result.compilation.compiled_trial.criteria[0].opaque is True
+    assert result.degradation_codes == [
+        "REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_offline_reviewer_chunks_merge_without_changing_live_default() -> None:
     raw, compiler_proposal = _trial_and_proposal()
     source = raw.eligibility_criteria or ""
