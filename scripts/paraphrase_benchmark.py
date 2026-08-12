@@ -420,11 +420,11 @@ def _finalize_candidate_pool(args: argparse.Namespace) -> None:
                 raise RuntimeError("PARAPHRASE_POOL_RESPONSE_ID_INVALID")
             if world_id in validated:
                 continue
-            extraction = parse_extraction_responses([row], {world_id})[world_id]
             narrative = candidate_paraphrases[world_id]
             if not isinstance(narrative, str):
                 raise RuntimeError("PARAPHRASE_POOL_NARRATIVE_INVALID")
             try:
+                extraction = parse_extraction_responses([row], {world_id})[world_id]
                 validate_paraphrase_spans(worlds[world_id], narrative, extraction)
             except ValueError:
                 continue
