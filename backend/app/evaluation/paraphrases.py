@@ -110,8 +110,8 @@ def build_paraphrase_requests(
                         {"role": "user", "parts": [{"text": prompt}]},
                     ],
                     "generationConfig": {
-                        "temperature": 0.2,
                         "maxOutputTokens": 768,
+                        "thinkingConfig": {"thinkingLevel": "LOW"},
                         "responseMimeType": "application/json",
                         "responseSchema": response_schema,
                     },
@@ -182,8 +182,8 @@ def build_extraction_requests(
                     }
                 ],
                 "generationConfig": {
-                    "temperature": 0,
                     "maxOutputTokens": 2048,
+                    "thinkingConfig": {"thinkingLevel": "MEDIUM"},
                     "responseMimeType": "application/json",
                     "responseJsonSchema": response_schema,
                 },

@@ -9,6 +9,7 @@ from backend.app.domain.model_outputs import PatientExtractionResult, PatientFac
 from backend.app.evaluation.models import BenchmarkArtifact
 from backend.app.evaluation.paraphrases import (
     apply_validated_paraphrases,
+    build_extraction_requests,
     build_paraphrase_requests,
     inline_json_schema_references,
     paraphrase_candidate_worlds,
@@ -88,7 +89,11 @@ def test_fixed_seed_paraphrase_selection_and_batch_requests_are_exact() -> None:
     assert repeated == selected
     assert [item.language for item in selected] == ["ko", "en", "ko"]
     assert {row["id"] for row in requests} == {item.world_id for item in selected}
-    assert all(row["request"]["generationConfig"]["temperature"] == 0.2 for row in requests)
+    assert all(
+        row["request"]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "LOW"}
+        for row in requests
+    )
+    assert all("temperature" not in row["request"]["generationConfig"] for row in requests)
 
     candidates = paraphrase_candidate_worlds(benchmark)
     alternate = candidates[len(selected) : len(selected) + 2]
@@ -101,6 +106,18 @@ def test_fixed_seed_paraphrase_selection_and_batch_requests_are_exact() -> None:
     )
     assert repeated_alternate == alternate
     assert {row["id"] for row in alternate_requests} == {item.world_id for item in alternate}
+
+
+def test_extraction_batch_requests_use_frozen_medium_thinking_without_temperature() -> None:
+    requests = build_extraction_requests(
+        {"world-1": "Patient narrative."},
+        patient_prompt_template="Extract from {patient_text}",
+        response_schema=PatientExtractionResult.model_json_schema(),
+    )
+
+    generation_config = requests[0]["request"]["generationConfig"]
+    assert generation_config["thinkingConfig"] == {"thinkingLevel": "MEDIUM"}
+    assert "temperature" not in generation_config
 
 
 def test_paraphrase_is_applied_only_after_all_facts_are_recovered() -> None:
