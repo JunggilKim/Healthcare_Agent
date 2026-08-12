@@ -161,12 +161,17 @@ def _validate_live_provenance(
     for case_id in cases:
         item = by_case.get(case_id, {})
         case_root = source / "sessions" / case_id
+        checks = item.get("checks")
         if (
             item.get("approved") is not True
             or not item.get("reviewer_alias")
             or not item.get("reviewed_at")
             or item.get("compiled_trials_sha256") != _sha256(case_root / "compiled_trials.json")
             or item.get("proofs_sha256") != _sha256(case_root / "proofs.json")
+            or item.get("questions_sha256") != _sha256(case_root / "questions.json")
+            or not isinstance(checks, dict)
+            or not checks
+            or any(value is not True for value in checks.values())
         ):
             raise RuntimeError(f"MANUAL_REVIEW_HASH_BINDING_INVALID:{case_id}")
     return acquisition, data_timestamp

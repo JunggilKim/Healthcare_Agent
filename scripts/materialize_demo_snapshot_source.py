@@ -189,6 +189,9 @@ def _apply_branch(
     *,
     source_id: str,
     catalog: Any,
+    answer_text_override: str | None = None,
+    unknown_override: bool | None = None,
+    declined_override: bool | None = None,
 ) -> tuple[FullOptimizationState, QuestionSelection, dict[str, object]]:
     candidate = selection.selected
     assert candidate is not None
@@ -196,7 +199,9 @@ def _apply_branch(
     loop = InteractiveTrialOptLoop(simulated, catalog)
     answer_text, structured, unknown, declined = _branch_answer(branch)
     proposal = None
-    if structured is not None:
+    if answer_text_override is not None:
+        answer_text = answer_text_override
+    elif structured is not None:
         answer_text, proposal = proposal_from_structured_answer(
             candidate=candidate,
             structured_value=structured,
@@ -214,10 +219,12 @@ def _apply_branch(
         simulated,
         next_selection,
         {
-            "answer_text": None if structured is not None else answer_text,
+            "answer_text": answer_text if answer_text_override is not None else (
+                None if structured is not None else answer_text
+            ),
             "structured_value": structured,
-            "unknown": unknown,
-            "declined": declined,
+            "unknown": unknown if unknown_override is None else unknown_override,
+            "declined": declined if declined_override is None else declined_override,
         },
     )
 
@@ -446,6 +453,11 @@ async def _materialize_case(
             f"SNAPSHOT_FIRST_QUESTION_MISSING:{case_id}:{selection.stop_reason}:"
             f"alternatives={alternatives}"
         )
+    if case_id == "S004" and selection.selected.slot_id != "pathology.histology":
+        raise RuntimeError(
+            f"SNAPSHOT_FIRST_QUESTION_UNEXPECTED:{case_id}:"
+            f"{selection.selected.slot_id}:expected=pathology.histology"
+        )
     degradation_codes = ["PATIENT_EXTRACTION_DETERMINISTIC_FALLBACK"] if degraded else []
     case_output = output_root / "sessions" / case_id
     _write(
@@ -501,14 +513,32 @@ async def _materialize_case(
     )
     branch_rows = []
     first_branch_states: list[tuple[FullOptimizationState, QuestionSelection, str]] = []
+    s004_branch_a: tuple[FullOptimizationState, QuestionSelection, str] | None = None
     for branch in selection.selected.branches:
         branch_id = branch.branch_id
+        is_s004_branch_a = bool(
+            case_id == "S004"
+            and branch.synthetic_value is not None
+            and getattr(branch.synthetic_value, "value", None) == "urothelial_carcinoma"
+        )
+        is_s004_branch_b = case_id == "S004" and branch.response_kind == "UNKNOWN"
         branch_state, next_selection, answer = _apply_branch(
             state,
             selection,
             branch,
             source_id=f"snapshot:{case_id}:answer:{branch_id}",
             catalog=catalog,
+            answer_text_override=(
+                "Existing pathology report confirms high-grade urothelial carcinoma."
+                if is_s004_branch_a
+                else (
+                    "No pathology test has been performed; only the CT finding is available."
+                    if is_s004_branch_b
+                    else None
+                )
+            ),
+            unknown_override=False if is_s004_branch_b else None,
+            declined_override=True if is_s004_branch_b else None,
         )
         relative = f"branches/{branch_id}.json"
         _write(
@@ -532,11 +562,18 @@ async def _materialize_case(
         )
         if next_selection.selected is not None:
             first_branch_states.append((branch_state, next_selection, branch_id))
+            if is_s004_branch_a:
+                s004_branch_a = (branch_state, next_selection, branch_id)
     if case_id == "S004":
-        if not first_branch_states:
-            raise RuntimeError("SNAPSHOT_S004_SECOND_QUESTION_MISSING")
-        parent_state, second_selection, parent_id = first_branch_states[0]
+        if s004_branch_a is None:
+            raise RuntimeError("SNAPSHOT_S004_PINNED_BRANCH_A_MISSING")
+        parent_state, second_selection, parent_id = s004_branch_a
         assert second_selection.selected is not None
+        if second_selection.selected.slot_id != "pathology.muscle_invasion":
+            raise RuntimeError(
+                "SNAPSHOT_S004_SECOND_QUESTION_UNEXPECTED:"
+                f"{second_selection.selected.slot_id}"
+            )
         for branch in second_selection.selected.branches:
             branch_id = branch.branch_id
             branch_state, next_selection, answer = _apply_branch(

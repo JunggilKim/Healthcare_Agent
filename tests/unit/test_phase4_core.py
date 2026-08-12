@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
+import backend.app.engine.multi_trial_optimizer as optimizer_module
 from backend.app.agents.answer_interpreter import interpret_answer
 from backend.app.agents.question_renderer import render_question
 from backend.app.agents.report_renderer import (
@@ -111,6 +112,60 @@ def test_full_optimizer_uses_real_utility_and_exposes_top_candidates() -> None:
     assert 1 <= len(selection.top_alternatives) <= 3
     assert all(item.utility_components is not None for item in selection.top_alternatives)
     assert state.recompiled_trial_ids == []
+
+
+def test_candidate_branch_inputs_preserve_canonical_rank_order(monkeypatch) -> None:
+    state = _full_state()
+    base_trial = next(iter(state.aggregate.compiled_trials.values()))
+    base_evaluation = next(iter(state.aggregate.trial_evaluations.values()))
+    base_proofs = next(iter(state.proofs_by_trial.values()))
+    ranked_ids = [f"NCT0000000{index}" for index in range(1, 6)]
+    trials = {}
+    evaluations = {}
+    proofs_by_trial = {}
+    histology_ids = []
+    for nct_id in reversed(ranked_ids):
+        criteria = []
+        proofs = []
+        paired = zip(base_trial.criteria, base_proofs, strict=True)
+        for index, (criterion, proof) in enumerate(paired):
+            criterion_id = f"{nct_id}:criterion:{index}"
+            criteria.append(criterion.model_copy(update={"criterion_id": criterion_id}))
+            proofs.append(proof.model_copy(update={"criterion_id": criterion_id, "nct_id": nct_id}))
+            if "pathology.histology" in criterion.required_slots:
+                histology_ids.append((nct_id, criterion_id))
+        trials[nct_id] = base_trial.model_copy(
+            update={"nct_id": nct_id, "criteria": criteria}
+        )
+        evaluations[nct_id] = base_evaluation.model_copy(update={"nct_id": nct_id})
+        proofs_by_trial[nct_id] = proofs
+
+    state.aggregate = state.aggregate.model_copy(
+        update={
+            "compiled_trials": trials,
+            "trial_evaluations": evaluations,
+            "ranked_nct_ids": ranked_ids,
+        }
+    )
+    state.proofs_by_trial = proofs_by_trial
+    observed: list[str] = []
+    real_build_branches = optimizer_module.build_branches
+
+    def recording_build_branches(**kwargs):
+        if kwargs["slot"].slot_id == "pathology.histology":
+            observed.extend(item.criterion_id for item in kwargs["affected_criteria"])
+        return real_build_branches(**kwargs)
+
+    monkeypatch.setattr(optimizer_module, "build_branches", recording_build_branches)
+    generate_slot_candidates(state)
+
+    expected_by_rank = [
+        criterion_id
+        for nct_id in ranked_ids
+        for owner, criterion_id in histology_ids
+        if owner == nct_id
+    ]
+    assert observed == expected_by_rank
 
 
 def test_optimizer_ablation_flags_change_shared_scoring_without_forking_policy() -> None:

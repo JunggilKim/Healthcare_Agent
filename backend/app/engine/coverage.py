@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from backend.app.domain.model_outputs import CriterionCompilationProposal
 
 _HEADING = re.compile(r"^\s*(?:inclusion|exclusion) criteria\s*:?\s*$", re.IGNORECASE)
-_LIST_MARKER = re.compile(r"^\s*(?:[-*•°]|\d+[.)])\s*")
+_LIST_MARKER = re.compile(r"^\s*(?:[-*•°]|\d+\\?[.)])\s*")
 
 
 @dataclass(frozen=True)

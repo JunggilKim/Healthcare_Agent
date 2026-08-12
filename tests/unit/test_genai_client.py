@@ -24,6 +24,8 @@ def test_genai_client_uses_first_party_enterprise_v1_without_api_key(monkeypatch
     assert captured["project"] == "trial-opt-test"
     assert captured["location"] == "global"
     assert captured["http_options"].api_version == "v1"
+    assert captured["http_options"].timeout == 60_000
+    assert captured["http_options"].retry_options.attempts == 1
     assert "api_key" not in captured
 
 

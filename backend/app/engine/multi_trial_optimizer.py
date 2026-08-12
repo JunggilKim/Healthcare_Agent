@@ -127,7 +127,10 @@ def generate_slot_candidates(
     aggregate = state.aggregate
     rank_by_trial = {nct_id: rank for rank, nct_id in enumerate(aggregate.ranked_nct_ids, start=1)}
     affected_by_slot: dict[str, list[AffectedCriterion]] = {}
-    top_ids = set(aggregate.ranked_nct_ids[: aggregate.config.top_k])
+    # Preserve canonical rank order. The branch builder keeps at most four
+    # categorical representatives, so iterating a set here made both branch
+    # composition and utility depend on Python's hash seed.
+    top_ids = aggregate.ranked_nct_ids[: aggregate.config.top_k]
     for nct_id in top_ids:
         proof_by_criterion = {
             proof.criterion_id: proof for proof in state.proofs_by_trial.get(nct_id, [])

@@ -34,10 +34,10 @@ from backend.app.settings import Settings  # noqa: E402
 CASE_QUERIES = {
     "S004": (
         [
-            "bladder cancer",
-            "urothelial carcinoma",
+            "high risk non-muscle invasive bladder cancer",
             "muscle invasive bladder cancer",
-            "non-muscle invasive bladder cancer",
+            "urothelial carcinoma",
+            "bladder cancer",
         ],
         "bladder cancer urothelial carcinoma",
     ),

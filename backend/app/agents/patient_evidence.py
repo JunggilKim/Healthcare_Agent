@@ -8,6 +8,7 @@ from typing import Literal
 
 from backend.app.agents.prompts import render_prompt
 from backend.app.application.catalog import SlotCatalog, SlotDefinition
+from backend.app.domain.canonical import canonical_json_bytes
 from backend.app.domain.enums import EvidenceGrade
 from backend.app.domain.evidence import (
     FactConflict,
@@ -39,6 +40,21 @@ from backend.app.infrastructure.structured_generation import (
 
 class PatientExtractionValidationError(ValueError):
     pass
+
+
+def compact_patient_slot_catalog(slot_catalog: SlotCatalog) -> str:
+    return canonical_json_bytes(
+        [
+            {
+                "slot_id": slot.slot_id,
+                "value_type": slot.value_type,
+                "canonical_values": slot.canonical_values,
+                "allowed_units": slot.allowed_units,
+                "aliases": slot.aliases,
+            }
+            for slot in slot_catalog.slots
+        ]
+    ).decode()
 
 
 @dataclass(frozen=True)
@@ -392,7 +408,11 @@ class PatientEvidenceAgent:
             "existing_facts": [],
             "task": "initial_extraction",
         }
-        prompt = render_prompt("patient_extraction_v1.md", patient_text=patient_text)
+        prompt = render_prompt(
+            "patient_extraction_v1.md",
+            patient_text=patient_text,
+            slot_catalog=compact_patient_slot_catalog(self.slot_catalog),
+        )
         degraded = False
         try:
             proposal, _ = await self.generator.generate_primary_with_lite_fallback(
@@ -400,7 +420,7 @@ class PatientEvidenceAgent:
                 lite_model_id="gemini-3.5-flash-lite",
                 task_name="patient_extraction",
                 prompt=prompt,
-                prompt_version="1.0.0",
+                prompt_version="1.1.0",
                 output_schema_version="patient-extraction-v1",
                 slot_catalog_version=self.slot_catalog.version,
                 normalized_input=normalized_input,

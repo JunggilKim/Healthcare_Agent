@@ -346,6 +346,43 @@ async def test_model_schema_failure_becomes_opaque_unknown_without_hard_verdict(
 
 
 @pytest.mark.asyncio
+async def test_trusted_ast_fallback_is_sent_to_single_repair_attempt() -> None:
+    raw, valid_proposal = _trial_and_proposal()
+    invalid_proposal = valid_proposal.model_copy(deep=True)
+    invalid_proposal.criteria[0].ast.nodes[0].slot_id = "unsupported.slot"
+
+    class RepairingGenerator:
+        def __init__(self) -> None:
+            self.compiler_calls = 0
+            self.repair_input: dict[str, object] | None = None
+
+        async def generate_primary_with_lite_fallback(self, **kwargs):
+            if kwargs["output_model"] is CompiledTrialProposal:
+                self.compiler_calls += 1
+                if self.compiler_calls == 1:
+                    return invalid_proposal, SimpleNamespace(used_fallback=False)
+                self.repair_input = kwargs["normalized_input"]
+                return valid_proposal, SimpleNamespace(used_fallback=False)
+            return ProtocolReviewProposal(approved=True), SimpleNamespace(used_fallback=False)
+
+    generator = RepairingGenerator()
+    service = ProtocolCompilationService(generator, load_slot_catalog())
+    result = await service.compile_and_review(
+        trial=raw,
+        evaluation_date=date(2026, 8, 11),
+        now=datetime(2026, 8, 11, tzinfo=UTC),
+    )
+
+    assert generator.compiler_calls == 2
+    assert generator.repair_input is not None
+    issues = generator.repair_input["repair_issues"]
+    assert isinstance(issues, list)
+    assert issues[0]["issue_type"] == "INVALID_AST"
+    assert result.repair_attempted is True
+    assert result.compilation.compiled_trial.criteria[0].protocol_verified is True
+
+
+@pytest.mark.asyncio
 async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> None:
     raw, compiler_proposal = _trial_and_proposal()
 
@@ -377,7 +414,7 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     initial_compile = generator.arguments[0]
     repair_compile = generator.arguments[2]
     reviewer_call = generator.arguments[1]
-    assert initial_compile["prompt_version"] == "1.0.4"
+    assert initial_compile["prompt_version"] == "1.0.5"
     assert initial_compile["primary_thinking_level"] is None
     assert initial_compile["fallback_thinking_level"] is None
     assert initial_compile["primary_thinking_budget"] == 1024
@@ -510,11 +547,14 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert len(generator.calls) == 2
     assert [item.source_direction.value for item in proposal.criteria] == [
         "INCLUSION",
+        "INCLUSION",
         "EXCLUSION",
     ]
-    assert [item.source_order for item in proposal.criteria] == [1, 1]
+    assert [item.source_order for item in proposal.criteria] == [1, 2, 1]
+    assert proposal.criteria[0].warnings == ["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"]
+    assert proposal.criteria[1].warnings == ["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"]
     assert all(source[item.start : item.end] == item.quote for item in proposal.criteria)
-    assert all(call["prompt_version"] == "1.0.4" for call in generator.calls)
+    assert all(call["prompt_version"] == "1.0.5" for call in generator.calls)
     assert all(call["primary_thinking_budget"] == 1024 for call in generator.calls)
 
     repaired, _ = await service._generate_offline_compilation(
@@ -535,6 +575,22 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert repaired.criteria[0] == proposal.criteria[0]
     assert generator.calls[-1]["task_name"] == "protocol_compiler_repair"
     assert generator.calls[-1]["primary_max_output_tokens"] == 2500
+
+
+def test_offline_compiler_splits_ctgov_escaped_numbered_items() -> None:
+    source = (
+        "Exclusion Criteria:\n"
+        "* 1\\. First exclusion.\n\n"
+        "  2\\. Second exclusion.\n\n"
+        "  3. Third exclusion.\n"
+    )
+    items = ProtocolCompilationService._offline_source_items(source)
+    assert [source[item.start : item.end].strip() for item in items] == [
+        "* 1\\. First exclusion.",
+        "2\\. Second exclusion.",
+        "3. Third exclusion.",
+    ]
+    assert all(item.direction.value == "EXCLUSION" for item in items)
 
 
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:

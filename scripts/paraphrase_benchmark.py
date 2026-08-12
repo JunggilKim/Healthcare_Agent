@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
+import os
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +15,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from backend.app.agents.patient_evidence import compact_patient_slot_catalog  # noqa: E402
+from backend.app.agents.prompts import render_prompt  # noqa: E402
+from backend.app.application.catalog import load_slot_catalog  # noqa: E402
 from backend.app.domain.canonical import canonical_json_bytes  # noqa: E402
 from backend.app.domain.model_outputs import PatientExtractionResult  # noqa: E402
 from backend.app.evaluation.models import BenchmarkArtifact  # noqa: E402
@@ -27,6 +33,18 @@ from backend.app.evaluation.paraphrases import (  # noqa: E402
     parse_paraphrase_responses,
     select_paraphrase_worlds,
 )
+from backend.app.infrastructure.cache import LocalModelResultCache  # noqa: E402
+from backend.app.infrastructure.circuit_breaker import CircuitOpenError  # noqa: E402
+from backend.app.infrastructure.genai_client import create_google_cloud_genai_client  # noqa: E402
+from backend.app.infrastructure.structured_generation import (  # noqa: E402
+    StructuredGenerationUnavailable,
+    StructuredGenerator,
+)
+from backend.app.infrastructure.usage_guard import (  # noqa: E402
+    InMemoryUsageGuard,
+    default_pricing_estimator,
+)
+from backend.app.settings import Settings  # noqa: E402
 
 
 def _jsonl_rows(paths: list[Path]) -> list[dict[str, Any]]:
@@ -124,6 +142,128 @@ def _prepare_validation(args: argparse.Namespace) -> None:
     print(orjson.dumps({"output": str(output), "selected": len(selected)}).decode())
 
 
+async def _validate_online_async(args: argparse.Namespace) -> None:
+    paraphrases = orjson.loads(args.paraphrases.read_bytes())
+    if not isinstance(paraphrases, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in paraphrases.items()
+    ):
+        raise RuntimeError("PARAPHRASE_CANDIDATE_FILE_INVALID")
+    output = args.output_dir.resolve()
+    if output.exists() and any(output.iterdir()):
+        raise SystemExit(f"Refusing to overwrite non-empty directory: {output}")
+    output.mkdir(parents=True, exist_ok=True)
+    catalog = load_slot_catalog()
+    generator = StructuredGenerator(
+        client=create_google_cloud_genai_client(
+            Settings(
+                google_cloud_project=args.project,
+                google_cloud_location="global",
+                allow_live_model_calls=True,
+            )
+        ),
+        cache=LocalModelResultCache(args.cache),
+        pricing=default_pricing_estimator(),
+        usage_guard=InMemoryUsageGuard(),
+    )
+    semaphore = asyncio.Semaphore(args.concurrency)
+
+    async def extract(
+        world_id: str, narrative: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+        try:
+            async with semaphore:
+                proposal, record = await generator.generate_primary_with_lite_fallback(
+                    primary_model_id=EXTRACTION_MODEL_ID,
+                    lite_model_id=PARAPHRASE_MODEL_ID,
+                    task_name="patient_extraction",
+                    prompt=render_prompt(
+                        "patient_extraction_v1.md",
+                        patient_text=narrative,
+                        slot_catalog=compact_patient_slot_catalog(catalog),
+                    ),
+                    prompt_version="1.1.0",
+                    output_schema_version="patient-extraction-v1",
+                    slot_catalog_version=catalog.version,
+                    normalized_input={
+                        "patient_text": narrative,
+                        "language_hint": "auto",
+                        "evaluation_date": args.evaluation_date.isoformat(),
+                        "slot_catalog_version": catalog.version,
+                        "existing_facts": [],
+                        "task": "initial_extraction",
+                    },
+                    output_model=PatientExtractionResult,
+                    primary_thinking_level="MEDIUM",
+                    fallback_thinking_level="HIGH",
+                    primary_max_output_tokens=2000,
+                    fallback_max_output_tokens=2000,
+                    session_id=f"paraphrase-validation:{world_id}",
+                )
+        except (StructuredGenerationUnavailable, CircuitOpenError) as error:
+            return None, {
+                "id": world_id,
+                "error_code": "STRUCTURED_GENERATION_UNAVAILABLE",
+                "error_type": type(error).__name__,
+                "error_message": str(error)[:500],
+            }
+        response = {
+            "id": world_id,
+            "response": {
+                "candidates": [
+                    {"content": {"parts": [{"text": proposal.model_dump_json()}], "role": "model"}}
+                ]
+            },
+        }
+        return response, record.model_dump(mode="json")
+
+    selected_items = sorted(paraphrases.items())
+    if args.world_id:
+        requested = set(args.world_id)
+        unknown = requested - set(paraphrases)
+        if unknown:
+            raise RuntimeError(f"PARAPHRASE_WORLD_ID_UNKNOWN:{sorted(unknown)}")
+        selected_items = [item for item in selected_items if item[0] in requested]
+    pairs = await asyncio.gather(*(extract(*item) for item in selected_items))
+    response_path = output / "extraction_responses.jsonl"
+    successes = [response for response, _ in pairs if response is not None]
+    failures = [record for response, record in pairs if response is None]
+    _write_jsonl(response_path, successes)
+    records = [record for response, record in pairs if response is not None]
+    _write_jsonl(output / "generation_records.jsonl", records)
+    _write_jsonl(output / "failures.jsonl", failures)
+    manifest = {
+        "schema_version": "trial-opt-paraphrase-online-validation-v1",
+        "status": "COMPLETE" if not failures else "INCOMPLETE",
+        "model_id": EXTRACTION_MODEL_ID,
+        "fallback_model_id": PARAPHRASE_MODEL_ID,
+        "evaluation_date": args.evaluation_date.isoformat(),
+        "requested_count": len(pairs),
+        "response_count": len(successes),
+        "failure_count": len(failures),
+        "response_sha256": hashlib.sha256(response_path.read_bytes()).hexdigest(),
+        "fallback_count": sum(bool(record.get("used_fallback")) for record in records),
+        "cache_hit_count": sum(bool(record["usage"]["cache_hit"]) for record in records),
+        "estimated_cost_usd": round(
+            sum(
+                float(record["usage"]["estimated_cost_usd"])
+                for record in records
+                if not record["usage"]["cache_hit"]
+            ),
+            8,
+        ),
+    }
+    (output / "online_validation_manifest.json").write_bytes(canonical_json_bytes(manifest))
+    print(orjson.dumps({"output": str(output), **manifest}).decode())
+
+
+def _validate_online(args: argparse.Namespace) -> None:
+    if not args.allow_live_validation or os.environ.get("ALLOW_LIVE_MODEL_CALLS") != "true":
+        raise SystemExit(
+            "Online validation requires --allow-live-validation and ALLOW_LIVE_MODEL_CALLS=true"
+        )
+    asyncio.run(_validate_online_async(args))
+
+
 def _apply(args: argparse.Namespace) -> None:
     benchmark = _load_benchmark(args.benchmark)
     selected = _load_selection(args.selection_manifest, args.benchmark)
@@ -173,6 +313,21 @@ def main() -> None:
     validate.add_argument("--paraphrase-output", type=Path, action="append", required=True)
     validate.add_argument("--output-dir", type=Path, required=True)
     validate.set_defaults(handler=_prepare_validation)
+
+    online = subparsers.add_parser("validate-online")
+    online.add_argument("--paraphrases", type=Path, required=True)
+    online.add_argument("--project", required=True)
+    online.add_argument("--output-dir", type=Path, required=True)
+    online.add_argument("--evaluation-date", type=date.fromisoformat, default=date(2026, 8, 11))
+    online.add_argument("--concurrency", type=int, choices=range(1, 6), default=1)
+    online.add_argument("--world-id", action="append")
+    online.add_argument(
+        "--cache",
+        type=Path,
+        default=REPOSITORY_ROOT / ".local_store/paraphrase-validation-model-cache",
+    )
+    online.add_argument("--allow-live-validation", action="store_true")
+    online.set_defaults(handler=_validate_online)
 
     apply = subparsers.add_parser("apply")
     apply.add_argument("--benchmark", type=Path, required=True)

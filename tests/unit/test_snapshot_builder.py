@@ -95,6 +95,10 @@ def _write_live_source(root: Path) -> Path:
                 "proofs_sha256": hashlib.sha256(
                     (case_root / "proofs.json").read_bytes()
                 ).hexdigest(),
+                "questions_sha256": hashlib.sha256(
+                    (case_root / "questions.json").read_bytes()
+                ).hexdigest(),
+                "checks": {"reviewed": True},
             }
         )
     (root / "acquisition.json").write_bytes(

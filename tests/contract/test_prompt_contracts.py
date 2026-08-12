@@ -46,7 +46,7 @@ def test_exported_logic_schemas_forbid_extra_fields() -> None:
 
 def test_protocol_compiler_prompt_requires_compact_json_and_opaque_metadata() -> None:
     text = (PROMPT_ROOT / "protocol_compiler_v1.md").read_text(encoding="utf-8")
-    assert "version: 1.0.4" in text
+    assert "version: 1.0.5" in text
     assert "compact schema-valid JSON" in text
     assert "zero-based Unicode code-point offsets" in text
     assert "eligibility_criteria[start:end]" in text
@@ -54,6 +54,13 @@ def test_protocol_compiler_prompt_requires_compact_json_and_opaque_metadata() ->
     assert "source_direction_hint" in text
     assert "metadata.reason_code" in text
     assert "metadata.residual_source_sha256" in text
+
+
+def test_protocol_compiler_prompt_preserves_explicit_muscle_invasion_semantics() -> None:
+    text = (PROMPT_ROOT / "protocol_compiler_v1.md").read_text(encoding="utf-8")
+    assert "pathology.muscle_invasion with a boolean value" in text
+    assert "must not replace that explicit muscle-invasion fact" in text
+    assert "Do not infer muscle invasion from histology alone" in text
     assert "value=null" in text
     assert "values=[]" in text
 

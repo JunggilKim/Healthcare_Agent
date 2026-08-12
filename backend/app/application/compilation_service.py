@@ -25,6 +25,7 @@ from backend.app.domain.model_outputs import (
 )
 from backend.app.domain.trials import ProtocolReviewArtifact, RawTrialRecord
 from backend.app.engine.boundary_tests import run_boundary_tests
+from backend.app.engine.coverage import calculate_source_coverage
 from backend.app.infrastructure.structured_generation import (
     StructuredGenerationUnavailable,
     StructuredGenerator,
@@ -48,7 +49,7 @@ class _OfflineSourceItem:
 
 
 _HEADING = re.compile(r"^\s*(inclusion|exclusion)\s+criteria\s*:?\s*$", re.IGNORECASE)
-_LIST_MARKER = re.compile(r"^\s*(?:[-*•°]|\d+[.)])\s+")
+_LIST_MARKER = re.compile(r"^\s*(?:[-*•°]|\d+\\?[.)])\s+")
 
 
 class ProtocolCompilationService:
@@ -115,7 +116,7 @@ class ProtocolCompilationService:
             lite_model_id="gemini-3.5-flash-lite",
             task_name="protocol_compiler_repair" if repair_issues else "protocol_compiler",
             prompt=prompt,
-            prompt_version="1.0.4",
+            prompt_version="1.0.5",
             output_schema_version="compiled-trial-proposal-v1",
             slot_catalog_version=self.slot_catalog.version,
             normalized_input={
@@ -253,16 +254,48 @@ class ProtocolCompilationService:
                     session_id=f"{session_id}:compiler-chunk:{chunk_index:03d}",
                 )
                 proposal = _anchor_proposal_source_spans(chunk_text, proposal)
-                for criterion in proposal.criteria:
-                    merged.append(
+                # A model may return schema-valid JSON while silently omitting a
+                # clause inside a source item. In the offline release pipeline,
+                # keep only item-level compilations with complete character
+                # coverage; otherwise retain that exact source item as OPAQUE.
+                # This preserves useful neighboring criteria without allowing a
+                # partial model response to clear the 90% verification floor.
+                for item in group:
+                    item_start = item.start - chunk_start
+                    item_end = item.end - chunk_start
+                    item_criteria = [
+                        criterion
+                        for criterion in proposal.criteria
+                        if item_start <= criterion.start and criterion.end <= item_end
+                    ]
+                    relative_criteria = [
                         criterion.model_copy(
                             update={
-                                "source_direction": group[0].direction,
-                                "start": criterion.start + chunk_start,
-                                "end": criterion.end + chunk_start,
+                                "start": criterion.start - item_start,
+                                "end": criterion.end - item_start,
                             }
                         )
-                    )
+                        for criterion in item_criteria
+                    ]
+                    item_text = source[item.start : item.end]
+                    item_coverage = calculate_source_coverage(item_text, relative_criteria)
+                    if item_criteria and item_coverage.ratio == 1.0:
+                        merged.extend(
+                            criterion.model_copy(
+                                update={
+                                    "source_direction": item.direction,
+                                    "start": criterion.start + chunk_start,
+                                    "end": criterion.end + chunk_start,
+                                }
+                            )
+                            for criterion in item_criteria
+                        )
+                    else:
+                        merged.append(self._opaque_item_proposal(trial, item, source_order=1))
+                        compiler_warnings.append(
+                            f"OFFLINE_ITEM_INCOMPLETE_OPAQUE:{chunk_index:03d}:"
+                            f"{item.start}:{item.end}"
+                        )
                 for span in proposal.unassigned_source_spans:
                     compiler_warnings.append(
                         f"UNASSIGNED_CHUNK_SPAN:{chunk_index}:{span.reason_code}"
@@ -367,6 +400,34 @@ class ProtocolCompilationService:
         )
 
     @staticmethod
+    def _trusted_validation_repair_issues(
+        compilation: TrustedCompilation,
+    ) -> list[dict[str, object]]:
+        """Surface backend AST rejection to the one permitted repair attempt.
+
+        The semantic reviewer correctly treats an OPAQUE node as safe, so it
+        cannot discover that an otherwise executable model proposal was made
+        opaque by trusted validation. Preserve the safety fallback while giving
+        the compiler its single bounded chance to correct the invalid AST.
+        """
+
+        return [
+            {
+                "criterion_id": criterion.criterion_id,
+                "issue_type": "INVALID_AST",
+                "severity": "BLOCKING",
+                "explanation": (
+                    "Trusted backend AST validation converted an intended executable "
+                    "criterion to OPAQUE. Correct the AST and all required metadata, "
+                    "or explicitly keep only the unsupported residual clause OPAQUE."
+                ),
+                "source_quote": criterion.source_span.quote,
+            }
+            for criterion in compilation.compiled_trial.criteria
+            if "AST_TRUSTED_VALIDATION_OPAQUE_FALLBACK" in criterion.warnings
+        ]
+
+    @staticmethod
     def _quarantine_blocking_criteria(
         compilation: TrustedCompilation,
         review: ProtocolReviewProposal,
@@ -460,15 +521,23 @@ class ProtocolCompilationService:
                 compiler_model_id=(
                     "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                 ),
-                compiler_prompt_version="1.0.4",
+                compiler_prompt_version="1.0.5",
                 created_at=now,
                 evaluation_date=evaluation_date,
             )
             review, reviewer_fallback = await self._review(compilation, session_id=session_id)
             review_attempts.append(review)
-            if not review.approved or any(issue.severity == "BLOCKING" for issue in review.issues):
+            validation_issues = self._trusted_validation_repair_issues(compilation)
+            if (
+                validation_issues
+                or not review.approved
+                or any(issue.severity == "BLOCKING" for issue in review.issues)
+            ):
                 repair_attempted = True
-                repair_issue_rows = [issue.model_dump(mode="json") for issue in review.issues]
+                repair_issue_rows = [
+                    *[issue.model_dump(mode="json") for issue in review.issues],
+                    *validation_issues,
+                ]
                 proposal, compiler_fallback = await self._compile_proposal(
                     trial,
                     repair_issues=repair_issue_rows,
@@ -482,7 +551,7 @@ class ProtocolCompilationService:
                     compiler_model_id=(
                         "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                     ),
-                    compiler_prompt_version="1.0.4",
+                    compiler_prompt_version="1.0.5",
                     created_at=now,
                     evaluation_date=evaluation_date,
                 )

@@ -1,5 +1,5 @@
 prompt_id: protocol_compiler
-version: 1.0.4
+version: 1.0.5
 model: gemini-3.6-flash
 task: protocol_compiler
 output_schema_version: compiled-trial-proposal-v1
@@ -20,6 +20,12 @@ NON-NEGOTIABLE RULES
 - Preserve AND/OR/NOT scope.
 - Normalize exclusion criteria into a requirement that must be satisfied, while retaining source_direction.
 - Use only listed operators and slots.
+- Map an explicit statement that disease is muscle-invasive or non-muscle-invasive to
+  pathology.muscle_invasion with a boolean value. A stated T category may additionally use
+  staging.clinical_group, but must not replace that explicit muscle-invasion fact with an inferred
+  composite N/M stage. Do not infer muscle invasion from histology alone.
+- Map an explicit pathology or histology diagnosis to pathology.histology. Do not encode a disease
+  risk group as a histology value unless the source itself states it as the pathology diagnosis.
 - Within each criterion AST, label nodes exactly n0, n1, ... in list order with no gaps or
   duplicates, start at n0, set root_node_id to one of those labels, and use only those labels in
   child_ids.
