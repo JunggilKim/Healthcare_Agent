@@ -219,9 +219,9 @@ def _apply_branch(
         simulated,
         next_selection,
         {
-            "answer_text": answer_text if answer_text_override is not None else (
-                None if structured is not None else answer_text
-            ),
+            "answer_text": answer_text
+            if answer_text_override is not None
+            else (None if structured is not None else answer_text),
             "structured_value": structured,
             "unknown": unknown if unknown_override is None else unknown_override,
             "declined": declined if declined_override is None else declined_override,
@@ -571,8 +571,7 @@ async def _materialize_case(
         assert second_selection.selected is not None
         if second_selection.selected.slot_id != "pathology.muscle_invasion":
             raise RuntimeError(
-                "SNAPSHOT_S004_SECOND_QUESTION_UNEXPECTED:"
-                f"{second_selection.selected.slot_id}"
+                f"SNAPSHOT_S004_SECOND_QUESTION_UNEXPECTED:{second_selection.selected.slot_id}"
             )
         for branch in second_selection.selected.branches:
             branch_id = branch.branch_id

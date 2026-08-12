@@ -134,9 +134,7 @@ def test_candidate_branch_inputs_preserve_canonical_rank_order(monkeypatch) -> N
             proofs.append(proof.model_copy(update={"criterion_id": criterion_id, "nct_id": nct_id}))
             if "pathology.histology" in criterion.required_slots:
                 histology_ids.append((nct_id, criterion_id))
-        trials[nct_id] = base_trial.model_copy(
-            update={"nct_id": nct_id, "criteria": criteria}
-        )
+        trials[nct_id] = base_trial.model_copy(update={"nct_id": nct_id, "criteria": criteria})
         evaluations[nct_id] = base_evaluation.model_copy(update={"nct_id": nct_id})
         proofs_by_trial[nct_id] = proofs
 
