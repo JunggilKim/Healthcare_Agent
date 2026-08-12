@@ -25,6 +25,7 @@ from backend.app.infrastructure.structured_generation import (
 class CompilationWorkflowResult:
     compilation: TrustedCompilation
     review_artifact: ProtocolReviewArtifact | None
+    review_attempts: list[ProtocolReviewProposal]
     repair_attempted: bool
     degradation_codes: list[str]
 
@@ -162,6 +163,7 @@ class ProtocolCompilationService:
     ) -> CompilationWorkflowResult:
         repair_attempted = False
         degradation_codes: list[str] = []
+        review_attempts: list[ProtocolReviewProposal] = []
         try:
             proposal, compiler_fallback = await self._generate_compilation(
                 trial, session_id=session_id
@@ -178,6 +180,7 @@ class ProtocolCompilationService:
                 evaluation_date=evaluation_date,
             )
             review, reviewer_fallback = await self._review(compilation, session_id=session_id)
+            review_attempts.append(review)
             if not review.approved or any(issue.severity == "BLOCKING" for issue in review.issues):
                 repair_attempted = True
                 proposal, compiler_fallback = await self._generate_compilation(
@@ -197,6 +200,7 @@ class ProtocolCompilationService:
                     evaluation_date=evaluation_date,
                 )
                 review, reviewer_fallback = await self._review(compilation, session_id=session_id)
+                review_attempts.append(review)
                 if not review.approved or any(
                     issue.severity == "BLOCKING" for issue in review.issues
                 ):
@@ -209,6 +213,7 @@ class ProtocolCompilationService:
                             reason_code="SEMANTIC_REVIEW_REJECTED_AFTER_REPAIR",
                         ),
                         review_artifact=None,
+                        review_attempts=review_attempts,
                         repair_attempted=True,
                         degradation_codes=["PROTOCOL_REVIEW_OPAQUE_AFTER_SINGLE_REPAIR"],
                     )
@@ -230,6 +235,7 @@ class ProtocolCompilationService:
                     boundary_reports=compilation.boundary_reports,
                 ),
                 review_artifact=reviewed.review_artifact,
+                review_attempts=review_attempts,
                 repair_attempted=repair_attempted,
                 degradation_codes=(
                     ["DOUBLE_LITE_FALLBACK_UNVERIFIED"]
@@ -248,6 +254,7 @@ class ProtocolCompilationService:
                     reason_code="MODEL_OR_SCHEMA_VALIDATION_FAILED",
                 ),
                 review_artifact=None,
+                review_attempts=review_attempts,
                 repair_attempted=repair_attempted,
                 degradation_codes=degradation_codes,
             )

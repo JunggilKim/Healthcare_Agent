@@ -330,6 +330,7 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     assert generator.calls == 4
     assert result.repair_attempted is True
     assert result.review_artifact is None
+    assert len(result.review_attempts) == 2
     assert result.compilation.compiled_trial.criteria[0].opaque is True
     assert result.degradation_codes == ["PROTOCOL_REVIEW_OPAQUE_AFTER_SINGLE_REPAIR"]
     initial_compile = generator.arguments[0]

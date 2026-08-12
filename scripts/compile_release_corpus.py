@@ -221,6 +221,9 @@ async def _compile_one(
             "review_content_hash": (
                 workflow.review_artifact.content_hash if workflow.review_artifact else None
             ),
+            "review_attempts": [
+                proposal.model_dump(mode="json") for proposal in workflow.review_attempts
+            ],
             "protocol_verified": compiled.protocol_verified,
             "source_character_coverage": compiled.source_character_coverage,
             "boundary_tests_passed": compiled.boundary_tests_passed,
