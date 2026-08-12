@@ -211,10 +211,21 @@ class StructuredGenerator:
                     await self._sleep(delay)
         circuit.record_failure()
         cause = type(last_error).__name__ if last_error is not None else "UnknownError"
+        issue_summary = self._error_summary(last_error)
         raise StructuredGenerationUnavailable(
             f"structured generation failed for {task_name} after {max_attempts} attempts "
-            f"(last_error={cause})"
+            f"(last_error={cause}{issue_summary})"
         ) from last_error
+
+    @staticmethod
+    def _error_summary(error: Exception | None) -> str:
+        if not isinstance(error, ValidationError):
+            return ""
+        issues = []
+        for issue in error.errors(include_input=False, include_url=False)[:8]:
+            location = ".".join(str(item) for item in issue["loc"]) or "$"
+            issues.append(f"{location}:{issue['type']}")
+        return f"; issues={','.join(issues)}"
 
     @staticmethod
     def _thinking_config(
