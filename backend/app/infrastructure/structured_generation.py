@@ -119,6 +119,7 @@ class StructuredGenerator:
         retry_prompt = prompt
         for attempt in range(max_attempts):
             reservation = None
+            billed_cost = None
             call_started = time.monotonic()
             try:
                 if self.usage_guard is not None:
@@ -141,22 +142,23 @@ class StructuredGenerator:
                         thinking_config=thinking_config,
                     ),
                 )
-                parsed = output_model.model_validate_json(response.text or "")
                 metadata = response.usage_metadata
                 prompt_tokens = int(metadata.prompt_token_count or 0) if metadata else 0
                 output_tokens = int(metadata.candidates_token_count or 0) if metadata else 0
                 reasoning_tokens = int(metadata.thoughts_token_count or 0) if metadata else 0
-                cost = self.pricing.generation_cost(
+                billed_cost = self.pricing.generation_cost(
                     model_id,
                     input_tokens=prompt_tokens,
                     output_tokens=output_tokens,
                     reasoning_tokens=reasoning_tokens,
                 )
+                parsed = output_model.model_validate_json(response.text or "")
                 if reservation is not None:
                     assert self.usage_guard is not None
                     await self.usage_guard.reconcile_async(
-                        reservation.reservation_id, actual_usd=cost
+                        reservation.reservation_id, actual_usd=billed_cost
                     )
+                    reservation = None
                 usage = ModelUsage(
                     model_id=model_id,
                     task_name=task_name,
@@ -164,7 +166,7 @@ class StructuredGenerator:
                     output_tokens=output_tokens,
                     reasoning_tokens=reasoning_tokens,
                     total_tokens=int(metadata.total_token_count or 0) if metadata else 0,
-                    estimated_cost_usd=float(cost),
+                    estimated_cost_usd=float(billed_cost),
                     cache_hit=False,
                     created_at=datetime.now(UTC),
                 )
@@ -192,7 +194,12 @@ class StructuredGenerator:
                 raise StructuredGenerationUnavailable(str(error)) from error
             except Exception as error:
                 if reservation is not None and self.usage_guard is not None:
-                    await self.usage_guard.release_async(reservation.reservation_id)
+                    if billed_cost is None:
+                        await self.usage_guard.release_async(reservation.reservation_id)
+                    else:
+                        await self.usage_guard.reconcile_async(
+                            reservation.reservation_id, actual_usd=billed_cost
+                        )
                 last_error = error
                 if attempt < max_attempts - 1:
                     issue = (

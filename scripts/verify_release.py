@@ -60,6 +60,7 @@ REQUIRED_FILES = (
     "presentation/demo_script.md",
     "presentation/submission_checklist.md",
     "scripts/acquire_release_corpus.py",
+    "scripts/compile_release_corpus.py",
     "scripts/bootstrap_gcp.sh",
     "scripts/deploy.sh",
     "scripts/smoke_test_deployment.sh",

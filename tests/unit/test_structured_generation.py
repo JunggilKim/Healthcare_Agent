@@ -141,7 +141,12 @@ async def test_schema_failure_retries_then_exact_cache_prevents_second_dispatch(
     assert first_record.usage.estimated_cost_usd > 0
     usage = usage_guard.snapshot("unscoped")
     assert usage.session_reserved_usd == 0
-    assert usage.session_reconciled_usd > 0
+    assert usage.session_reconciled_usd == 2 * default_pricing_estimator().generation_cost(
+        "gemini-3.6-flash",
+        input_tokens=100,
+        output_tokens=10,
+        reasoning_tokens=5,
+    )
 
 
 async def test_primary_schema_exhaustion_uses_single_lite_fallback(tmp_path: Path) -> None:
