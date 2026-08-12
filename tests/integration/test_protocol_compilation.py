@@ -556,6 +556,13 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert all(source[item.start : item.end] == item.quote for item in proposal.criteria)
     assert all(call["prompt_version"] == "1.0.6" for call in generator.calls)
     assert all(call["primary_thinking_budget"] == 1024 for call in generator.calls)
+    assert all(
+        call["normalized_input"]["trial"]["minimum_age"] is None
+        and call["normalized_input"]["trial"]["maximum_age"] is None
+        and call["normalized_input"]["trial"]["sex"] is None
+        and call["normalized_input"]["trial"]["conditions"] == []
+        for call in generator.calls
+    )
 
     repaired, _ = await service._generate_offline_compilation(
         raw,

@@ -245,7 +245,20 @@ class ProtocolCompilationService:
                     if chunk_start <= criterion.start < chunk_end
                 )
                 continue
-            chunk_trial = trial.model_copy(update={"eligibility_criteria": chunk_text})
+            # An offline chunk is compiled solely against its exact eligibility
+            # source span. Registry-level demographic/condition fields belong
+            # to separate evidence and can otherwise leak unrelated clauses
+            # into a repaired criterion.
+            chunk_trial = trial.model_copy(
+                update={
+                    "eligibility_criteria": chunk_text,
+                    "sex": None,
+                    "minimum_age": None,
+                    "maximum_age": None,
+                    "healthy_volunteers": None,
+                    "conditions": [],
+                }
+            )
             try:
                 proposal, chunk_fallback = await self._generate_compilation(
                     chunk_trial,
