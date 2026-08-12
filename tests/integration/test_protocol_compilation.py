@@ -776,6 +776,24 @@ def test_offline_compiler_isolates_explicit_acute_pancreatitis_diagnosis() -> No
         if "acute pancreatitis" in source[item.start : item.end]
     ] == ["acute pancreatitis"]
 
+
+def test_offline_compiler_isolates_explicit_recurrent_pancreatitis_history() -> None:
+    service = ProtocolCompilationService
+    for phrase in (
+        "recurrent acute pancreatitis",
+        "History of recurrent acute pancreatitis",
+        "at least two episodes of acute pancreatitis",
+    ):
+        source = f"Inclusion Criteria:\n* Individuals with {phrase} in the prior 2 years.\n"
+        items = service._isolate_explicit_recurrent_pancreatitis_phrases(
+            source, service._offline_source_items(source)
+        )
+        assert [
+            source[item.start : item.end]
+            for item in items
+            if phrase.lower() == source[item.start : item.end].lower()
+        ] == [phrase]
+
     history = (
         "Inclusion Criteria:\n"
         "* Prior treatment after a history of acute pancreatitis is permitted.\n"
