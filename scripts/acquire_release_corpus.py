@@ -34,9 +34,9 @@ from backend.app.settings import Settings  # noqa: E402
 CASE_QUERIES = {
     "S004": (
         [
-            "outcomes high-risk non-muscle invasive bladder cancer blue light resection",
             "high risk non-muscle invasive bladder cancer",
-            "urothelial carcinoma",
+            "muscle invasive bladder cancer",
+            "bladder cancer",
             "localized muscle invasive bladder urothelial carcinoma",
         ],
         "bladder cancer urothelial carcinoma",
