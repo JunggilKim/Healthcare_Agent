@@ -379,7 +379,11 @@ async def compile_corpus(args: argparse.Namespace) -> dict[str, object]:
         pricing=default_pricing_estimator(),
         usage_guard=usage_guard,
     )
-    service = ProtocolCompilationService(generator, load_slot_catalog())
+    service = ProtocolCompilationService(
+        generator,
+        load_slot_catalog(),
+        offline_reviewer_chunk_size=args.reviewer_chunk_size,
+    )
     models_hash = _sha256(REPOSITORY_ROOT / "config" / "models.yaml")
     slots_hash = _sha256(REPOSITORY_ROOT / "config" / "slots.yaml")
     implementation_hash = hashlib.sha256(
@@ -439,6 +443,7 @@ def main() -> None:
     )
     parser.add_argument("--evaluation-date", type=date.fromisoformat, default=date(2026, 8, 12))
     parser.add_argument("--concurrency", type=int, choices=(1, 2), default=2)
+    parser.add_argument("--reviewer-chunk-size", type=int, default=4)
     parser.add_argument("--case", action="append")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--allow-live-compilation", action="store_true")
@@ -449,6 +454,8 @@ def main() -> None:
         raise SystemExit("Refusing paid compilation unless ALLOW_LIVE_MODEL_CALLS=true")
     if args.limit is not None and args.limit < 1:
         raise SystemExit("--limit must be positive")
+    if args.reviewer_chunk_size < 1:
+        raise SystemExit("--reviewer-chunk-size must be positive")
     manifest = asyncio.run(compile_corpus(args))
     print(
         orjson.dumps(

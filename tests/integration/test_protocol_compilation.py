@@ -350,6 +350,50 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     assert set(reviewer_input["criteria"][0]) == {"criterion_id", "source_quote", "ast"}
 
 
+@pytest.mark.asyncio
+async def test_offline_reviewer_chunks_merge_without_changing_live_default() -> None:
+    raw, compiler_proposal = _trial_and_proposal()
+    source = raw.eligibility_criteria or ""
+    raw = raw.model_copy(update={"eligibility_criteria": f"{source}\n{source}"})
+    second = compiler_proposal.criteria[0].model_copy(deep=True)
+    second.source_order = 2
+    second.start = len(source) + 1
+    second.end = len(source) + 1 + len(source)
+    compiler_proposal.criteria.append(second)
+
+    class ChunkGenerator:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        async def generate_primary_with_lite_fallback(self, **kwargs):
+            self.calls.append(kwargs)
+            return ProtocolReviewProposal(approved=True), SimpleNamespace(used_fallback=False)
+
+    generator = ChunkGenerator()
+    service = ProtocolCompilationService(
+        generator,
+        load_slot_catalog(),
+        offline_reviewer_chunk_size=1,
+    )
+    compilation = construct_trusted_compilation(
+        trial=raw,
+        proposal=compiler_proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.3",
+        created_at=datetime(2026, 8, 12, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 12),
+    )
+    review, used_fallback = await service._review(compilation)
+    assert review.approved is True
+    assert used_fallback is False
+    assert [call["task_name"] for call in generator.calls] == [
+        "protocol_reviewer_chunk_000",
+        "protocol_reviewer_chunk_001",
+    ]
+    assert all(len(call["normalized_input"]["criteria"]) == 1 for call in generator.calls)
+
+
 def test_all_phase3_top8_cache_entries_are_hash_bound_opaque_and_loadable() -> None:
     root = Path("data/fixtures/compiled/S004")
     manifest = orjson.loads((root / "manifest.json").read_bytes())

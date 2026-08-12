@@ -30,9 +30,18 @@ class CompilationWorkflowResult:
 
 
 class ProtocolCompilationService:
-    def __init__(self, generator: StructuredGenerator, slot_catalog: SlotCatalog) -> None:
+    def __init__(
+        self,
+        generator: StructuredGenerator,
+        slot_catalog: SlotCatalog,
+        *,
+        offline_reviewer_chunk_size: int | None = None,
+    ) -> None:
+        if offline_reviewer_chunk_size is not None and offline_reviewer_chunk_size < 1:
+            raise ValueError("offline_reviewer_chunk_size must be positive")
         self.generator = generator
         self.slot_catalog = slot_catalog
+        self.offline_reviewer_chunk_size = offline_reviewer_chunk_size
 
     def _compiler_prompt(self, trial: RawTrialRecord, repair_issues: object | None = None) -> str:
         payload = {
@@ -93,38 +102,55 @@ class ProtocolCompilationService:
         self, compilation: TrustedCompilation, *, session_id: str = "unscoped"
     ) -> tuple[ProtocolReviewProposal, bool]:
         compiled = compilation.compiled_trial
-        review_payload = {
-            "nct_id": compiled.nct_id,
-            "criteria": [
-                {
-                    "criterion_id": criterion.criterion_id,
-                    "source_quote": criterion.source_span.quote,
-                    "ast": criterion.ast.model_dump(mode="json"),
-                }
-                for criterion in compiled.criteria
-            ],
-        }
-        prompt = render_prompt(
-            "protocol_reviewer_v1.md",
-            review_payload=canonical_json_bytes(review_payload).decode(),
+        criterion_rows = [
+            {
+                "criterion_id": criterion.criterion_id,
+                "source_quote": criterion.source_span.quote,
+                "ast": criterion.ast.model_dump(mode="json"),
+            }
+            for criterion in compiled.criteria
+        ]
+        chunk_size = self.offline_reviewer_chunk_size or len(criterion_rows)
+        proposals: list[ProtocolReviewProposal] = []
+        used_fallback = False
+        for chunk_index, start in enumerate(range(0, len(criterion_rows), chunk_size)):
+            review_payload = {
+                "nct_id": compiled.nct_id,
+                "criteria": criterion_rows[start : start + chunk_size],
+            }
+            prompt = render_prompt(
+                "protocol_reviewer_v1.md",
+                review_payload=canonical_json_bytes(review_payload).decode(),
+            )
+            proposal, record = await self.generator.generate_primary_with_lite_fallback(
+                primary_model_id="gemini-3.6-flash",
+                lite_model_id="gemini-3.5-flash-lite",
+                task_name=(
+                    "protocol_reviewer"
+                    if self.offline_reviewer_chunk_size is None
+                    else f"protocol_reviewer_chunk_{chunk_index:03d}"
+                ),
+                prompt=prompt,
+                prompt_version="1.0.2",
+                output_schema_version="protocol-review-proposal-v1",
+                slot_catalog_version=self.slot_catalog.version,
+                normalized_input=review_payload,
+                output_model=ProtocolReviewProposal,
+                primary_thinking_level="MEDIUM",
+                fallback_thinking_level="HIGH",
+                primary_max_output_tokens=1500,
+                fallback_max_output_tokens=1500,
+                session_id=session_id,
+            )
+            proposals.append(proposal)
+            used_fallback = used_fallback or record.used_fallback
+        return (
+            ProtocolReviewProposal(
+                approved=all(proposal.approved for proposal in proposals),
+                issues=[issue for proposal in proposals for issue in proposal.issues],
+            ),
+            used_fallback,
         )
-        proposal, record = await self.generator.generate_primary_with_lite_fallback(
-            primary_model_id="gemini-3.6-flash",
-            lite_model_id="gemini-3.5-flash-lite",
-            task_name="protocol_reviewer",
-            prompt=prompt,
-            prompt_version="1.0.2",
-            output_schema_version="protocol-review-proposal-v1",
-            slot_catalog_version=self.slot_catalog.version,
-            normalized_input=review_payload,
-            output_model=ProtocolReviewProposal,
-            primary_thinking_level="MEDIUM",
-            fallback_thinking_level="HIGH",
-            primary_max_output_tokens=1500,
-            fallback_max_output_tokens=1500,
-            session_id=session_id,
-        )
-        return proposal, record.used_fallback
 
     async def compile_and_review(
         self,
