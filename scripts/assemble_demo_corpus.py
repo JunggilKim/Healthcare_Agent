@@ -59,9 +59,9 @@ def _source_spec(value: str) -> tuple[str, Path]:
 
 
 def _compiled_source(
-    nct_id: str, root: Path
+    case_id: str, nct_id: str, root: Path
 ) -> tuple[CompiledTrial, ProtocolReviewArtifact, dict[str, object]]:
-    result_path = root / "sessions" / "S004" / "results" / f"{nct_id}.json"
+    result_path = root / "sessions" / case_id / "results" / f"{nct_id}.json"
     result = orjson.loads(result_path.read_bytes())
     if result.get("status") not in ELIGIBLE_STATUSES:
         raise RuntimeError(f"DEMO_CORPUS_COMPILATION_NOT_ELIGIBLE:{nct_id}:{result.get('status')}")
@@ -76,6 +76,14 @@ def _compiled_source(
     return compiled, review, result
 
 
+def _case_source_spec(value: str) -> tuple[str, str, Path]:
+    case_id, separator, source = value.partition(":")
+    if not separator or case_id not in CASE_IDS:
+        raise argparse.ArgumentTypeError("case source must begin CASE_ID:")
+    nct_id, root = _source_spec(source)
+    return case_id, nct_id, root
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Assemble an exact multi-source 24-trial snapshot corpus"
@@ -83,6 +91,13 @@ def main() -> None:
     parser.add_argument("--base-corpus", type=Path, required=True)
     parser.add_argument("--acquisition", type=Path, required=True)
     parser.add_argument("--s004-source", action="append", type=_source_spec, required=True)
+    parser.add_argument(
+        "--case-source",
+        action="append",
+        type=_case_source_spec,
+        default=[],
+        help="override a non-S004 case source as CASE_ID:NCT########=compilation-root",
+    )
     parser.add_argument("--trials-per-case", type=int, choices=range(8, 13), default=8)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -92,6 +107,16 @@ def main() -> None:
         raise RuntimeError("DEMO_CORPUS_S004_SOURCE_COUNT_INVALID")
     if len({nct_id for nct_id, _ in args.s004_source}) != len(args.s004_source):
         raise RuntimeError("DEMO_CORPUS_S004_SOURCE_DUPLICATE")
+    case_sources: dict[str, list[tuple[str, Path]]] = {}
+    for case_id, nct_id, root in args.case_source:
+        if case_id == "S004":
+            raise RuntimeError("DEMO_CORPUS_S004_USE_DEDICATED_SOURCE_ARGUMENT")
+        case_sources.setdefault(case_id, []).append((nct_id, root))
+    for case_id, sources in case_sources.items():
+        if len(sources) != args.trials_per_case:
+            raise RuntimeError(f"DEMO_CORPUS_CASE_SOURCE_COUNT_INVALID:{case_id}")
+        if len({nct_id for nct_id, _ in sources}) != len(sources):
+            raise RuntimeError(f"DEMO_CORPUS_CASE_SOURCE_DUPLICATE:{case_id}")
 
     acquisition = orjson.loads((args.acquisition / "acquisition.json").read_bytes())
     case_acquisition = {
@@ -130,13 +155,30 @@ def main() -> None:
         }
         if case_id == "S004":
             selected_ids = [nct_id for nct_id, _ in args.s004_source]
-            sourced = [_compiled_source(nct_id, root) for nct_id, root in args.s004_source]
+            sourced = [
+                _compiled_source(case_id, nct_id, root)
+                for nct_id, root in args.s004_source
+            ]
             compiled = [item[0] for item in sourced]
             reviews = [item[1] for item in sourced]
             source_records.update(
                 {
                     nct_id: root.resolve().relative_to(REPOSITORY_ROOT).as_posix()
                     for nct_id, root in args.s004_source
+                }
+            )
+        elif case_id in case_sources:
+            sources = case_sources[case_id]
+            selected_ids = [nct_id for nct_id, _ in sources]
+            sourced = [
+                _compiled_source(case_id, nct_id, root) for nct_id, root in sources
+            ]
+            compiled = [item[0] for item in sourced]
+            reviews = [item[1] for item in sourced]
+            source_records.update(
+                {
+                    nct_id: root.resolve().relative_to(REPOSITORY_ROOT).as_posix()
+                    for nct_id, root in sources
                 }
             )
         else:
