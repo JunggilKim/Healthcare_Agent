@@ -25,7 +25,7 @@ gcloud run deploy trial-opt-web \
   --service-account "trial-opt-runtime@${PROJECT_ID}.iam.gserviceaccount.com" \
   --cpu 2 --memory 2Gi --concurrency 4 --timeout 300 \
   --min-instances 0 --max-instances 2 --allow-unauthenticated \
-  --set-env-vars "APP_ENV=prod,STORE_BACKEND=gcp,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global,GCP_REGION=${GCP_REGION},GCS_BUCKET=${PROJECT_ID}-trial-opt-artifacts,DEFAULT_RUNTIME_MODE=snapshot,DEMO_SNAPSHOT_VERSION=${SNAPSHOT_VERSION},APP_ENABLE_FAULT_INJECTION=false,ALLOW_LIVE_MODEL_CALLS=true,ALLOW_LIVE_CTGOV_CALLS=true" \
+  --set-env-vars "APP_ENV=prod,APP_VERSION=${GIT_SHA},STORE_BACKEND=gcp,GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=global,GCP_REGION=${GCP_REGION},GCS_BUCKET=${PROJECT_ID}-trial-opt-artifacts,DEFAULT_RUNTIME_MODE=snapshot,DEMO_SNAPSHOT_VERSION=${SNAPSHOT_VERSION},APP_ENABLE_FAULT_INJECTION=false,ALLOW_LIVE_MODEL_CALLS=true,ALLOW_LIVE_CTGOV_CALLS=true" \
   --set-secrets "SESSION_TOKEN_HMAC_SALT=trial-opt-session-hmac-salt:latest,IP_HASH_SALT=trial-opt-ip-hash-salt:latest"
 
 SERVICE_URL="$(gcloud run services describe trial-opt-web --project "$PROJECT_ID" --region "$GCP_REGION" --format='value(status.url)')"
