@@ -15,7 +15,7 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /근거가 부족한 지점을 찾고/ })).toBeVisible();
-  await expect(page).toHaveScreenshot("landing-1440x900.png", { animations: "disabled" });
+  await expect.soft(page).toHaveScreenshot("landing-1440x900.png", { animations: "disabled" });
   await page.getByRole("button", { name: "S004 데모 분석 시작" }).click();
 
   await expect(page.getByText("NCT05239624")).toBeVisible();
@@ -34,7 +34,7 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
   expect(
     accessibility.violations.filter((item) => ["critical", "serious"].includes(item.impact ?? "")),
   ).toEqual([]);
-  await expect(page).toHaveScreenshot("s004-workspace-1440x900.png", {
+  await expect.soft(page).toHaveScreenshot("s004-workspace-1440x900.png", {
     animations: "disabled",
   });
 
@@ -44,7 +44,7 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
   expect(
     researchAccessibility.violations.filter((item) => ["critical", "serious"].includes(item.impact ?? "")),
   ).toEqual([]);
-  await expect(page).toHaveScreenshot("research-evidence-1440x900.png", { animations: "disabled" });
+  await expect.soft(page).toHaveScreenshot("research-evidence-1440x900.png", { animations: "disabled" });
 
   await page.getByRole("button", { name: "Experiment Evidence" }).click();
   await expect(page.getByText(/해석 범위에 주의하세요/)).toBeVisible();
@@ -52,7 +52,7 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
   expect(
     experimentAccessibility.violations.filter((item) => ["critical", "serious"].includes(item.impact ?? "")),
   ).toEqual([]);
-  await expect(page).toHaveScreenshot("experiment-evidence-1440x900.png", { animations: "disabled" });
+  await expect.soft(page).toHaveScreenshot("experiment-evidence-1440x900.png", { animations: "disabled" });
   await page.getByRole("button", { name: "Patient Summary" }).click();
 
   const ageRow = page.getByRole("row").filter({ hasText: "Age ≥ 18 years" });
@@ -138,7 +138,7 @@ test("mobile Korean layout has no page overflow and no console errors", async ({
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /근거가 부족한 지점을 찾고/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await expect(page).toHaveScreenshot("landing-390x844.png", { animations: "disabled" });
+  await expect.soft(page).toHaveScreenshot("landing-390x844.png", { animations: "disabled" });
 
   await page.getByRole("button", { name: "S004 데모 분석 시작" }).click();
   await expect(page.getByText("NCT05239624")).toBeVisible();
@@ -148,7 +148,7 @@ test("mobile Korean layout has no page overflow and no console errors", async ({
   expect(
     accessibility.violations.filter((item) => ["critical", "serious"].includes(item.impact ?? "")),
   ).toEqual([]);
-  await expect(page).toHaveScreenshot("s004-workspace-390x844.png", { animations: "disabled" });
+  await expect.soft(page).toHaveScreenshot("s004-workspace-390x844.png", { animations: "disabled" });
   expect(consoleProblems).toEqual([]);
 });
 

@@ -4,7 +4,7 @@
   font-family: "Noto Sans KR", Pretendard, Inter, ui-sans-serif, system-ui, sans-serif;
   color: #12243f;
   background: #f4f7fa;
-  font-synthesis: none;
+  font-synthesis: weight;
   text-rendering: optimizeLegibility;
   --navy-950: #0a1a31;
   --navy-900: #12243f;
