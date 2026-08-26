@@ -562,6 +562,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 /* TRIAL-OPT Clinical Intelligence V3
    Korean-first readability pass for presentation and clinical review. */
 body { font-size: 16px; }
+.landing-hero h1, .panel-title, .stage-copy strong, .question-panel h2, .question-panel button, .firewall-panel h2, .summary-label { word-break: keep-all; overflow-wrap: normal; }
 .eyebrow { font-size: .76rem; letter-spacing: .08em; }
 .panel-title { margin-top: 6px; font-size: 1.28rem; line-height: 1.4; }
 .section-description { margin-top: 7px; max-width: 760px; font-size: .9rem; line-height: 1.65; }
