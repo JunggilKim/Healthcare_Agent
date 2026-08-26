@@ -1,3 +1,5 @@
+import { stageLabels, stageStateLabels } from "../lib/locale";
+
 const stages = [
   "Patient Evidence",
   "Trial Retrieval",
@@ -12,22 +14,25 @@ export type StageState = "pending" | "running" | "completed" | "degraded" | "fai
 
 export function AgentTimeline({ states }: { states: Record<string, StageState> }) {
   return (
-    <section aria-labelledby="agent-timeline-title" className="panel shrink-0 p-2">
+    <section aria-labelledby="agent-timeline-title" className="panel timeline-panel shrink-0">
       <p className="eyebrow">ROLE-SEPARATED PIPELINE</p>
-      <h2 id="agent-timeline-title" className="mt-0.5 text-sm font-bold">Agent timeline</h2>
-      <ol className="mt-1 space-y-0.5">
-        {stages.map((stage, index) => (
-          <li key={stage} className="flex items-center gap-2 text-[0.68rem] leading-4 text-slate-300">
-            <span
-              className={`stage-dot stage-${states[stage] ?? "pending"}`}
-              aria-hidden="true"
-            />
-            <span>{index + 1}. {stage}</span>
-            <span className="ml-auto text-[0.68rem] text-slate-500">
-              {{ pending: "대기", running: "진행 중", completed: "완료", degraded: "대체 경로", failed: "실패" }[states[stage] ?? "pending"]}
+      <h2 id="agent-timeline-title" className="panel-title">7단계 Agent Timeline</h2>
+      <ol className="stage-list">
+        {stages.map((stage, index) => {
+          const state = states[stage] ?? "pending";
+          const label = stageLabels[stage];
+          return (
+          <li key={stage} className={`stage-item stage-item-${state}`}>
+            <span className={`stage-symbol stage-symbol-${state}`} aria-hidden="true">
+              {state === "completed" ? "✓" : state === "failed" ? "!" : state === "degraded" ? "△" : index + 1}
             </span>
+            <span className="stage-copy">
+              <strong>{label.ko}</strong>
+              <small>{label.en}</small>
+            </span>
+            <span className="stage-state">{stageStateLabels[state]}</span>
           </li>
-        ))}
+        )})}
       </ol>
     </section>
   );

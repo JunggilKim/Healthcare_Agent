@@ -61,9 +61,9 @@ async function readSummary() {
 
 export function ExperimentEvidence() {
   const query = useQuery({ queryKey: ["evaluation-summary"], queryFn: readSummary });
-  if (query.isPending) return <section className="panel">Evaluation artifact loading…</section>;
+  if (query.isPending) return <section className="panel runtime-loading">평가 아티팩트 불러오는 중 · Evaluation artifact loading…</section>;
   if (query.isError) {
-    return <section className="panel text-amber-100">Evaluation artifact unavailable · no metric is imputed.</section>;
+    return <section className="panel runtime-error">평가 아티팩트를 사용할 수 없습니다 · Evaluation artifact unavailable · no metric is imputed.</section>;
   }
   const summary = query.data;
   const curve = summary.accuracy_curves.B0.map((point, index) => ({
@@ -73,31 +73,31 @@ export function ExperimentEvidence() {
     B6: summary.accuracy_curves.B6[index]?.accuracy,
   }));
   return (
-    <section className="panel" aria-labelledby="experiment-title">
+    <section className="panel experiment-evidence" aria-labelledby="experiment-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="eyebrow">EXPERIMENT EVIDENCE</p>
-          <h2 id="experiment-title" className="panel-title">Committed evaluation artifact</h2>
+          <p className="eyebrow">실험 근거 · EXPERIMENT EVIDENCE</p>
+          <h2 id="experiment-title" className="panel-title">커밋된 평가 아티팩트 · Committed evaluation artifact</h2>
         </div>
         <span className="mode-badge">FIXED SEED · 20260811</span>
       </div>
-      <div className="mt-4 rounded-xl border border-amber-300/40 bg-amber-100/5 p-4 text-sm text-amber-100">
+      <div className="experiment-warning">
         <p className="font-bold">Provisional fixture smoke · release acceptance evidence 아님</p>
         <p className="mt-1 text-xs leading-5">{summary.claim_scope}. Clinical validation: {String(summary.clinical_validation)}. Acceptance eligible: {String(summary.acceptance_eligible)}.</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-300">{summary.blocking_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
       </div>
       <div className="mt-4 grid gap-5 xl:grid-cols-[1fr_0.85fr]">
-        <div className="h-72 rounded-xl border border-slate-800 bg-slate-950/50 p-4" aria-label="Accuracy versus questions chart">
+        <div className="experiment-chart" aria-label="Accuracy versus questions chart">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={curve}>
-              <CartesianGrid stroke="#1e293b" />
-              <XAxis dataKey="questions" stroke="#94a3b8" />
-              <YAxis domain={[0, 1]} stroke="#94a3b8" />
+              <CartesianGrid stroke="#d9e2ec" />
+              <XAxis dataKey="questions" stroke="#64748b" />
+              <YAxis domain={[0, 1]} stroke="#64748b" />
               <Tooltip />
               <Legend />
-              <Line dataKey="B0" stroke="#94a3b8" strokeWidth={2} />
-              <Line dataKey="B3" stroke="#fbbf24" strokeWidth={2} />
-              <Line dataKey="B6" stroke="#67e8f9" strokeWidth={3} />
+              <Line dataKey="B0" stroke="#64748b" strokeWidth={2} />
+              <Line dataKey="B3" stroke="#b45309" strokeWidth={2} />
+              <Line dataKey="B6" stroke="#2563eb" strokeWidth={3} />
             </LineChart>
           </ResponsiveContainer>
         </div>

@@ -34,8 +34,8 @@ export function ProofGraph({ session }: { session: SessionView }) {
         {
           selector: "node",
           style: {
-            "background-color": "#0f766e",
-            color: "#e2e8f0",
+            "background-color": "#2563eb",
+            color: "#0b1f33",
             label: "data(label)",
             "font-size": 10,
             "text-wrap": "wrap",
@@ -50,8 +50,8 @@ export function ProofGraph({ session }: { session: SessionView }) {
           selector: "edge",
           style: {
             width: 1.5,
-            "line-color": "#475569",
-            "target-arrow-color": "#475569",
+            "line-color": "#94a3b8",
+            "target-arrow-color": "#94a3b8",
             "target-arrow-shape": "triangle",
             "curve-style": "bezier",
           },
@@ -65,9 +65,9 @@ export function ProofGraph({ session }: { session: SessionView }) {
   }, [proof, session.trial_evaluation]);
 
   return (
-    <section className="panel" aria-labelledby="proof-graph-title">
-      <p className="eyebrow">FILTERED PROOF PATH</p>
-      <h2 id="proof-graph-title" className="panel-title">Proof graph</h2>
+    <section className="panel proof-graph" aria-labelledby="proof-graph-title">
+      <p className="eyebrow">필터된 근거 경로 · FILTERED PROOF PATH</p>
+      <h2 id="proof-graph-title" className="panel-title">Proof graph · 증명 연결</h2>
       <p className="mt-2 text-xs leading-5 text-slate-500">선택 기준의 근거 경로만 표시합니다. 전체 세션 그래프는 렌더링하지 않습니다.</p>
       <div ref={container} className="mt-3 h-56 rounded-xl bg-slate-950/70" />
     </section>

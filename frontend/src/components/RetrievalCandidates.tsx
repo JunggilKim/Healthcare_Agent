@@ -3,10 +3,10 @@ import type { RetrievalView } from "../types/api";
 export function RetrievalCandidates({ retrieval }: { retrieval: RetrievalView }) {
   const selected = new Set(retrieval.selected_for_compilation);
   return (
-    <section className="panel" aria-label="Hybrid retrieval candidates">
+    <section className="panel retrieval-candidates" aria-label="Hybrid retrieval candidates">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="eyebrow">BOUNDED HYBRID RETRIEVAL</p>
+          <p className="eyebrow">제한된 하이브리드 검색 · BOUNDED HYBRID RETRIEVAL</p>
           <h2 className="panel-title">20 retained candidates · top 8 selected</h2>
         </div>
         <p className="text-xs text-slate-500">

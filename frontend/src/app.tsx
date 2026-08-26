@@ -17,12 +17,14 @@ import {
   type SessionCredentials,
 } from "./api/client";
 import { AgentTimeline, type StageState } from "./components/AgentTimeline";
+import { EmptyState } from "./components/ClinicalUI";
 import { CriterionMatrix } from "./components/CriterionMatrix";
 import { Disclaimer } from "./components/Disclaimer";
 import { QuestionPanel } from "./components/QuestionPanel";
 import { ResearcherView } from "./components/ResearcherView";
 import { RetrievalCandidates } from "./components/RetrievalCandidates";
 import { TrialCard } from "./components/TrialCard";
+import { ko } from "./lib/locale";
 import { retrievalSchema, type RetrievalView, type SessionView } from "./types/api";
 
 const ProofGraph = lazy(() =>
@@ -60,9 +62,9 @@ function initialStages(): Record<string, StageState> {
 
 function AboutPage() {
   return (
-    <main className="min-h-screen bg-slate-950 px-6 py-16 text-slate-100">
-      <article className="mx-auto max-w-3xl">
-        <Link className="text-sm font-bold text-cyan-300" to="/">← Demo로 돌아가기</Link>
+    <main className="about-page min-h-screen px-6 py-16">
+      <article className="about-card mx-auto max-w-3xl">
+        <Link className="text-sm font-bold text-blue-700" to="/">← 데모로 돌아가기</Link>
         <p className="eyebrow mt-12">ABOUT THE RESEARCH PROTOTYPE</p>
         <h1 className="mt-4 text-4xl font-black">TRIAL-OPT</h1>
         <p className="mt-6 text-lg leading-8 text-slate-300">불완전한 환자 설명을 진단으로 채우지 않고, 임상시험 판정을 바꿀 가능성이 큰 기존 근거 하나를 결정론적으로 선택하는 연구 프로토타입입니다.</p>
@@ -81,6 +83,7 @@ export function App() {
     const token = sessionStorage.getItem(`trial-opt:${match[1]}`);
     return token ? { sessionId: match[1], token } : null;
   });
+  const restorePending = useRef(Boolean(credentials));
   const [session, setSession] = useState<SessionView | null>(null);
   const [retrieval, setRetrieval] = useState<RetrievalView | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,6 +105,10 @@ export function App() {
   const cancelledForFallback = useRef(false);
   const casesQuery = useQuery({ queryKey: ["demo-cases"], queryFn: readDemoCases });
   const configQuery = useQuery({ queryKey: ["public-config"], queryFn: readPublicConfig });
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [location.pathname]);
 
   const identifierRanges = useMemo(() => {
     const patterns = [
@@ -132,7 +139,8 @@ export function App() {
             (identifierRanges.length === 0 || identifierAcknowledged))));
 
   useEffect(() => {
-    if (!credentials || session) return;
+    if (!restorePending.current || !credentials || session) return;
+    restorePending.current = false;
     void readSession(credentials)
       .then((restored) => {
         setSession(restored);
@@ -362,90 +370,95 @@ export function App() {
   if (location.pathname === "/about") return <AboutPage />;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 px-6 py-2 backdrop-blur">
-        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-4">
-          <Link to="/" className="group">
-            <p className="text-lg font-black tracking-tight group-hover:text-cyan-200">TRIAL-OPT</p>
-            <p className="text-[0.68rem] text-slate-500">Proof-carrying active evidence acquisition</p>
+    <main className="app-shell min-h-screen" aria-busy={busy}>
+      <header className="app-header sticky top-0 z-20">
+        <div className="app-header-inner mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-4">
+          <Link to="/" className="brand-lockup group">
+            <p className="brand-name">{ko.product.name}</p>
+            <p className="brand-descriptor">{ko.product.descriptor}</p>
           </Link>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mode-badge">{session?.mode === "snapshot" || !session ? "SNAPSHOT DEMO" : session.mode.toUpperCase()}</span>
-            <span className="mode-badge">DATA · 2026-08-11 09:00 UTC</span>
-            <span className="mode-badge">MODEL · CACHED / $0.000</span>
-            {degradationCodes.length ? <span className="degraded-badge">DEGRADED · {degradationCodes.length}</span> : null}
+          <div className="header-meta flex flex-wrap items-center gap-2">
+            <span className="mode-badge">{session?.mode === "snapshot" || !session ? ko.mode.snapshot : ko.mode.live}</span>
+            <span className="mode-badge">데이터 · DATA 2026-08-11</span>
+            <span className="mode-badge hidden sm:inline-flex">모델 · CACHED / $0.000</span>
+            {degradationCodes.length ? <span className="degraded-badge">성능 저하 · DEGRADED {degradationCodes.length}</span> : null}
             <Link className="secondary-button px-3 py-2" to="/about">About</Link>
           </div>
         </div>
       </header>
 
       {!session ? (
-        <section className="mx-auto max-w-[1320px] px-6 py-10">
-          <div className="grid gap-8 xl:grid-cols-[0.82fr_1.18fr]">
-            <div className="flex flex-col justify-center">
+        <section className="landing-shell mx-auto max-w-[1320px] px-6 py-10">
+          <div className="landing-grid grid gap-8 xl:grid-cols-[0.96fr_1.04fr]">
+            <div className="landing-hero flex flex-col justify-center">
               <p className="eyebrow">2026 HEALTHCARE AGENTIC AI CHALLENGE</p>
               <h1 className="mt-4 text-5xl font-black leading-[1.04] tracking-tight sm:text-6xl">추측하지 않고,<br />확인할 근거를 선택합니다.</h1>
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300">검색 가설과 자격 판정 근거를 분리하고, 재생 가능한 criterion proof를 만든 뒤 결정 가치가 가장 큰 기존 정보 한 가지만 요청합니다.</p>
+              <ol className="landing-principles" aria-label="TRIAL-OPT 데모 흐름">
+                <li><span>01</span><div><strong>근거를 분리</strong><small>Retrieval hypothesis ≠ admissible evidence</small></div></li>
+                <li><span>02</span><div><strong>증명을 검증</strong><small>Criterion Proof · Evidence Firewall · PV-012</small></div></li>
+                <li><span>03</span><div><strong>다음 질문을 선택</strong><small>새 검사가 아닌 기존 기록 한 가지를 요청</small></div></li>
+              </ol>
               <div className="mt-6"><Disclaimer /></div>
             </div>
 
-            <section className="panel border-cyan-400/30 p-6" aria-labelledby="input-title">
+            <section className="panel pre-screen-card" aria-labelledby="input-title">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><p className="eyebrow">START A PRE-SCREEN</p><h2 id="input-title" className="panel-title">Synthetic/public input only</h2></div>
-                <div className="flex rounded-xl bg-slate-950 p-1">
-                  {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? "Snapshot Demo" : "Live Mode"}</button>)}
+                <div><p className="eyebrow">START A PRE-SCREEN</p><h2 id="input-title" className="panel-title">사전 선별 시작</h2><p className="section-description">공개 또는 합성 데이터만 사용</p></div>
+                <div className="segmented-control flex rounded-xl p-1">
+                  {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? ko.mode.snapshot : ko.mode.live}</button>)}
                 </div>
               </div>
-              {mode === "live" ? <p className="mt-3 rounded-xl border border-amber-300/30 bg-amber-100/5 p-3 text-sm text-amber-100">{configQuery.data?.live_available ? "Live Mode 활성화됨 · first-party Google Cloud ADC와 비용 guard를 사용합니다." : "Live Mode는 Google Cloud ADC·결제·quota 외부 검증 전까지 비활성입니다. Snapshot은 계속 사용할 수 있습니다."}</p> : null}
-              <div className="mt-5 flex gap-2 border-b border-slate-800 pb-3">
-                <button className={`tab-button ${inputMode === "seed" ? "tab-active" : ""}`} onClick={() => setInputMode("seed")}>Organizer seed</button>
-                <button className={`tab-button ${inputMode === "text" ? "tab-active" : ""}`} onClick={() => setInputMode("text")}>Free text</button>
+              {mode === "live" ? <p className="runtime-banner runtime-warning mt-3">{configQuery.data?.live_available ? "라이브 모드 활성화 · first-party Google Cloud ADC와 비용 guard를 사용합니다." : "라이브 모드는 Google Cloud ADC·결제·quota 외부 검증 전까지 비활성입니다. 스냅샷 데모는 계속 사용할 수 있습니다."}</p> : null}
+              <div className="input-tabs mt-5 flex gap-2 pb-3">
+                <button className={`tab-button ${inputMode === "seed" ? "tab-active" : ""}`} onClick={() => setInputMode("seed")}>주최자 시드 · Organizer seed</button>
+                <button className={`tab-button ${inputMode === "text" ? "tab-active" : ""}`} onClick={() => setInputMode("text")}>자유 입력 · Free text</button>
               </div>
               {inputMode === "seed" ? (
                 <div className="mt-4 grid max-h-64 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                   {(casesQuery.data ?? []).map((item) => (
                     <button key={item.id} onClick={() => setSelectedCase(item.id)} className={`seed-card ${selectedCase === item.id ? "seed-card-active" : ""}`}>
-                      <span className="flex items-center justify-between"><strong>{item.id}</strong><span className={item.has_full_snapshot ? "text-emerald-300" : "text-slate-500"}>{item.has_full_snapshot ? "FULL" : "DOMAIN ONLY"}</span></span>
+                      <span className="flex items-center justify-between"><strong>{item.id}</strong><span className={item.has_full_snapshot ? "text-emerald-300" : "text-slate-500"}>{item.has_full_snapshot ? "전체 스냅샷 · FULL" : "도메인 경로 · DOMAIN ONLY"}</span></span>
                       <span className="mt-2 line-clamp-2 text-left text-xs leading-5 text-slate-400">{item.text}</span>
                     </button>
                   ))}
                 </div>
               ) : (
                 <div className="mt-4">
-                  <label className="text-sm font-bold" htmlFor="patient-text">Public or synthetic patient description</label>
-                  <textarea id="patient-text" className="mt-2 min-h-32 w-full rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm" maxLength={12000} value={patientText} onChange={(event) => { setPatientText(event.target.value); setIdentifierAcknowledged(false); }} />
+                  <label className="text-sm font-bold" htmlFor="patient-text">공개 또는 합성 환자 설명 · Public or synthetic patient description</label>
+                  <textarea id="patient-text" className="clinical-input mt-2 min-h-32 w-full p-3 text-sm" maxLength={12000} value={patientText} onChange={(event) => { setPatientText(event.target.value); setIdentifierAcknowledged(false); }} />
                   <label className="mt-3 flex items-start gap-3 text-sm leading-6 text-slate-300"><input type="checkbox" className="mt-1" checked={confirmedSynthetic} onChange={(event) => setConfirmedSynthetic(event.target.checked)} />이 입력은 공개 또는 합성 데이터이며 실제 환자 정보가 포함되지 않았습니다.</label>
                   {identifierRanges.length ? <div role="alertdialog" aria-label="잠재적 식별자 경고" className="mt-3 rounded-xl border border-rose-300/40 bg-rose-300/10 p-4"><p className="font-bold text-rose-200">잠재적 식별자 패턴을 확인하세요</p><ul className="mt-2 text-xs text-slate-300">{identifierRanges.map((item, index) => <li key={`${item.category}-${index}`}>{item.category} · characters {item.start}–{item.end}</li>)}</ul><label className="mt-3 flex gap-2 text-xs"><input type="checkbox" checked={identifierAcknowledged} onChange={(event) => setIdentifierAcknowledged(event.target.checked)} />합성 placeholder임을 다시 확인합니다.</label></div> : null}
                 </div>
               )}
               <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
-                <label className="text-xs font-bold text-slate-400">Evaluation date<input type="date" value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} className="mt-1 block w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white" /></label>
+                <label className="text-xs font-bold text-slate-400">평가 기준일 · Evaluation date<input type="date" value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} className="clinical-input mt-1 block w-full px-3 py-2 text-sm" /></label>
                 <button className="primary-button self-end" disabled={!canStart} onClick={() => void start()}>{busy ? "분석 중…" : mode === "live" ? "Live 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} Snapshot 분석 시작` : "Full snapshot 준비 중"}</button>
               </div>
               <p aria-live="polite" className="mt-3 text-center text-xs text-slate-500">{statusText}</p>
-              {liveStalled || (mode === "live" && busy && degradationCodes.length) ? <div role="status" className="mt-3 rounded-xl border border-amber-300/40 bg-amber-100/10 p-3 text-sm text-amber-100"><p>{liveStalled ? "Live 단계가 지연되고 있습니다." : "Live 의존성 강등 이벤트를 받았습니다."} 임의 입력은 Snapshot에 자동 매핑하지 않습니다.</p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>현재 요청을 중단하고 별도 S004 Snapshot 준비</button></div> : null}
+              {liveStalled || (mode === "live" && busy && degradationCodes.length) ? <div role="status" className="runtime-banner runtime-warning mt-3"><p>{liveStalled ? "Live 단계가 지연되고 있습니다." : "Live 의존성 강등 이벤트를 받았습니다."} 임의 입력은 Snapshot에 자동 매핑하지 않습니다.</p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>현재 요청을 중단하고 별도 S004 Snapshot 준비</button></div> : null}
               {error ? <p role="alert" className="mt-3 text-sm text-rose-300">{error}</p> : null}
             </section>
           </div>
         </section>
       ) : (
-        <div className="mx-auto max-w-[1500px] px-5 py-3">
-          {degradationCodes.length ? <div role="status" className="mb-4 rounded-xl border border-amber-300/40 bg-amber-100/10 px-4 py-3 text-sm text-amber-100"><p>Partial results preserved · {degradationCodes.join(" · ")} · Snapshot/template fallback active</p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>별도 S004 Snapshot 시작</button></div> : null}
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-2">
+        <div className="workspace-shell mx-auto max-w-[1500px] px-5 py-4">
+          {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>부분 결과 보존 · Partial results preserved</strong> · {degradationCodes.join(" · ")} · Snapshot/template fallback active</p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>별도 S004 Snapshot 시작</button></div> : null}
+          <div className="workspace-toolbar mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-2">
             <p className="text-sm text-slate-300">{statusText}</p>
-            <div className="flex flex-wrap gap-2"><button className="secondary-button py-2" onClick={() => void replay()}>Replay Proof</button><button className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : "Persistence degraded; durable export is unavailable."} onClick={() => credentials && void exportReport(credentials)}>Export report</button><button className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>Reset session</button><button className="secondary-button py-2 text-rose-200" disabled={busy} onClick={() => void deleteCurrentSession()}>Delete session</button></div>
+            <div className="flex flex-wrap gap-2"><button aria-label="Replay Proof" className="secondary-button py-2" onClick={() => void replay()}>{ko.action.replay}</button><button aria-label="Export report" className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : "Persistence degraded; durable export is unavailable."} onClick={() => credentials && void exportReport(credentials)}>{ko.action.export}</button><button aria-label="Reset session" className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>{ko.action.reset}</button><button aria-label="Delete session" className="danger-button py-2" disabled={busy} onClick={() => void deleteCurrentSession()}>{ko.action.delete}</button></div>
           </div>
           {replayStatus ? <p aria-live="polite" className="mb-4 rounded-xl bg-emerald-300/10 p-3 text-sm text-emerald-200">{replayStatus}</p> : null}
           {showDemoTools ? <section className="mb-4 rounded-xl border border-dashed border-fuchsia-300/40 bg-fuchsia-300/5 p-3" aria-label="Failure simulation controls"><p className="text-xs font-bold text-fuchsia-200">REHEARSAL ONLY · FAILURE SIMULATION</p><div className="mt-2 flex flex-wrap gap-2">{["GEMINI_UNAVAILABLE", "CTGOV_UNAVAILABLE", "EMBEDDING_UNAVAILABLE"].map((code) => <button key={code} className="secondary-button px-3 py-2 text-xs" onClick={() => toggleFailure(code)}>{degradationCodes.includes(code) ? "✓ " : ""}{code}</button>)}</div></section> : null}
 
-          <div className="workspace-grid workspace-primary">
+          <div className={`workspace-grid workspace-primary ${tab === "patient" ? "" : "workspace-primary-evidence"}`}>
             <div className="flex min-h-0 flex-col gap-3"><AgentTimeline states={stages} /><QuestionPanel session={session} busy={busy} onAnswer={(branch) => void answer(branch)} /></div>
             <div className="min-h-0 space-y-3 overflow-y-auto"><TrialCard session={session} /><section className="panel p-4"><p className="eyebrow">PATIENT SOURCE</p><p className="mt-2 text-sm leading-6 text-slate-300">{session.patient_text}</p></section></div>
-            <div className="flex min-h-0 flex-col gap-3"><section className="panel border-amber-300/30 p-3"><p className="eyebrow text-amber-300">EVIDENCE FIREWALL</p><h2 className="mt-1 text-sm font-bold">Imaging suspicion ≠ pathology confirmation</h2><p className="mt-1 text-xs leading-4 text-slate-400">Bladder cancer remains a Grade-H retrieval hypothesis. PV-007 confirms no hypothesis enters a hard decision.</p></section><CriterionMatrix session={session} /></div>
+            <div className="flex min-h-0 flex-col gap-3"><section className="panel firewall-panel"><p className="eyebrow">근거 방화벽 · EVIDENCE FIREWALL</p><h2>Imaging suspicion ≠ pathology confirmation</h2><p>방광암은 Grade-H 검색 가설로 유지됩니다. PV-007은 가설이 hard decision에 들어가지 않음을 검증합니다.</p></section><CriterionMatrix session={session} /></div>
           </div>
 
-          <nav className="mt-3 flex gap-1 rounded-xl border border-slate-800 bg-slate-900/70 p-1" aria-label="Workspace evidence tabs">{(["patient", "research", "experiment"] as const).map((item) => <button key={item} onClick={() => setTab(item)} className={`workspace-tab ${tab === item ? "workspace-tab-active" : ""}`}>{item === "patient" ? "Patient Summary" : item === "research" ? "Researcher View" : "Experiment Evidence"}</button>)}</nav>
-          <div className="mt-4"><Suspense fallback={<section className="panel text-sm text-slate-300">Evidence view loading…</section>}>{tab === "patient" ? <div className="grid gap-4 xl:grid-cols-[1fr_0.8fr]"><ProofGraph session={session} />{retrieval ? <RetrievalCandidates retrieval={retrieval} /> : null}</div> : tab === "research" ? <ResearcherView session={session} /> : <ExperimentEvidence />}</Suspense></div>
+          <nav className="workspace-tabs mt-3 flex gap-1 p-1" aria-label="Workspace evidence tabs">{(["patient", "research", "experiment"] as const).map((item) => <button aria-label={item === "patient" ? "Patient Summary" : item === "research" ? "Researcher View" : "Experiment Evidence"} key={item} onClick={() => setTab(item)} className={`workspace-tab ${tab === item ? "workspace-tab-active" : ""}`}>{item === "patient" ? "환자·판정" : item === "research" ? "연구 근거" : "실험 근거"}<small>{item === "patient" ? "Patient Summary" : item === "research" ? "Researcher View" : "Experiment Evidence"}</small></button>)}</nav>
+          <div className="evidence-view mt-4"><Suspense fallback={<section className="panel runtime-loading">근거 화면 불러오는 중 · Evidence view loading…</section>}>{tab === "patient" ? <div className="grid gap-4 xl:grid-cols-[1fr_0.8fr]"><ProofGraph session={session} />{retrieval ? <RetrievalCandidates retrieval={retrieval} /> : <EmptyState>검색 후보가 세션에 기록되지 않았습니다. 현재 판정과 부분 proof는 그대로 유지됩니다.</EmptyState>}</div> : tab === "research" ? <ResearcherView session={session} /> : <ExperimentEvidence />}</Suspense></div>
           <div className="mt-5"><Disclaimer /></div>
         </div>
       )}
