@@ -17,19 +17,19 @@ export function ProofGraph({ session }: { session: SessionView }) {
     const graph = cytoscape({
       container: container.current,
       elements: [
-        { data: { id: "source", label: "Patient source span" } },
-        { data: { id: "fact", label: evidenceLabel } },
-        { data: { id: "criterion", label: "Eligibility criterion" } },
-        { data: { id: "verdict", label: proof.final_verdict } },
-        { data: { id: "decision", label: session.trial_evaluation.decision } },
-        { data: { id: "rank", label: "Rank #1" } },
+        { data: { id: "source", label: "Patient source span" }, position: { x: 80, y: 80 } },
+        { data: { id: "fact", label: evidenceLabel }, position: { x: 230, y: 80 } },
+        { data: { id: "criterion", label: "Eligibility criterion" }, position: { x: 380, y: 80 } },
+        { data: { id: "verdict", label: proof.final_verdict }, position: { x: 530, y: 80 } },
+        { data: { id: "decision", label: session.trial_evaluation.decision }, position: { x: 680, y: 80 } },
+        { data: { id: "rank", label: "Rank #1" }, position: { x: 830, y: 80 } },
         { data: { source: "source", target: "fact", label: "EXTRACTED_FROM" } },
         { data: { source: "fact", target: "criterion", label: "SUPPORTS" } },
         { data: { source: "criterion", target: "verdict", label: "EVALUATES" } },
         { data: { source: "verdict", target: "decision", label: "AGGREGATES_TO" } },
         { data: { source: "decision", target: "rank", label: "CONTRIBUTES_TO_RANK" } },
       ],
-      layout: { name: "breadthfirst", directed: true, padding: 24, spacingFactor: 1.15 },
+      layout: { name: "preset", fit: true, padding: 42 },
       style: [
         {
           selector: "node",
