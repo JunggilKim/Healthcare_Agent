@@ -14,7 +14,11 @@ export type StageState = "pending" | "running" | "completed" | "degraded" | "fai
 
 export function AgentTimeline({ states }: { states: Record<string, StageState> }) {
   return (
-    <section aria-labelledby="agent-timeline-title" className="panel timeline-panel shrink-0">
+    <section
+      aria-labelledby="agent-timeline-title"
+      className="panel timeline-panel shrink-0"
+      tabIndex={0}
+    >
       <p className="eyebrow">ROLE-SEPARATED PIPELINE</p>
       <h2 id="agent-timeline-title" className="panel-title">7단계 Agent Timeline</h2>
       <ol className="stage-list">

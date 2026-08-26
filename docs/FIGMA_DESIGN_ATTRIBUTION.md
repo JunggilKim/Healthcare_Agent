@@ -16,16 +16,14 @@ All TRIAL-OPT product copy, layouts, components, and code in this repository wer
 
 ## Design file structure
 
-| Figma page | Deliverable |
+| Figma V2 page | Deliverable |
 | --- | --- |
-| `00 Cover` | Product framing and safety scope |
-| `01 Foundations` | Light clinical color, typography, spacing, radius, elevation, and state tokens |
-| `02 Components` | Button, badge, field, tabs, trial card, pipeline stage, criterion table, evidence inspector, graph/chart container, and dialog variants |
-| `03 Desktop Screens` | 1440×900 Landing, Trial Workspace, Research Evidence, and Experiment Evidence screens (`10:2`–`10:5`) |
-| `04 Mobile & States` | 390×844 Landing and Workspace (`15:2`, `15:3`) plus loading/error/degraded/fallback/empty board (`15:4`) |
-| `05 Mapping & Attribution` | Figma-to-code mapping, source roles, license, and attribution (`20:2`) |
+| `Components V2` | Status Badge, Command Button, Timeline Stage, Metric Tile, Criterion Row, Retrieval Candidate Row, Evidence Node, Trial Intelligence Hero, Chart Container, Confirm Dialog, App Navigation, and Command Bar (`26:27`) |
+| `Desktop V2` | 1440×900 Landing (`40:2`), Trial Workspace (`43:2`), Research Evidence (`46:48`), and Experiment Evidence (`49:94`) |
+| `Mobile & States V2` | Loading/error/degraded/fallback/empty gallery (`54:2`), 390px Landing (`57:2`), and Workspace (`60:2`) |
+| `05 Mapping & Attribution` | Figma-to-code mapping, source roles, license, and attribution retained alongside the V2 pages |
 
-The file contains 19 primitive variables, 18 semantic variables, 13 dimension variables, nine Noto Sans KR text styles, and two elevation styles. Components use Auto Layout and variant properties rather than detached screen-only copies.
+The V2 system contains 67 variables, 14 Noto Sans KR text styles, and four effect styles. Components use Auto Layout, reusable component properties, and semantic aliases rather than detached screen-only copies. The legacy first-pass pages remain archived in the same file for design-history comparison.
 
 ## Figma-to-code mapping
 
@@ -42,7 +40,12 @@ The file contains 19 primitive variables, 18 semantic variables, 13 dimension va
 | Research Evidence | `frontend/src/components/ResearcherView.tsx` | Facts, conflicts, hypotheses, source provenance and firewall semantics |
 | Experiment Evidence | `frontend/src/components/ExperimentEvidence.tsx` | Committed evaluation artifact and provisional/non-acceptance caveats |
 | Runtime states | `frontend/src/app.tsx`, `ClinicalUI.tsx`, `.runtime-*` | loading, error, degraded, fallback and empty without discarding partial proof |
+| App Navigation / Command Bar | `frontend/src/app.tsx`, `.clinical-sidebar`, `.workspace-command-bar`, `.workspace-toolbar` | active workspace context plus replay, export, reset and delete commands |
+| Metric Tile / Chart Container | `frontend/src/components/ExperimentEvidence.tsx`, `.metric-chip`, `.experiment-chart` | committed artifact provenance and provisional/non-acceptance labeling |
+| Confirm Dialog | `frontend/src/app.tsx`, `.dialog-*` | destructive reset/delete intent and keyboard focus behavior |
 | Design tokens | `frontend/src/styles/index.css` | Navy/blue/teal clinical palette; amber/rose restricted to warning/error/risk |
+
+Direct Figma Code Connect publishing was attempted on the V2 component page, but the connected Figma account does not have the required Organization/Enterprise Dev or Full seat. The mapping table above and the `05 Mapping & Attribution` Figma page are therefore the current mapping source of truth; no unpublished or unverifiable Code Connect registration is claimed.
 
 ## Korean display glossary and source preservation
 

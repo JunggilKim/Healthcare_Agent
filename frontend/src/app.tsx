@@ -367,17 +367,23 @@ export function App() {
     setStages((current) => ({ ...current, [stage]: "degraded" }));
   }
 
+  function selectWorkspaceTab(nextTab: "patient" | "research" | "experiment") {
+    setTab(nextTab);
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
+  }
+
   if (location.pathname === "/about") return <AboutPage />;
 
   return (
     <main className="app-shell min-h-screen" aria-busy={busy}>
-      <header className="app-header sticky top-0 z-20">
+      <header className={`app-header sticky top-0 z-20 ${session ? "workspace-command-bar" : "landing-product-bar"}`}>
         <div className="app-header-inner mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-4">
           <Link to="/" className="brand-lockup group">
             <p className="brand-name">{ko.product.name}</p>
             <p className="brand-descriptor">{ko.product.descriptor}</p>
           </Link>
           <div className="header-meta flex flex-wrap items-center gap-2">
+            {session ? <span className="workspace-context">{inputMode === "seed" ? selectedCase : "FREE TEXT"} · {session.state}</span> : null}
             <span className="mode-badge">{session?.mode === "snapshot" || !session ? ko.mode.snapshot : ko.mode.live}</span>
             <span className="mode-badge">데이터 · DATA 2026-08-11</span>
             <span className="mode-badge hidden sm:inline-flex">모델 · CACHED / $0.000</span>
@@ -391,20 +397,29 @@ export function App() {
         <section className="landing-shell mx-auto max-w-[1320px] px-6 py-10">
           <div className="landing-grid grid gap-8 xl:grid-cols-[0.96fr_1.04fr]">
             <div className="landing-hero flex flex-col justify-center">
-              <p className="eyebrow">2026 HEALTHCARE AGENTIC AI CHALLENGE</p>
-              <h1 className="mt-4 text-5xl font-black leading-[1.04] tracking-tight sm:text-6xl">추측하지 않고,<br />확인할 근거를 선택합니다.</h1>
-              <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300">검색 가설과 자격 판정 근거를 분리하고, 재생 가능한 criterion proof를 만든 뒤 결정 가치가 가장 큰 기존 정보 한 가지만 요청합니다.</p>
-              <ol className="landing-principles" aria-label="TRIAL-OPT 데모 흐름">
-                <li><span>01</span><div><strong>근거를 분리</strong><small>Retrieval hypothesis ≠ admissible evidence</small></div></li>
-                <li><span>02</span><div><strong>증명을 검증</strong><small>Criterion Proof · Evidence Firewall · PV-012</small></div></li>
-                <li><span>03</span><div><strong>다음 질문을 선택</strong><small>새 검사가 아닌 기존 기록 한 가지를 요청</small></div></li>
-              </ol>
-              <div className="mt-6"><Disclaimer /></div>
+              <p className="eyebrow">PROOF-CARRYING ACTIVE EVIDENCE ACQUISITION</p>
+              <h1 className="mt-4 text-5xl font-black leading-[1.04] tracking-tight sm:text-6xl">추측하지 않고,<br />다음 확인 행동을 설계합니다.</h1>
+              <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300">AI가 적합성을 단정하지 않습니다. 현재 근거의 빈틈을 보여주고, 가장 정보 가치가 높은 기존 기록 한 가지를 선택해 proof를 다시 평가합니다.</p>
+              <dl className="landing-stats" aria-label="Snapshot 데모 요약">
+                <div><dt>Agent stages</dt><dd>7</dd></div>
+                <div><dt>Trials retained</dt><dd>20</dd></div>
+                <div><dt>Proof packets</dt><dd>7</dd></div>
+              </dl>
+              <section className="landing-flow-preview" aria-label="Evidence lineage preview">
+                <div className="landing-flow-heading"><strong>한 질문이 proof를 어떻게 바꾸는지 보여줍니다.</strong><span>Evidence lineage preview</span></div>
+                <ol>
+                  <li><small>SOURCE</small><strong>Registry criterion</strong></li>
+                  <li><small>PROOF</small><strong>KRAS G12C</strong></li>
+                  <li><small>QUESTION</small><strong>병리결과 확인</strong></li>
+                  <li><small>VERDICT</small><strong>proof 재평가</strong></li>
+                </ol>
+              </section>
+              <div className="landing-disclaimer"><Disclaimer /></div>
             </div>
 
             <section className="panel pre-screen-card" aria-labelledby="input-title">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><p className="eyebrow">START A PRE-SCREEN</p><h2 id="input-title" className="panel-title">사전 선별 시작</h2><p className="section-description">공개 또는 합성 데이터만 사용</p></div>
+                <div><p className="eyebrow">PRE-SCREEN CONSOLE</p><h2 id="input-title" className="panel-title">사전 선별 콘솔</h2><p className="section-description">공개 또는 합성 데이터만 사용</p></div>
                 <div className="segmented-control flex rounded-xl p-1">
                   {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? ko.mode.snapshot : ko.mode.live}</button>)}
                 </div>
@@ -442,7 +457,19 @@ export function App() {
           </div>
         </section>
       ) : (
-        <div className="workspace-shell mx-auto max-w-[1500px] px-5 py-4">
+        <div className="session-layout">
+          <aside className="clinical-sidebar" aria-label="Clinical intelligence navigation">
+            <div className="sidebar-brand"><span aria-hidden="true">+</span><strong>TRIAL-OPT</strong></div>
+            <div className="sidebar-case"><small>{inputMode === "seed" ? "DEMO CASE" : "FREE TEXT"}</small><strong>{inputMode === "seed" ? selectedCase : "Custom input"} · {session.mode.toUpperCase()}</strong><span>{session.state} · proof session</span></div>
+            <nav>
+              <Link to="/" className="sidebar-nav-item"><span aria-hidden="true">⌂</span><span><strong>사전 선별</strong><small>Pre-screen</small></span></Link>
+              <button className={`sidebar-nav-item ${tab === "patient" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("patient")}><span aria-hidden="true">◇</span><span><strong>Trial Workspace</strong><small>Workspace</small></span></button>
+              <button className={`sidebar-nav-item ${tab === "research" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("research")}><span aria-hidden="true">◎</span><span><strong>연구 근거</strong><small>Research</small></span></button>
+              <button className={`sidebar-nav-item ${tab === "experiment" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("experiment")}><span aria-hidden="true">▥</span><span><strong>실험 근거</strong><small>Experiment</small></span></button>
+            </nav>
+            <p className="sidebar-disclaimer">Research prototype<br />의료 조언이 아닙니다.</p>
+          </aside>
+          <div className="workspace-shell mx-auto max-w-[1500px] px-5 py-4">
           {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>부분 결과 보존 · Partial results preserved</strong> · {degradationCodes.join(" · ")} · Snapshot/template fallback active</p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>별도 S004 Snapshot 시작</button></div> : null}
           <div className="workspace-toolbar mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-2">
             <p className="text-sm text-slate-300">{statusText}</p>
@@ -457,9 +484,10 @@ export function App() {
             <div className="flex min-h-0 flex-col gap-3"><section className="panel firewall-panel"><p className="eyebrow">근거 방화벽 · EVIDENCE FIREWALL</p><h2>Imaging suspicion ≠ pathology confirmation</h2><p>방광암은 Grade-H 검색 가설로 유지됩니다. PV-007은 가설이 hard decision에 들어가지 않음을 검증합니다.</p></section><CriterionMatrix session={session} /></div>
           </div>
 
-          <nav className="workspace-tabs mt-3 flex gap-1 p-1" aria-label="Workspace evidence tabs">{(["patient", "research", "experiment"] as const).map((item) => <button aria-label={item === "patient" ? "Patient Summary" : item === "research" ? "Researcher View" : "Experiment Evidence"} key={item} onClick={() => setTab(item)} className={`workspace-tab ${tab === item ? "workspace-tab-active" : ""}`}>{item === "patient" ? "환자·판정" : item === "research" ? "연구 근거" : "실험 근거"}<small>{item === "patient" ? "Patient Summary" : item === "research" ? "Researcher View" : "Experiment Evidence"}</small></button>)}</nav>
-          <div className="evidence-view mt-4"><Suspense fallback={<section className="panel runtime-loading">근거 화면 불러오는 중 · Evidence view loading…</section>}>{tab === "patient" ? <div className="grid gap-4 xl:grid-cols-[1fr_0.8fr]"><ProofGraph session={session} />{retrieval ? <RetrievalCandidates retrieval={retrieval} /> : <EmptyState>검색 후보가 세션에 기록되지 않았습니다. 현재 판정과 부분 proof는 그대로 유지됩니다.</EmptyState>}</div> : tab === "research" ? <ResearcherView session={session} /> : <ExperimentEvidence />}</Suspense></div>
-          <div className="mt-5"><Disclaimer /></div>
+          <nav className="workspace-tabs mt-3 flex gap-1 p-1" aria-label="Workspace evidence tabs">{(["patient", "research", "experiment"] as const).map((item) => <button aria-label={item === "patient" ? "Patient Summary" : item === "research" ? "Researcher View" : "Experiment Evidence"} key={item} onClick={() => selectWorkspaceTab(item)} className={`workspace-tab ${tab === item ? "workspace-tab-active" : ""}`}>{item === "patient" ? "환자·판정" : item === "research" ? "연구 근거" : "실험 근거"}<small>{item === "patient" ? "Patient Summary" : item === "research" ? "Researcher View" : "Experiment Evidence"}</small></button>)}</nav>
+          <div className="evidence-view mt-4"><Suspense fallback={<section className="panel runtime-loading">근거 화면 불러오는 중 · Evidence view loading…</section>}>{tab === "patient" ? <div className="grid gap-4 xl:grid-cols-[1fr_0.8fr]"><ProofGraph session={session} />{retrieval ? <RetrievalCandidates retrieval={retrieval} /> : <EmptyState>검색 후보가 세션에 기록되지 않았습니다. 현재 판정과 부분 proof는 그대로 유지됩니다.</EmptyState>}</div> : tab === "research" ? <div className="research-evidence-layout"><ResearcherView session={session} /><ProofGraph session={session} />{retrieval ? <RetrievalCandidates retrieval={retrieval} /> : <EmptyState>검색 후보가 세션에 기록되지 않았습니다. 현재 판정과 부분 proof는 그대로 유지됩니다.</EmptyState>}</div> : <ExperimentEvidence />}</Suspense></div>
+          <div className="workspace-disclaimer mt-5"><Disclaimer /></div>
+          </div>
         </div>
       )}
     </main>
