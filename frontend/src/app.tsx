@@ -87,7 +87,7 @@ export function App() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [retrieval, setRetrieval] = useState<RetrievalView | null>(null);
   const [busy, setBusy] = useState(false);
-  const [statusText, setStatusText] = useState("스냅샷 데모를 시작할 수 있습니다.");
+  const [statusText, setStatusText] = useState("S004 스냅샷 데모를 시작할 수 있습니다.");
   const [replayStatus, setReplayStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedCase, setSelectedCase] = useState("S004");
@@ -146,7 +146,7 @@ export function App() {
         setSession(restored);
         setDegradationCodes(restored.degradation_codes);
         setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
-        setStatusText("분석이 완료되었습니다. 다음으로 확인할 기록을 선택했습니다.");
+        setStatusText("분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.");
         const parsed = retrievalSchema.safeParse(restored.retrieval);
         if (parsed.success) setRetrieval(parsed.data);
         else if (restored.top_trial?.nct_id === "NCT05239624") {
@@ -177,7 +177,7 @@ export function App() {
     setLiveStalled(false);
     setDegradationCodes([]);
     setStages({ ...initialStages(), "Patient Evidence": "running" });
-    setStatusText("역할별 에이전트 파이프라인 실행 중…");
+    setStatusText("7단계 근거 분석을 실행하고 있습니다…");
     try {
       const nextCredentials = await createSession({
         mode,
@@ -226,7 +226,7 @@ export function App() {
       const parsedRetrieval = retrievalSchema.safeParse(nextSession.retrieval);
       if (parsedRetrieval.success) setRetrieval(parsedRetrieval.data);
       setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
-      setStatusText("분석이 완료되었습니다. 다음으로 확인할 기록을 선택했습니다.");
+      setStatusText("분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.");
       void navigate(
         `/session/${nextCredentials.sessionId}${showDemoTools ? "?demo-tools=1" : ""}`,
       );
@@ -387,7 +387,7 @@ export function App() {
           </Link>
           <div className="header-meta flex flex-wrap items-center gap-2">
             {session ? <span className="workspace-context">{inputMode === "seed" ? `${selectedCase} 데모` : "직접 입력 사례"} · 분석 완료</span> : null}
-            <span className="mode-badge">{session?.mode === "snapshot" || !session ? ko.mode.snapshotShort : ko.mode.liveShort}</span>
+            <span className="mode-badge">{!session ? ko.mode.snapshot : session.mode === "snapshot" ? ko.mode.snapshotShort : ko.mode.liveShort}</span>
             <span className="mode-badge">기준일 2026.08.11</span>
             <span className="mode-badge hidden sm:inline-flex">저장된 분석 · 비용 $0.000</span>
             {degradationCodes.length ? <span className="degraded-badge">일부 기능 제한 {degradationCodes.length}건</span> : null}
@@ -401,7 +401,7 @@ export function App() {
           <div className="landing-grid grid gap-8 xl:grid-cols-[0.96fr_1.04fr]">
             <div className="landing-hero flex flex-col justify-center">
               <p className="eyebrow">{ko.landing.eyebrow}</p>
-              <h1 className="mt-4 text-5xl font-black leading-[1.04] tracking-tight sm:text-6xl">{ko.landing.title.split("\n").map((line) => <span key={line}>{line}<br /></span>)}</h1>
+              <h1 aria-label="근거가 부족한 지점을 찾고, 다음 확인 질문을 제안합니다." className="mt-4 text-5xl font-black leading-[1.04] tracking-tight sm:text-6xl">{ko.landing.title.split("\n").map((line) => <span key={line}>{line}<br /></span>)}</h1>
               <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300">{ko.landing.description}</p>
               <dl className="landing-stats" aria-label="스냅샷 데모 구성">
                 <div><dt>분석 단계</dt><dd>7</dd></div>
@@ -409,7 +409,7 @@ export function App() {
                 <div><dt>평가 조건</dt><dd>7</dd></div>
               </dl>
               <section className="landing-flow-preview" aria-label="근거 기반 판정 흐름">
-                <div className="landing-flow-heading"><strong>하나의 답변이 판정 근거를 바꾸는 과정을 보여줍니다.</strong><span>근거 추적 흐름</span></div>
+                <div className="landing-flow-heading"><strong>답변 하나가 조건별 판정 근거를 어떻게 바꾸는지 확인하세요.</strong><span>근거 추적 흐름</span></div>
                 <ol>
                   <li><small>01</small><strong>임상시험 선정 조건</strong></li>
                   <li><small>02</small><strong>환자 기록과 대조</strong></li>
@@ -422,7 +422,7 @@ export function App() {
 
             <section className="panel pre-screen-card" aria-labelledby="input-title">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><p className="eyebrow">데모 사례 선택</p><h2 id="input-title" className="panel-title">사전 선별 시작하기</h2><p className="section-description">공개·합성 데이터만 사용하는 발표용 데모입니다.</p></div>
+                <div><p className="eyebrow">STEP 1 OF 2 · 데모 입력</p><h2 id="input-title" className="panel-title">어떤 환자 정보로 시작할까요?</h2><p className="section-description">준비된 사례를 선택하거나 환자 정보를 직접 입력하세요.</p></div>
                 <div className="segmented-control flex rounded-xl p-1">
                   {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? ko.mode.snapshot : ko.mode.live}</button>)}
                 </div>
@@ -451,7 +451,7 @@ export function App() {
               )}
               <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
                 <label className="text-xs font-bold text-slate-400">평가 기준일<input type="date" value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} className="clinical-input mt-1 block w-full px-3 py-2 text-sm" /></label>
-                <button className="primary-button self-end" disabled={!canStart} onClick={() => void start()}>{busy ? "분석 중…" : mode === "live" ? "라이브 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} 데모 분석 시작` : "전체 데모가 준비되지 않은 사례"}</button>
+                <button aria-label={busy ? "분석 중…" : mode === "live" ? "라이브 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} 데모 분석 시작` : "전체 데모가 준비되지 않은 사례"} className="primary-button self-end" disabled={!canStart} onClick={() => void start()}>{busy ? "근거 분석 중…" : mode === "live" ? "라이브 근거 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} 근거 분석 시작` : "전체 데모가 준비되지 않은 사례"}</button>
               </div>
               <p aria-live="polite" className="mt-3 text-center text-xs text-slate-500">{statusText}</p>
               {liveStalled || (mode === "live" && busy && degradationCodes.length) ? <div role="status" className="runtime-banner runtime-warning mt-3"><p>{liveStalled ? "라이브 모드의 외부 분석이 지연되고 있습니다." : "라이브 모드의 일부 외부 기능을 사용할 수 없습니다."} 직접 입력한 내용은 스냅샷 사례에 자동으로 대입하지 않습니다.</p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>현재 요청 중단 후 S004 스냅샷 데모 준비</button></div> : null}
@@ -466,7 +466,7 @@ export function App() {
             <div className="sidebar-case"><small>{inputMode === "seed" ? "데모 사례" : "직접 입력 사례"}</small><strong>{inputMode === "seed" ? selectedCase : "직접 입력"} · {session.mode === "snapshot" ? "스냅샷" : "라이브"}</strong><span>조건별 근거 평가 완료</span></div>
             <nav>
               <Link to="/" className="sidebar-nav-item"><span aria-hidden="true">⌂</span><span><strong>사전 선별</strong><small>새 사례 선택</small></span></Link>
-              <button className={`sidebar-nav-item ${tab === "patient" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("patient")}><span aria-hidden="true">◇</span><span><strong>환자·판정</strong><small>조건별 근거와 다음 질문</small></span></button>
+              <button className={`sidebar-nav-item ${tab === "patient" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("patient")}><span aria-hidden="true">◇</span><span><strong>Trial Workspace</strong><small>조건별 판정과 다음 질문</small></span></button>
               <button className={`sidebar-nav-item ${tab === "research" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("research")}><span aria-hidden="true">◎</span><span><strong>연구 근거</strong><small>질문 선택과 검색 근거</small></span></button>
               <button className={`sidebar-nav-item ${tab === "experiment" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("experiment")}><span aria-hidden="true">▥</span><span><strong>실험 근거</strong><small>평가 지표와 비교 결과</small></span></button>
             </nav>

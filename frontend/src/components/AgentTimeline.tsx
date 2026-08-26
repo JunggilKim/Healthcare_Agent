@@ -19,8 +19,8 @@ export function AgentTimeline({ states }: { states: Record<string, StageState> }
       className="panel timeline-panel shrink-0"
       tabIndex={0}
     >
-      <p className="eyebrow">7단계 분석 진행 상황</p>
-      <h2 id="agent-timeline-title" className="panel-title">근거 기반 사전 선별 과정</h2>
+      <p className="eyebrow">AGENT PIPELINE · 7단계 분석</p>
+      <h2 id="agent-timeline-title" className="panel-title">근거 기반 사전 선별 진행 상황</h2>
       <ol className="stage-list">
         {stages.map((stage, index) => {
           const state = states[stage] ?? "pending";

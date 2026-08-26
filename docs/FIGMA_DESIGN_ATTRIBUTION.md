@@ -14,6 +14,10 @@ License: [Creative Commons Attribution 4.0 International](https://creativecommon
 
 All TRIAL-OPT product copy, layouts, components, and code in this repository were created specifically for this demo. Official NCT identifiers, trial titles, registry criterion text, citations, verifier codes, and standard medical terminology remain source data and are not translated or shortened.
 
+The 2026-08-27 readability refinement also reviewed the user's duplicated Community files `Snow Dashboard UI Kit`, `Metrix SaaS Dashboard UI Kit`, and several website wireframe/start-up kits. They were used only as visual references for workspace density, card hierarchy, and responsive information order. No nodes, raster assets, icons, or source components were copied from those files, and their licenses are therefore not relied upon by this implementation.
+
+The web app self-hosts the Korean subset of Pretendard 1.3.9 in Regular, Medium, SemiBold, and Bold weights. Pretendard is distributed under the SIL Open Font License 1.1; the bundled license is preserved at `frontend/public/fonts/Pretendard-LICENSE.txt`. The connected Figma editing environment does not expose Pretendard, so Figma retains Noto Sans KR with the same size/weight/line-height hierarchy while production code uses Pretendard.
+
 ## Design file structure
 
 | Figma V2 page | Deliverable |
@@ -22,6 +26,9 @@ All TRIAL-OPT product copy, layouts, components, and code in this repository wer
 | `Desktop V2` | 1440×900 Landing (`40:2`), Trial Workspace (`43:2`), Research Evidence (`46:48`), and Experiment Evidence (`49:94`) |
 | `Mobile & States V2` | Loading/error/degraded/fallback/empty gallery (`54:2`), 390px Landing (`57:2`), and Workspace (`60:2`) |
 | `05 Mapping & Attribution` | Figma-to-code mapping, source roles, license, and attribution retained alongside the V2 pages |
+| `01 Foundations` · `V3 / UI Kit Integration & Web Typography` | UI-kit synthesis, Pretendard-to-Noto mapping, and 12/14/16px readability minimums (`65:2`) |
+| `02 Components · V2` · `V3 / Clinical Section Header` | Token-bound reusable section heading with editable eyebrow, title, and source action (`66:2`) |
+| `03 Desktop Screens · V2` · V3 screens | 1440×960 Landing / Pre-screen (`70:144`) and Trial Workspace (`67:140`) used for the final implementation pass |
 
 The V2 system contains 67 variables, 14 Noto Sans KR text styles, and four effect styles. Components use Auto Layout, reusable component properties, and semantic aliases rather than detached screen-only copies. The legacy first-pass pages remain archived in the same file for design-history comparison.
 

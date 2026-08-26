@@ -1,14 +1,14 @@
 export const ko = {
   product: {
     name: "TRIAL-OPT",
-    descriptor: "임상시험 사전 선별 데모",
-    prototypeNotice: "연구용 사전 선별 지원 데모",
+    descriptor: "임상시험 근거 분석 데모",
+    prototypeNotice: "연구용 임상시험 사전 선별 데모",
     nonClinical: "최종 임상시험 적격 판정 또는 의료 조언이 아닙니다.",
   },
   mode: {
-    snapshot: "스냅샷 데모 (Snapshot)",
+    snapshot: "스냅샷 데모 (Snapshot Demo)",
     snapshotShort: "스냅샷 데모",
-    live: "라이브 모드 (Live)",
+    live: "라이브 모드 (Live Mode)",
     liveShort: "라이브 모드",
   },
   navigation: {
@@ -18,28 +18,28 @@ export const ko = {
     experiment: "실험 근거",
   },
   action: {
-    replay: "판정 다시 검증",
-    export: "보고서 저장",
-    reset: "처음부터 다시",
+    replay: "근거 다시 검증",
+    export: "보고서 내보내기",
+    reset: "분석 초기화",
     delete: "세션 삭제",
     viewOriginal: "영어 원문 보기",
   },
   landing: {
-    eyebrow: "근거 중심 임상시험 사전 선별",
-    title: "근거가 부족한 지점을 찾고,\n다음 확인 질문을 제안합니다.",
+    eyebrow: "검증 가능한 임상시험 사전 선별",
+    title: "환자 정보에서\n검증 가능한 임상시험 근거까지",
     description:
-      "환자 설명을 임의로 보완하지 않습니다. 현재 기록으로 확인할 수 있는 조건과 아직 근거가 부족한 조건을 구분하고, 판정에 가장 도움이 되는 기존 기록 한 가지를 제안합니다.",
+      "환자 정보를 임의로 보완하지 않습니다. 현재 기록으로 확인된 조건과 근거가 부족한 조건을 나누고, 판정을 갱신하는 데 가장 유용한 다음 확인 항목을 제안합니다.",
   },
 } as const;
 
 export const stageLabels: Record<string, { ko: string; en: string }> = {
-  "Patient Evidence": { ko: "환자 정보 정리", en: "Patient Evidence" },
+  "Patient Evidence": { ko: "환자 정보 정규화", en: "Patient Evidence" },
   "Trial Retrieval": { ko: "임상시험 검색", en: "Trial Retrieval" },
-  "Protocol Compilation": { ko: "선정 기준 구조화", en: "Protocol Compilation" },
-  "Eligibility Proof": { ko: "조건별 근거 평가", en: "Eligibility Proof" },
+  "Protocol Compilation": { ko: "선정 조건 구조화", en: "Protocol Compilation" },
+  "Eligibility Proof": { ko: "적격 조건 대조", en: "Eligibility Proof" },
   "Proof Verification": { ko: "판정 근거 검증", en: "Proof Verification" },
-  Ranking: { ko: "우선순위 계산", en: "Ranking" },
-  "Next Question Optimization": { ko: "다음 질문 선택", en: "Next Question Optimization" },
+  Ranking: { ko: "후보 우선순위", en: "Ranking" },
+  "Next Question Optimization": { ko: "추가 확인 질문", en: "Next Question Optimization" },
 };
 
 export const stageStateLabels = {
