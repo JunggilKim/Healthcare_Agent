@@ -19,20 +19,19 @@ export function AgentTimeline({ states }: { states: Record<string, StageState> }
       className="panel timeline-panel shrink-0"
       tabIndex={0}
     >
-      <p className="eyebrow">ROLE-SEPARATED PIPELINE</p>
-      <h2 id="agent-timeline-title" className="panel-title">7단계 Agent Timeline</h2>
+      <p className="eyebrow">7단계 분석 진행 상황</p>
+      <h2 id="agent-timeline-title" className="panel-title">근거 기반 사전 선별 과정</h2>
       <ol className="stage-list">
         {stages.map((stage, index) => {
           const state = states[stage] ?? "pending";
           const label = stageLabels[stage];
           return (
-          <li key={stage} className={`stage-item stage-item-${state}`}>
+          <li key={stage} title={label.en} className={`stage-item stage-item-${state}`}>
             <span className={`stage-symbol stage-symbol-${state}`} aria-hidden="true">
               {state === "completed" ? "✓" : state === "failed" ? "!" : state === "degraded" ? "△" : index + 1}
             </span>
             <span className="stage-copy">
               <strong>{label.ko}</strong>
-              <small>{label.en}</small>
             </span>
             <span className="stage-state">{stageStateLabels[state]}</span>
           </li>

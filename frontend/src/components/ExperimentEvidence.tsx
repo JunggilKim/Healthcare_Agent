@@ -61,9 +61,9 @@ async function readSummary() {
 
 export function ExperimentEvidence() {
   const query = useQuery({ queryKey: ["evaluation-summary"], queryFn: readSummary });
-  if (query.isPending) return <section className="panel runtime-loading">평가 아티팩트 불러오는 중 · Evaluation artifact loading…</section>;
+  if (query.isPending) return <section className="panel runtime-loading">실험 평가 결과를 불러오고 있습니다…</section>;
   if (query.isError) {
-    return <section className="panel runtime-error">평가 아티팩트를 사용할 수 없습니다 · Evaluation artifact unavailable · no metric is imputed.</section>;
+    return <section className="panel runtime-error">실험 평가 결과를 불러오지 못했습니다. 사용할 수 없는 지표를 임의 값으로 채우지 않습니다.</section>;
   }
   const summary = query.data;
   const curve = summary.accuracy_curves.B0.map((point, index) => ({
@@ -76,18 +76,19 @@ export function ExperimentEvidence() {
     <section className="panel experiment-evidence" aria-labelledby="experiment-title">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="eyebrow">실험 근거 · EXPERIMENT EVIDENCE</p>
-          <h2 id="experiment-title" className="panel-title">커밋된 평가 아티팩트 · Committed evaluation artifact</h2>
+          <p className="eyebrow">실험 평가 결과</p>
+          <h2 id="experiment-title" className="panel-title">질문 전략과 안전장치 비교</h2>
+          <p className="section-description">저장소에 포함된 고정 시드 평가 결과를 그대로 시각화합니다.</p>
         </div>
-        <span className="mode-badge">FIXED SEED · 20260811</span>
+        <span className="mode-badge">고정 시드 · 2026.08.11</span>
       </div>
       <div className="experiment-warning">
-        <p className="font-bold">Provisional fixture smoke · release acceptance evidence 아님</p>
-        <p className="mt-1 text-xs leading-5">{summary.claim_scope}. Clinical validation: {String(summary.clinical_validation)}. Acceptance eligible: {String(summary.acceptance_eligible)}.</p>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-300">{summary.blocking_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+        <p className="font-bold">해석 범위에 주의하세요.</p>
+        <p className="mt-1 text-xs leading-5">이 결과는 발표용 고정 데이터에서 실행한 기능 점검입니다. 임상적 성능 검증이나 출시 승인 근거가 아닙니다.</p>
+        <details className="source-original"><summary>평가 범위 원문 보기</summary><div className="source-original-content"><p>{summary.claim_scope}</p><p>Clinical validation: {String(summary.clinical_validation)} · Acceptance eligible: {String(summary.acceptance_eligible)}</p><ul>{summary.blocking_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></div></details>
       </div>
       <div className="mt-4 grid gap-5 xl:grid-cols-[1fr_0.85fr]">
-        <div className="experiment-chart" aria-label="Accuracy versus questions chart">
+        <div className="experiment-chart" aria-label="질문 수에 따른 판정 정확도 변화">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={curve}>
               <CartesianGrid stroke="#d9e2ec" />
@@ -102,27 +103,27 @@ export function ExperimentEvidence() {
           </ResponsiveContainer>
         </div>
         <div className="grid grid-cols-2 gap-3 text-xs">
-          <p className="metric-chip"><span>Criterion Macro-F1</span><strong>{summary.metrics.criterion_macro_f1_self_consistency.toFixed(3)}</strong><small>AST self-consistency only</small></p>
-          <p className="metric-chip"><span>Unsupported hard decisions</span><strong>{(summary.metrics.unsupported_hard_decision_rate_fixture * 100).toFixed(1)}%</strong><small>S004 fixture only</small></p>
-          <p className="metric-chip"><span>Retrieval Recall@20</span><strong>{summary.metrics.retrieval_recall_at_20_proxy.toFixed(3)}</strong><small>exact-condition proxy qrels</small></p>
-          <p className="metric-chip"><span>B6 final accuracy</span><strong>{summary.metrics.b6_final_decision_accuracy_fixture.toFixed(3)}</strong><small>single-trial smoke only</small></p>
-          <p className="metric-chip"><span>False pre-screen pass</span><strong>{(summary.metrics.false_pre_screen_pass_rate_fixture * 100).toFixed(1)}%</strong><small>generated fixture only</small></p>
+          <p className="metric-chip"><span>조건 판정 일관성</span><strong>{summary.metrics.criterion_macro_f1_self_consistency.toFixed(3)}</strong><small>구조화 규칙 내부 일관성</small></p>
+          <p className="metric-chip"><span>근거 없는 확정 판정</span><strong>{(summary.metrics.unsupported_hard_decision_rate_fixture * 100).toFixed(1)}%</strong><small>S004 고정 사례 기준</small></p>
+          <p className="metric-chip"><span>검색 재현율@20</span><strong>{summary.metrics.retrieval_recall_at_20_proxy.toFixed(3)}</strong><small>대리 정답 집합 기준</small></p>
+          <p className="metric-chip"><span>B6 최종 정확도</span><strong>{summary.metrics.b6_final_decision_accuracy_fixture.toFixed(3)}</strong><small>단일 임상시험 기능 점검</small></p>
+          <p className="metric-chip"><span>잘못된 사전 선별 통과</span><strong>{(summary.metrics.false_pre_screen_pass_rate_fixture * 100).toFixed(1)}%</strong><small>생성된 고정 사례 기준</small></p>
         </div>
       </div>
       <div className="mt-4 overflow-x-auto" tabIndex={0} aria-label="Question policy smoke table">
         <table className="w-full min-w-[680px] text-left text-xs">
-          <thead className="text-slate-400"><tr><th className="pb-2">Policy</th><th>Runs</th><th>Final accuracy</th><th>Accuracy AUC</th><th>Mean questions</th><th>Median to stable top-3*</th></tr></thead>
+          <thead className="text-slate-400"><tr><th className="pb-2">질문 전략</th><th>실행 횟수</th><th>최종 정확도</th><th>정확도 AUC</th><th>평균 질문 수</th><th>상위 3개 안정화 중앙값*</th></tr></thead>
           <tbody className="divide-y divide-slate-800">{summary.policy_table.map((policy) => <tr key={policy.policy}><td className="py-2 font-bold text-cyan-200">{policy.policy}</td>{"status" in policy ? <td colSpan={5} className="py-2 text-amber-200">{policy.status}</td> : <><td>{policy.runs}</td><td>{policy.final_decision_accuracy.toFixed(3)}</td><td>{policy.accuracy_auc.toFixed(3)}</td><td>{policy.question_count_mean.toFixed(2)}</td><td>{policy.median_questions_to_stable_top3.toFixed(1)}</td></>}</tr>)}</tbody>
         </table>
       </div>
-      <p className="mt-2 text-[0.65rem] text-slate-400">* Single-trial fixture proxy; stable top-3 is not estimable and this value is not an acceptance result.</p>
+      <p className="mt-2 text-[0.65rem] text-slate-400">* 단일 임상시험 고정 사례에서는 상위 3개 안정화를 추정할 수 없습니다. 이 값은 출시 승인 지표가 아닙니다.</p>
       <div className="mt-4 overflow-x-auto" tabIndex={0} aria-label="Selected ablation smoke table">
         <table className="w-full min-w-[680px] text-left text-xs">
-          <thead className="text-slate-400"><tr><th className="pb-2">Ablation</th><th>Final accuracy</th><th>Mean questions</th><th>Safety metric status</th></tr></thead>
+          <thead className="text-slate-400"><tr><th className="pb-2">제거 실험</th><th>최종 정확도</th><th>평균 질문 수</th><th>안전 지표 상태</th></tr></thead>
           <tbody className="divide-y divide-slate-800">{summary.ablation_table.map((item) => <tr key={item.ablation}><td className="py-2 font-bold text-fuchsia-200">{item.ablation}</td><td>{item.final_decision_accuracy.toFixed(3)}</td><td>{item.question_count_mean.toFixed(2)}</td><td>{item.safety_metric_status ?? "fixture run"}</td></tr>)}</tbody>
         </table>
       </div>
-      <p className="mt-4 break-all font-mono text-[0.65rem] text-slate-400">Runs · {Object.values(summary.run_ids).join(" · ")}</p>
+      <details className="source-original mt-4"><summary>실행 ID 보기</summary><div className="source-original-content break-all font-mono">{Object.values(summary.run_ids).join(" · ")}</div></details>
     </section>
   );
 }

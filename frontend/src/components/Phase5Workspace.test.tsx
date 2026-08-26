@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { sessionSchema } from "../types/api";
 import { AgentTimeline } from "./AgentTimeline";
@@ -63,22 +63,24 @@ const session = sessionSchema.parse({
 
 test("trial card labels the score as nonprobabilistic", () => {
   render(<TrialCard session={session} />);
-  expect(screen.getByText(/evidence match score · 확률 아님/)).toBeVisible();
+  expect(screen.getByText(/근거 일치 점수 · 적합 확률이 아님/)).toBeVisible();
   expect(screen.getByText("POTENTIAL_MATCH")).toBeVisible();
 });
 
 test("criterion matrix exposes unresolved evidence and verifier state", () => {
   render(<CriterionMatrix session={session} />);
+  expect(screen.getByText("병리검사로 요로상피암 조직형이 확인됨")).toBeVisible();
+  expect(screen.getByText("병리 조직형")).toBeVisible();
+  expect(screen.getByText("자동 검증 1/1 통과")).toBeVisible();
+  fireEvent.click(screen.getByText("영어 원문 보기"));
   expect(screen.getByText("Pathology-confirmed urothelial histology")).toBeVisible();
-  expect(screen.getByText("pathology.histology")).toBeVisible();
-  expect(screen.getByText("1/1 applicable ✓")).toBeVisible();
 });
 
 test("question panel always offers unknown and record-decline controls", () => {
   render(<QuestionPanel session={session} busy={false} onAnswer={() => undefined} />);
-  expect(screen.getByRole("button", { name: "잘 모르겠습니다" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "이 기록을 제공할 수 없습니다" })).toBeEnabled();
-  expect(screen.getByText(/no new test is being recommended/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "현재 기록으로는 모르겠어요" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "이 기록을 확인할 수 없어요" })).toBeEnabled();
+  expect(screen.getByText(/새 검사를 권하는 질문이 아닙니다/)).toBeVisible();
 });
 
 test("agent timeline communicates degraded state in text", () => {
@@ -90,6 +92,6 @@ test("agent timeline communicates degraded state in text", () => {
       }}
     />,
   );
-  expect(screen.getByText("대체 경로")).toBeVisible();
+  expect(screen.getByText("대체 경로 사용")).toBeVisible();
   expect(screen.getByText("완료")).toBeVisible();
 });

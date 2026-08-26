@@ -58,7 +58,7 @@ export function EmptyState({ children }: { children: ReactNode }) {
     <section className="panel empty-state" role="status">
       <span aria-hidden="true" className="state-symbol">∅</span>
       <div>
-        <h2>표시할 근거가 없습니다 · EMPTY</h2>
+        <h2>표시할 근거가 없습니다.</h2>
         <p>{children}</p>
       </div>
     </section>
