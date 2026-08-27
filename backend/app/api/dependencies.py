@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ipaddress
+import math
+from datetime import UTC, datetime
 from typing import cast
 
 from fastapi import Header, Request
@@ -36,20 +38,28 @@ def rate_limit_subject(request: Request) -> str:
     return request.client.host if request.client is not None else "unknown"
 
 
-async def enforce_rate_limit(request: Request, kind: RateLimitKind) -> None:
+async def enforce_rate_limit(
+    request: Request, kind: RateLimitKind, *, subject: str | None = None
+) -> None:
     limiter = cast(
         FixedWindowRateLimiter | FirestoreFixedWindowRateLimiter,
         request.app.state.rate_limiter,
     )
-    client_ip = rate_limit_subject(request)
-    result = await limiter.consume_async(client_ip, kind)
+    rate_subject = subject or rate_limit_subject(request)
+    result = await limiter.consume_async(rate_subject, kind)
     if not result.allowed:
+        retry_after = max(
+            1,
+            math.ceil((result.reset_at - datetime.now(UTC)).total_seconds()),
+        )
         raise ApiProblem(
             429,
             "RATE_LIMITED",
             "Rate limit exceeded",
-            f"The {kind} hourly limit has been reached.",
+            f"The {kind} hourly limit has been reached and resets at "
+            f"{result.reset_at.isoformat()}.",
             retryable=True,
+            headers={"Retry-After": str(retry_after)},
         )
 
 

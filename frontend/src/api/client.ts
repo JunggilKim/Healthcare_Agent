@@ -15,6 +15,27 @@ interface StreamEvent {
   data: Record<string, unknown>;
 }
 
+interface ProblemDetail {
+  code?: string;
+  detail?: string;
+  title?: string;
+}
+
+async function responseError(response: Response, prefix: string): Promise<Error> {
+  let problem: ProblemDetail | null = null;
+  try {
+    problem = (await response.clone().json()) as ProblemDetail;
+  } catch {
+    // Non-JSON gateway responses still retain their HTTP status below.
+  }
+  if (problem?.code === "RATE_LIMITED") {
+    const retryAfter = response.headers.get("Retry-After");
+    const suffix = retryAfter ? ` ${retryAfter}초 후 다시 시도해주세요.` : " 잠시 후 다시 시도해주세요.";
+    return new Error(`요청 한도를 초과했습니다.${suffix}`);
+  }
+  return new Error(problem?.detail ?? problem?.title ?? `${prefix}: ${response.status}`);
+}
+
 export interface DemoCase {
   id: string;
   text: string;
@@ -92,7 +113,8 @@ async function readEventStream(
   onEvent: (event: StreamEvent) => void,
   onStall?: () => void,
 ): Promise<void> {
-  if (!response.ok || !response.body) throw new Error(`Streaming request failed: ${response.status}`);
+  if (!response.ok) throw await responseError(response, "Streaming request failed");
+  if (!response.body) throw new Error("Streaming response body is unavailable.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -113,7 +135,13 @@ async function readEventStream(
         const data = frame.match(/^data: (.+)$/m)?.[1];
         if (event && data) {
           armStallTimer();
-          onEvent({ event, data: JSON.parse(data) as Record<string, unknown> });
+          const payload = JSON.parse(data) as Record<string, unknown>;
+          if (event === "error") {
+            throw new Error(
+              typeof payload.code === "string" ? payload.code : "Analysis stream failed.",
+            );
+          }
+          onEvent({ event, data: payload });
         }
       }
       if (done) break;
@@ -138,8 +166,10 @@ export async function analyzeSession(
 
 export interface AnswerInput {
   answerText?: string;
+  structuredValue?: Record<string, unknown>;
   unknown?: boolean;
   declined?: boolean;
+  idempotencyKey?: string;
 }
 
 export async function submitAnswer(
@@ -153,12 +183,13 @@ export async function submitAnswer(
     headers: {
       Accept: "text/event-stream",
       "Content-Type": "application/json",
+      "Idempotency-Key": input.idempotencyKey ?? crypto.randomUUID(),
       "X-Session-Token": credentials.token,
     },
     body: JSON.stringify({
       question_id: questionId,
       answer_text: input.answerText ?? null,
-      structured_value: null,
+      structured_value: input.structuredValue ?? null,
       unknown: input.unknown ?? false,
       declined: input.declined ?? false,
     }),

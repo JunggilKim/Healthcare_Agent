@@ -4,7 +4,12 @@ import type { SessionView } from "../types/api";
 interface Props {
   session: SessionView;
   busy: boolean;
-  onAnswer: (answer: { answerText?: string; unknown?: boolean; declined?: boolean }) => void;
+  onAnswer: (answer: {
+    answerText?: string;
+    structuredValue?: Record<string, unknown>;
+    unknown?: boolean;
+    declined?: boolean;
+  }) => void;
 }
 
 export function QuestionPanel({ session, busy, onAnswer }: Props) {
@@ -25,7 +30,7 @@ export function QuestionPanel({ session, busy, onAnswer }: Props) {
         </div>
       ) : (
         <div className="mt-2 grid grid-cols-2 gap-2">
-          {question.branches.filter((branch) => branch.response_kind === "VALUE").map((branch) => <button key={branch.branch_id} className="secondary-button px-3 py-2 text-xs" disabled={busy} onClick={() => onAnswer({ answerText: branch.label })}>{localizedQuestionValue(branch.label)}</button>)}
+          {question.branches.filter((branch) => branch.response_kind === "VALUE").map((branch) => <button key={branch.branch_id} className="secondary-button px-3 py-2 text-xs" disabled={busy} onClick={() => onAnswer({ structuredValue: branch.synthetic_value ?? undefined })}>{localizedQuestionValue(branch.label)}</button>)}
         </div>
       )}
       <div className="mt-2 grid grid-cols-2 gap-2">

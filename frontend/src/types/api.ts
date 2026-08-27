@@ -30,6 +30,7 @@ export const questionCandidateSchema = z
             branch_id: z.string(),
             label: z.string(),
             response_kind: z.string(),
+            synthetic_value: z.record(z.string(), z.unknown()).nullable().optional(),
           })
           .passthrough(),
       )

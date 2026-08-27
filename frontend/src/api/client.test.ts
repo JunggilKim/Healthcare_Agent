@@ -51,7 +51,10 @@ test("question answers preserve the exact English evidence payload", async () =>
   await submitAnswer(
     { sessionId: "session-s004", token: "token-s004" },
     "question-pathology",
-    { answerText: "Existing pathology report confirms high-grade urothelial carcinoma." },
+    {
+      answerText: "Existing pathology report confirms high-grade urothelial carcinoma.",
+      idempotencyKey: "answer-turn-pathology",
+    },
     () => undefined,
   );
 
@@ -60,6 +63,7 @@ test("question answers preserve the exact English evidence payload", async () =>
     headers: {
       Accept: "text/event-stream",
       "Content-Type": "application/json",
+      "Idempotency-Key": "answer-turn-pathology",
       "X-Session-Token": "token-s004",
     },
     body: JSON.stringify({
@@ -70,6 +74,54 @@ test("question answers preserve the exact English evidence payload", async () =>
       declined: false,
     }),
   });
+});
+
+test("structured question branches preserve their typed value", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response('event: completed\ndata: {"state":"QUESTION_READY"}\n\n', { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await submitAnswer(
+    { sessionId: "session-s004", token: "token-s004" },
+    "question-muscle-invasion",
+    {
+      structuredValue: { kind: "boolean", value: true },
+      idempotencyKey: "answer-turn-muscle-invasion",
+    },
+    () => undefined,
+  );
+
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+    question_id: "question-muscle-invasion",
+    answer_text: null,
+    structured_value: { kind: "boolean", value: true },
+    unknown: false,
+    declined: false,
+  });
+});
+
+test("SSE error events reject instead of looking like successful answers", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response('event: error\ndata: {"code":"SNAPSHOT_BRANCH_UNAVAILABLE"}\n\n', {
+        status: 200,
+      }),
+    ),
+  );
+
+  await expect(
+    submitAnswer(
+      { sessionId: "session-s004", token: "token-s004" },
+      "question-muscle-invasion",
+      {
+        structuredValue: { kind: "boolean", value: true },
+        idempotencyKey: "answer-turn-error",
+      },
+      () => undefined,
+    ),
+  ).rejects.toThrow("SNAPSHOT_BRANCH_UNAVAILABLE");
 });
 
 test("live analysis reports an eight-second event-stream stall", async () => {

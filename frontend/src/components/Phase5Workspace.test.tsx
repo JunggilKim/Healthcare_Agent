@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 
 import { sessionSchema } from "../types/api";
 import { AgentTimeline } from "./AgentTimeline";
@@ -81,6 +82,40 @@ test("question panel always offers unknown and record-decline controls", () => {
   expect(screen.getByRole("button", { name: "현재 기록으로는 모르겠어요" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "이 기록을 확인할 수 없어요" })).toBeEnabled();
   expect(screen.getByText(/새 검사를 권하는 질문이 아닙니다/)).toBeVisible();
+});
+
+test("question value buttons submit the backend typed value instead of the display label", () => {
+  const onAnswer = vi.fn();
+  const booleanSession = sessionSchema.parse({
+    ...session,
+    current_question: {
+      ...session.current_question,
+      selected: {
+        ...session.current_question?.selected,
+        slot_id: "pathology.muscle_invasion",
+        branches: [
+          {
+            branch_id: "q:boolean:0",
+            label: "true",
+            response_kind: "VALUE",
+            synthetic_value: { kind: "boolean", value: true },
+          },
+          {
+            branch_id: "q:boolean:1",
+            label: "false",
+            response_kind: "VALUE",
+            synthetic_value: { kind: "boolean", value: false },
+          },
+        ],
+      },
+    },
+  });
+
+  render(<QuestionPanel session={booleanSession} busy={false} onAnswer={onAnswer} />);
+  fireEvent.click(screen.getByRole("button", { name: "기존 기록에서 확인됨" }));
+  expect(onAnswer).toHaveBeenCalledWith({
+    structuredValue: { kind: "boolean", value: true },
+  });
 });
 
 test("agent timeline communicates degraded state in text", () => {

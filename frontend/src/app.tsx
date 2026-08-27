@@ -267,11 +267,13 @@ export function App() {
 
   async function answer(input: {
     answerText?: string;
+    structuredValue?: Record<string, unknown>;
     unknown?: boolean;
     declined?: boolean;
   }) {
     if (!credentials || !session?.current_question?.selected) return;
     setBusy(true);
+    setError(null);
     setReplayStatus(null);
     setStatusText("답변을 반영해 관련 조건의 근거만 다시 평가하고 있습니다…");
     try {
@@ -478,6 +480,7 @@ export function App() {
             <p className="text-sm text-slate-300">{statusText}</p>
             <div className="flex flex-wrap gap-2"><button aria-label="Replay Proof" className="secondary-button py-2" onClick={() => void replay()}>{ko.action.replay}</button><button aria-label="Export report" className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : "일부 저장 기능을 사용할 수 없어 보고서를 저장할 수 없습니다."} onClick={() => credentials && void exportReport(credentials)}>{ko.action.export}</button><button aria-label="Reset session" className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>{ko.action.reset}</button><button aria-label="Delete session" className="danger-button py-2" disabled={busy} onClick={() => void deleteCurrentSession()}>{ko.action.delete}</button></div>
           </div>
+          {error ? <p role="alert" className="mb-4 rounded-xl border border-rose-300/40 bg-rose-300/10 p-3 text-sm text-rose-200">{error}</p> : null}
           {replayStatus ? <p aria-live="polite" className="mb-4 rounded-xl bg-emerald-300/10 p-3 text-sm text-emerald-200">{replayStatus}</p> : null}
           {showDemoTools ? <section className="mb-4 rounded-xl border border-dashed border-fuchsia-300/40 bg-fuchsia-300/5 p-3" aria-label="Failure simulation controls"><p className="text-xs font-bold text-fuchsia-200">발표 리허설 전용 · 장애 상태 재현</p><div className="mt-2 flex flex-wrap gap-2">{["GEMINI_UNAVAILABLE", "CTGOV_UNAVAILABLE", "EMBEDDING_UNAVAILABLE"].map((code) => <button key={code} className="secondary-button px-3 py-2 text-xs" onClick={() => toggleFailure(code)}>{degradationCodes.includes(code) ? "✓ " : ""}{code}</button>)}</div></section> : null}
 
