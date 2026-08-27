@@ -72,16 +72,32 @@ session = json.load(open(sys.argv[1]))
 ranked_ids = session.get("full_state", {}).get("aggregate", {}).get("ranked_nct_ids", [])
 selected_ids = session.get("retrieval", {}).get("selected_for_compilation", [])
 degradation_codes = session.get("degradation_codes", [])
+question_selection = session.get("current_question", {})
+selected_question = question_selection.get("selected")
+stop_reason = question_selection.get("stop_reason")
+valid_stop_reasons = {
+    "NO_RELEVANT_TRIALS",
+    "NO_ACTIONABLE_MISSING_SLOT",
+    "UTILITY_BELOW_THRESHOLD",
+    "MAX_QUESTION_BUDGET",
+    "TOP_RESULT_STABLE",
+    "ALL_RECORD_ACTIONS_DECLINED",
+    "TOP3_BRANCH_STABLE",
+}
 assert ranked_ids, "Live analysis completed without any ranked trials"
 assert 1 <= len(selected_ids) <= 4, "Live compilation budget was not enforced"
-assert session.get("current_question", {}).get("selected"), "Live analysis produced no next question"
+assert selected_question or stop_reason in valid_stop_reasons, (
+    "Live analysis neither selected a next question nor recorded a valid stop reason"
+)
 assert "LIVE_RETRIEVAL_TIMEOUT_SNAPSHOT_USED" not in degradation_codes, (
     "Live registry retrieval timed out and silently became a snapshot analysis"
 )
 print(
     "live_result: "
     f"mode={session.get('mode')}, ranked={len(ranked_ids)}, "
-    f"compiled={len(selected_ids)}, degradations={','.join(degradation_codes) or 'none'}"
+    f"compiled={len(selected_ids)}, "
+    f"next_action={selected_question.get('question_id') if selected_question else stop_reason}, "
+    f"degradations={','.join(degradation_codes) or 'none'}"
 )
 PY
   unset LIVE_SESSION_TOKEN
