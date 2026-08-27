@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -34,10 +35,26 @@ def _exact_source_offsets(source: str, *, start: int, end: int, quote: str) -> t
     while offset >= 0:
         matches.append(offset)
         offset = source.find(quote, offset + 1)
+    escaped_pattern: str | None = None
+    if not matches and any(symbol in quote for symbol in "<>"):
+        # ClinicalTrials.gov markdown can retain a presentation backslash in
+        # the source while a model returns the same visible quote without it.
+        # Match only optional escapes before comparison symbols; every other
+        # byte remains exact and the final quote is rebound to source bytes.
+        escaped_pattern = "".join(
+            rf"\\?{re.escape(character)}" if character in "<>" else re.escape(character)
+            for character in quote
+        )
+        matches = [match.start() for match in re.finditer(escaped_pattern, source)]
     if len(matches) != 1:
         raise ProtocolCompilationError("criterion quote is not uniquely anchored in source")
     anchored_start = matches[0]
-    return anchored_start, anchored_start + len(quote)
+    if escaped_pattern is None:
+        return anchored_start, anchored_start + len(quote)
+    escaped_match = re.match(escaped_pattern, source[anchored_start:])
+    if escaped_match is None:
+        raise ProtocolCompilationError("criterion quote is not uniquely anchored in source")
+    return anchored_start, anchored_start + escaped_match.end()
 
 
 def _anchor_proposal_source_spans(
@@ -51,7 +68,9 @@ def _anchor_proposal_source_spans(
             end=criterion.end,
             quote=criterion.quote,
         )
-        criteria.append(criterion.model_copy(update={"start": start, "end": end}))
+        criteria.append(
+            criterion.model_copy(update={"start": start, "end": end, "quote": source[start:end]})
+        )
     unassigned = []
     for span in proposal.unassigned_source_spans:
         start, end = _exact_source_offsets(
@@ -60,7 +79,9 @@ def _anchor_proposal_source_spans(
             end=span.end,
             quote=span.quote,
         )
-        unassigned.append(span.model_copy(update={"start": start, "end": end}))
+        unassigned.append(
+            span.model_copy(update={"start": start, "end": end, "quote": source[start:end]})
+        )
     return proposal.model_copy(update={"criteria": criteria, "unassigned_source_spans": unassigned})
 
 

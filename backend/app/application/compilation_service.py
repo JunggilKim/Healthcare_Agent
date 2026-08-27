@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -32,6 +33,8 @@ from backend.app.infrastructure.structured_generation import (
     StructuredGenerationUnavailable,
     StructuredGenerator,
 )
+
+logger = logging.getLogger("trial_opt.live")
 
 
 @dataclass(frozen=True)
@@ -889,6 +892,12 @@ class ProtocolCompilationService:
                 ),
             )
         except (StructuredGenerationUnavailable, ProtocolCompilationError, ValueError) as error:
+            logger.warning(
+                "protocol compilation fallback (nct_id=%s error=%s detail=%s)",
+                trial.nct_id,
+                type(error).__name__,
+                str(error)[:500],
+            )
             degradation_codes.extend(
                 [
                     "PROTOCOL_COMPILATION_OPAQUE_FALLBACK",

@@ -245,6 +245,27 @@ def test_unique_exact_quote_is_deterministically_reanchored() -> None:
     assert raw.eligibility_criteria[span.start : span.end] == span.quote
 
 
+def test_markdown_escaped_comparison_quote_is_rebound_to_exact_source_bytes() -> None:
+    source = r"Adults age \>18 years"
+    raw, proposal = _trial_and_proposal(source)
+    proposal.criteria[0].quote = "Adults age >18 years"
+    proposal.criteria[0].end = len(proposal.criteria[0].quote)
+
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.4",
+        created_at=datetime(2026, 8, 27, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 27),
+    )
+
+    span = result.compiled_trial.criteria[0].source_span
+    assert span.quote == source
+    assert raw.eligibility_criteria[span.start : span.end] == span.quote
+
+
 def test_ambiguous_quote_cannot_be_reanchored() -> None:
     raw, proposal = _trial_and_proposal()
     criterion_text = raw.eligibility_criteria
