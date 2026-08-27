@@ -1,9 +1,13 @@
+from pathlib import Path
+
 from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
 from starlette.middleware.gzip import GZipMiddleware
 
 from backend.app.api.middleware import request_id_middleware
 from backend.app.main import app
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_declared_spa_routes_support_direct_navigation() -> None:
@@ -13,6 +17,10 @@ def test_declared_spa_routes_support_direct_navigation() -> None:
     assert client.get("/session/session-example").status_code == 200
     assert client.get("/api/v1/not-a-route").status_code == 404
     assert client.get("/unrecognized-frontend-route").status_code == 404
+
+    source_index = (REPOSITORY_ROOT / "frontend" / "index.html").read_text()
+    assert 'href="/favicon.svg"' in source_index
+    assert (REPOSITORY_ROOT / "frontend" / "public" / "favicon.svg").is_file()
 
 
 def test_frontend_cache_and_compression_contracts() -> None:
