@@ -79,7 +79,7 @@ test("unknown and failure-rehearsal paths remain usable", async ({ page }) => {
   await page.goto("/?demo-tools=1");
   await page.getByRole("button", { name: "S004 데모 분석 시작" }).click();
   await page.getByRole("button", { name: "GEMINI_UNAVAILABLE" }).click();
-  await expect(page.getByText(/완료된 분석 결과는 그대로 보존했습니다/)).toBeVisible();
+  await expect(page.getByText(/제한적 분석 결과입니다/)).toBeVisible();
   await page.getByRole("button", { name: "현재 기록으로는 모르겠어요" }).click();
   await expect(page.getByRole("heading", { name: /근육 침윤 여부/ })).toBeVisible();
   await page.getByRole("button", { name: "이 기록을 확인할 수 없어요" }).click();
