@@ -254,7 +254,64 @@ def test_s004_branch_b_keeps_histology_unknown_and_never_repeats_question(
         )
         assert histology["final_verdict"] == "UNKNOWN"
         assert "pathology.histology" in updated["unavailable_slot_ids"]
-        assert updated["current_question"]["selected"]["slot_id"] == "pathology.muscle_invasion"
+        assert updated["current_question"]["selected"] is None
+        assert (
+            updated["current_question"]["stop_reason"]
+            == "SNAPSHOT_BRANCH_COVERAGE_EXHAUSTED"
+        )
+    get_settings.cache_clear()
+
+
+def test_s004_snapshot_stops_after_the_last_materialized_branch(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "branch-depth-store"))
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        session_id, headers, initial = _create_and_analyze(client)
+        first_question = initial["current_question"]["selected"]
+        with client.stream(
+            "POST",
+            f"/api/v1/sessions/{session_id}/answers",
+            headers=headers,
+            json={
+                "question_id": first_question["question_id"],
+                "answer_text": (
+                    "Existing pathology report confirms high-grade urothelial carcinoma."
+                ),
+                "structured_value": None,
+                "unknown": False,
+                "declined": False,
+            },
+        ) as response:
+            assert response.status_code == 200
+            _ = "".join(response.iter_text())
+
+        after_first = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        second_question = after_first["current_question"]["selected"]
+        assert second_question["slot_id"] == "pathology.muscle_invasion"
+        with client.stream(
+            "POST",
+            f"/api/v1/sessions/{session_id}/answers",
+            headers=headers,
+            json={
+                "question_id": second_question["question_id"],
+                "answer_text": None,
+                "structured_value": {"kind": "boolean", "value": True},
+                "unknown": False,
+                "declined": False,
+            },
+        ) as response:
+            assert response.status_code == 200
+            stream = "".join(response.iter_text())
+        assert "SNAPSHOT_BRANCH_UNAVAILABLE" not in stream
+
+        completed = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        assert completed["state"] == "COMPLETE"
+        assert completed["current_question"]["selected"] is None
+        assert (
+            completed["current_question"]["stop_reason"]
+            == "SNAPSHOT_BRANCH_COVERAGE_EXHAUSTED"
+        )
+        assert "라이브 모드" in completed["current_question"]["deterministic_rationale"]
     get_settings.cache_clear()
 
 

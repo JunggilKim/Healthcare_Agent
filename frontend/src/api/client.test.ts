@@ -153,7 +153,9 @@ test("SSE error events reject instead of looking like successful answers", async
       },
       () => undefined,
     ),
-  ).rejects.toThrow("SNAPSHOT_BRANCH_UNAVAILABLE");
+  ).rejects.toThrow(
+    "이 스냅샷 데모에는 선택한 답변 이후의 저장된 분석 경로가 없습니다.",
+  );
 });
 
 test("live analysis reports an eight-second event-stream stall", async () => {

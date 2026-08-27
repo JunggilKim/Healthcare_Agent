@@ -56,6 +56,34 @@ before, after = (json.load(open(path)) for path in sys.argv[1:])
 assert after["patient_state_version"] > before["patient_state_version"]
 assert after["trial_evaluation"] != before["trial_evaluation"]
 PY
+python3 - "$TMP_DIR/updated.json" >"$TMP_DIR/snapshot-answer-2.json" <<'PY'
+import json, sys
+session = json.load(open(sys.argv[1]))
+question = session["current_question"]["selected"]
+branch = next(
+    item for item in question["branches"]
+    if item.get("synthetic_value") == {"kind": "boolean", "value": True}
+)
+print(json.dumps({
+    "question_id": question["question_id"],
+    "answer_text": None,
+    "structured_value": branch["synthetic_value"],
+    "unknown": False,
+    "declined": False,
+}))
+PY
+request snapshot_answer_2 POST "$BASE_URL/api/v1/sessions/$SESSION_ID/answers" "$TMP_DIR/snapshot-answer-2.sse" -H 'Content-Type: application/json' -H 'Accept: text/event-stream' "${AUTH[@]}" --data-binary "@$TMP_DIR/snapshot-answer-2.json"
+grep -q '^event: completed' "$TMP_DIR/snapshot-answer-2.sse"
+! grep -q 'SNAPSHOT_BRANCH_UNAVAILABLE' "$TMP_DIR/snapshot-answer-2.sse"
+request snapshot_completed GET "$BASE_URL/api/v1/sessions/$SESSION_ID" "$TMP_DIR/snapshot-completed.json" "${AUTH[@]}"
+python3 - "$TMP_DIR/snapshot-completed.json" <<'PY'
+import json, sys
+session = json.load(open(sys.argv[1]))
+selection = session["current_question"]
+assert session["state"] == "COMPLETE"
+assert selection.get("selected") is None
+assert selection.get("stop_reason") == "SNAPSHOT_BRANCH_COVERAGE_EXHAUSTED"
+PY
 request export GET "$BASE_URL/api/v1/sessions/$SESSION_ID/export.json" "$TMP_DIR/export.json" "${AUTH[@]}"
 
 if [[ "$LIVE" -eq 1 ]]; then

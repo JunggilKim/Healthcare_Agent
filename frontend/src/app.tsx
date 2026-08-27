@@ -322,6 +322,21 @@ export function App() {
           : "답변을 반영해 조건별 근거 평가를 완료했습니다.",
       );
     } catch (caught) {
+      if (
+        caught instanceof Error &&
+        caught.name === "SNAPSHOT_BRANCH_UNAVAILABLE" &&
+        session.mode === "snapshot"
+      ) {
+        try {
+          const recoveredSession = await readSession(credentials);
+          setSession(recoveredSession);
+          setDegradationCodes(recoveredSession.degradation_codes);
+          setStatusText(caught.message);
+          return;
+        } catch {
+          // Preserve the original actionable error if session recovery also fails.
+        }
+      }
       setError(caught instanceof Error ? caught.message : "재평가를 완료하지 못했습니다.");
     } finally {
       setBusy(false);

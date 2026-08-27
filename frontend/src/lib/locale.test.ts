@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { localizedCode, localizedQuestionValue, stageLabels, verdictLabels } from "./locale";
+import {
+  localizedCode,
+  localizedQuestionValue,
+  questionFallbackLabels,
+  stageLabels,
+  verdictLabels,
+} from "./locale";
 
 describe("Korean display mapping", () => {
   it("uses conservative verdict language and preserves raw codes", () => {
@@ -31,8 +37,25 @@ describe("Korean display mapping", () => {
   });
 
   it("localizes question values without changing their API value", () => {
-    expect(localizedQuestionValue("true")).toBe("기존 기록에서 확인됨");
-    expect(localizedQuestionValue("false")).toBe("기존 기록에서 확인되지 않음");
+    expect(localizedQuestionValue("true")).toBe("기록에서 확인됨");
+    expect(localizedQuestionValue("false")).toBe("기록에서 확인되지 않음");
+    expect(
+      localizedQuestionValue("true", {
+        action: "ASK_PATIENT",
+        slotId: "consent.informed_provided",
+      }),
+    ).toBe("예, 동의했습니다");
+    expect(
+      localizedQuestionValue("false", {
+        action: "ASK_PATIENT",
+        slotId: "prior_treatment.mibc_systemic",
+      }),
+    ).toBe("아니요, 치료받은 적이 없습니다");
+    expect(localizedQuestionValue("synthetic:15 year")).toBe("15년");
+    expect(questionFallbackLabels("ASK_PATIENT")).toEqual({
+      unknown: "잘 모르겠습니다",
+      declined: "답변하지 않겠습니다",
+    });
     expect(localizedQuestionValue("server_defined_value")).toBe("server_defined_value");
   });
 });

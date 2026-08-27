@@ -21,6 +21,23 @@ interface ProblemDetail {
   title?: string;
 }
 
+const problemMessages: Record<string, string> = {
+  SNAPSHOT_BRANCH_UNAVAILABLE: (
+    "이 스냅샷 데모에는 선택한 답변 이후의 저장된 분석 경로가 없습니다. " +
+    "새 스냅샷을 시작하거나 라이브 모드를 이용해주세요."
+  ),
+};
+
+function problemMessage(code: unknown, fallback: string): string {
+  return typeof code === "string" ? (problemMessages[code] ?? code) : fallback;
+}
+
+function codedError(code: unknown, fallback: string): Error {
+  const error = new Error(problemMessage(code, fallback));
+  if (typeof code === "string") error.name = code;
+  return error;
+}
+
 async function responseError(response: Response, prefix: string): Promise<Error> {
   let problem: ProblemDetail | null = null;
   try {
@@ -32,6 +49,9 @@ async function responseError(response: Response, prefix: string): Promise<Error>
     const retryAfter = response.headers.get("Retry-After");
     const suffix = retryAfter ? ` ${retryAfter}초 후 다시 시도해주세요.` : " 잠시 후 다시 시도해주세요.";
     return new Error(`요청 한도를 초과했습니다.${suffix}`);
+  }
+  if (problem?.code) {
+    return codedError(problem.code, problem.detail ?? problem.title ?? prefix);
   }
   return new Error(problem?.detail ?? problem?.title ?? `${prefix}: ${response.status}`);
 }
@@ -137,9 +157,7 @@ async function readEventStream(
           armStallTimer();
           const payload = JSON.parse(data) as Record<string, unknown>;
           if (event === "error") {
-            throw new Error(
-              typeof payload.code === "string" ? payload.code : "Analysis stream failed.",
-            );
+            throw codedError(payload.code, "분석 스트림을 처리하지 못했습니다.");
           }
           onEvent({ event, data: payload });
         }

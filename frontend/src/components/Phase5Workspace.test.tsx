@@ -86,9 +86,9 @@ test("criterion matrix exposes unresolved evidence and verifier state", () => {
 
 test("question panel always offers unknown and record-decline controls", () => {
   render(<QuestionPanel session={session} busy={false} onAnswer={() => undefined} />);
-  expect(screen.getByRole("button", { name: "현재 기록으로는 모르겠어요" })).toBeEnabled();
-  expect(screen.getByRole("button", { name: "이 기록을 확인할 수 없어요" })).toBeEnabled();
-  expect(screen.getByText(/새 검사를 권하는 질문이 아닙니다/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "기록 내용이 불명확함" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "기록을 확인할 수 없음" })).toBeEnabled();
+  expect(screen.getByText(/새 검사를 권하는 항목이 아닙니다/)).toBeVisible();
 });
 
 test("question value buttons submit the backend typed value instead of the display label", () => {
@@ -119,10 +119,45 @@ test("question value buttons submit the backend typed value instead of the displ
   });
 
   render(<QuestionPanel session={booleanSession} busy={false} onAnswer={onAnswer} />);
-  fireEvent.click(screen.getByRole("button", { name: "기존 기록에서 확인됨" }));
+  fireEvent.click(screen.getByRole("button", { name: "기록에서 확인됨" }));
   expect(onAnswer).toHaveBeenCalledWith({
     structuredValue: { kind: "boolean", value: true },
   });
+});
+
+test("patient questions use slot-specific natural Korean choices", () => {
+  const consentSession = sessionSchema.parse({
+    ...session,
+    mode: "live",
+    current_question: {
+      ...session.current_question,
+      selected: {
+        ...session.current_question?.selected,
+        slot_id: "consent.informed_provided",
+        action: "ASK_PATIENT",
+        branches: [
+          {
+            branch_id: "q:consent:0",
+            label: "true",
+            response_kind: "VALUE",
+            synthetic_value: { kind: "boolean", value: true },
+          },
+          {
+            branch_id: "q:consent:1",
+            label: "false",
+            response_kind: "VALUE",
+            synthetic_value: { kind: "boolean", value: false },
+          },
+        ],
+      },
+    },
+  });
+
+  render(<QuestionPanel session={consentSession} busy={false} onAnswer={() => undefined} />);
+  expect(screen.getByRole("button", { name: "예, 동의했습니다" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "아니요, 동의하지 않았습니다" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "잘 모르겠습니다" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "답변하지 않겠습니다" })).toBeEnabled();
 });
 
 test("live histology questions use their server-provided typed branches", () => {
@@ -179,6 +214,27 @@ test("limited sessions do not claim that every evidence check is complete", () =
   expect(screen.getByText("현재 제한적 결과에서 선택된 다음 질문이 없습니다.")).toBeVisible();
   expect(screen.getByText("추가 질문의 예상 효용이 중단 기준보다 낮습니다.")).toBeVisible();
   expect(screen.queryByText(/근거 평가를 모두 마쳤습니다/)).not.toBeInTheDocument();
+});
+
+test("snapshot branch exhaustion is presented as a completed frozen demo path", () => {
+  const completed = sessionSchema.parse({
+    ...session,
+    state: "COMPLETE",
+    current_question: {
+      selected: null,
+      stop_reason: "SNAPSHOT_BRANCH_COVERAGE_EXHAUSTED",
+      top_alternatives: [],
+      patient_facing_question: null,
+      deterministic_rationale: (
+        "이 스냅샷 데모에서 준비된 답변 경로를 모두 확인했습니다. " +
+        "더 많은 질문을 이어가려면 라이브 모드로 새 분석을 시작하세요."
+      ),
+    },
+  });
+
+  render(<QuestionPanel session={completed} busy={false} onAnswer={() => undefined} />);
+  expect(screen.getByText("스냅샷 데모의 준비된 질문을 모두 확인했습니다.")).toBeVisible();
+  expect(screen.getByText(/라이브 모드로 새 분석/)).toBeVisible();
 });
 
 test("agent timeline communicates degraded state in text", () => {

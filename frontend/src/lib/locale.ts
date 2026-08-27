@@ -98,15 +98,77 @@ export const questionActionLabels: Record<string, string> = {
 };
 
 const questionValueLabels: Record<string, string> = {
-  true: "기존 기록에서 확인됨",
-  false: "기존 기록에서 확인되지 않음",
   urothelial_carcinoma: "요로상피암",
   other_histology: "다른 조직형",
   unknown: "확인 필요",
 };
 
-export function localizedQuestionValue(value: string): string {
+interface QuestionValueContext {
+  action?: string;
+  slotId?: string;
+}
+
+const patientBooleanLabels: Record<string, [string, string]> = {
+  "consent.informed_provided": ["예, 동의했습니다", "아니요, 동의하지 않았습니다"],
+  "prior_treatment.mibc_systemic": [
+    "예, 치료받은 적이 있습니다",
+    "아니요, 치료받은 적이 없습니다",
+  ],
+  "medical_history.genitourinary_cancer": [
+    "예, 진단받은 적이 있습니다",
+    "아니요, 진단받은 적이 없습니다",
+  ],
+  "procedure.hematuria_evaluation_within_2_years": [
+    "예, 검사를 받은 적이 있습니다",
+    "아니요, 검사받은 적이 없습니다",
+  ],
+};
+
+export function localizedQuestionValue(
+  value: string,
+  context: QuestionValueContext = {},
+): string {
+  if (value === "true" || value === "false") {
+    if (context.action === "ASK_PATIENT") {
+      const labels = patientBooleanLabels[context.slotId ?? ""] ?? [
+        "예, 그렇습니다",
+        "아니요, 그렇지 않습니다",
+      ];
+      return value === "true" ? labels[0] : labels[1];
+    }
+    if (context.action === "ASK_CLINICIAN") {
+      return value === "true" ? "해당함" : "해당하지 않음";
+    }
+    return value === "true" ? "기록에서 확인됨" : "기록에서 확인되지 않음";
+  }
+  const syntheticYears = value.match(/^synthetic:(\d+(?:\.\d+)?)\s*year$/i);
+  if (syntheticYears) return `${syntheticYears[1]}년`;
+  const syntheticPackYears = value.match(/^synthetic:(\d+(?:\.\d+)?)\s*pack[- ]?years?$/i);
+  if (syntheticPackYears) return `${syntheticPackYears[1]}갑년`;
   return questionValueLabels[value] ?? value;
+}
+
+export function questionFallbackLabels(action: string): {
+  unknown: string;
+  declined: string;
+} {
+  if (action === "ASK_PATIENT") {
+    return { unknown: "잘 모르겠습니다", declined: "답변하지 않겠습니다" };
+  }
+  if (action === "ASK_CLINICIAN") {
+    return { unknown: "의료진 확인이 필요함", declined: "현재 확인할 수 없음" };
+  }
+  return { unknown: "기록 내용이 불명확함", declined: "기록을 확인할 수 없음" };
+}
+
+export function questionNotice(action: string): string {
+  if (action === "ASK_PATIENT") {
+    return "새 검사나 진단을 요청하지 않습니다. 현재 알고 있거나 보유한 기록으로 답할 수 있는 내용만 묻습니다.";
+  }
+  if (action === "ASK_CLINICIAN") {
+    return "새 검사를 권하는 항목이 아닙니다. 현재 진료기록으로 확인 가능한 내용만 묻습니다.";
+  }
+  return "새 검사를 권하는 항목이 아닙니다. 이미 보유한 기록에서 확인 가능한 내용만 묻습니다.";
 }
 
 export const recruitmentStatusLabels: Record<string, string> = {
