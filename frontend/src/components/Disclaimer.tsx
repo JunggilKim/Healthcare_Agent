@@ -5,10 +5,9 @@ export const DISCLAIMER =
 
 export function Disclaimer() {
   return (
-    <aside aria-label="의료 및 데이터 안전 고지" className="rounded-2xl border border-amber-300/40 bg-amber-100/10 p-5">
-      <h2 className="font-semibold text-amber-200">연구용 사전 선별 · 의료 조언 아님</h2>
-      <p className="mt-2 leading-7 text-slate-200">{DISCLAIMER}</p>
+    <aside aria-label="의료 및 데이터 안전 고지" className="clinical-disclaimer">
+      <span aria-hidden="true" className="disclaimer-symbol">△</span>
+      <div><h2>연구용 사전 선별 지원 데모</h2><p>{DISCLAIMER}</p></div>
     </aside>
   );
 }
-

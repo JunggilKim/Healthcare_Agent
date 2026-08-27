@@ -5,6 +5,13 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   reporter: "list",
+  expect: {
+    toHaveScreenshot: {
+      // Keep layout regressions strict while allowing tiny host-specific font
+      // antialiasing differences between local Linux and GitHub runners.
+      maxDiffPixelRatio: 0.003,
+    },
+  },
   use: {
     baseURL: "http://127.0.0.1:8091",
     screenshot: "only-on-failure",
