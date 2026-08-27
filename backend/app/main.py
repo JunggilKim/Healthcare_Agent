@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -106,6 +106,16 @@ def _phase_zero_html() -> str:
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)
 async def spa_root() -> Response:
     return FileResponse(_INDEX_FILE) if _INDEX_FILE.is_file() else HTMLResponse(_phase_zero_html())
+
+
+@app.api_route(
+    "/favicon.ico",
+    methods=["GET", "HEAD"],
+    response_class=RedirectResponse,
+    include_in_schema=False,
+)
+async def legacy_favicon() -> Response:
+    return RedirectResponse(url="/favicon.svg", status_code=308)
 
 
 @app.api_route(

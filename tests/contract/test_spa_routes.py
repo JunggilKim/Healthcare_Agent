@@ -18,6 +18,9 @@ def test_declared_spa_routes_support_direct_navigation() -> None:
     assert client.head("/about").status_code == 200
     assert client.get("/session/session-example").status_code == 200
     assert client.head("/session/session-example").status_code == 200
+    favicon = client.get("/favicon.ico", follow_redirects=False)
+    assert favicon.status_code == 308
+    assert favicon.headers["location"] == "/favicon.svg"
     assert client.get("/api/v1/not-a-route").status_code == 404
     assert client.get("/unrecognized-frontend-route").status_code == 404
 
