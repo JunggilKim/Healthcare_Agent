@@ -180,7 +180,7 @@ class ProtocolCompilationService:
             lite_model_id="gemini-3.5-flash-lite",
             task_name="protocol_compiler_repair" if repair_issues else "protocol_compiler",
             prompt=prompt,
-            prompt_version="1.0.8",
+            prompt_version="1.0.9",
             output_schema_version="compiled-trial-proposal-v1",
             slot_catalog_version=self.slot_catalog.version,
             normalized_input=compiler_generation_input(
@@ -192,12 +192,20 @@ class ProtocolCompilationService:
             primary_thinking_level=None,
             fallback_thinking_level=None,
             primary_max_output_tokens=4000 if repair_issues is None else 2500,
-            fallback_max_output_tokens=2500,
+            fallback_max_output_tokens=8000,
             primary_thinking_budget=1024,
             fallback_thinking_budget=1024,
             primary_max_attempts=self.primary_max_attempts,
-            primary_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
-            fallback_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
+            primary_attempt_timeout_seconds=(
+                min(4.0, self.generation_attempt_timeout_seconds)
+                if self.generation_attempt_timeout_seconds is not None
+                else None
+            ),
+            fallback_attempt_timeout_seconds=(
+                max(20.0, self.generation_attempt_timeout_seconds)
+                if self.generation_attempt_timeout_seconds is not None
+                else None
+            ),
             session_id=session_id,
         )
         return proposal, record.used_fallback
@@ -392,7 +400,12 @@ class ProtocolCompilationService:
 
     @staticmethod
     def _opaque_item_proposal(
-        trial: RawTrialRecord, item: _OfflineSourceItem, source_order: int
+        trial: RawTrialRecord,
+        item: _OfflineSourceItem,
+        source_order: int,
+        *,
+        reason_code: str = "OFFLINE_CHUNK_COMPILATION_FAILED",
+        warning_code: str = "OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK",
     ) -> CriterionCompilationProposal:
         source = trial.eligibility_criteria or ""
         quote = source[item.start : item.end]
@@ -411,7 +424,7 @@ class ProtocolCompilationService:
                         node_id="n0",
                         op=AstOperator.OPAQUE,
                         metadata={
-                            "reason_code": "OFFLINE_CHUNK_COMPILATION_FAILED",
+                            "reason_code": reason_code,
                             "residual_source_sha256": residual_hash,
                         },
                     )
@@ -420,7 +433,84 @@ class ProtocolCompilationService:
             required_slots=[],
             compiler_confidence=0,
             opaque=True,
-            warnings=["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"],
+            warnings=[warning_code],
+        )
+
+    def _complete_live_source_coverage(
+        self, trial: RawTrialRecord, proposal: CompiledTrialProposal
+    ) -> CompiledTrialProposal:
+        """Retain complete model items and quarantine every incomplete source item.
+
+        A short but schema-valid model response must not look better merely
+        because it omitted most criteria.  Exact source-item coverage is
+        deterministic; incomplete items become independently OPAQUE while
+        useful, fully covered neighboring items remain executable.
+        """
+
+        source = trial.eligibility_criteria or ""
+        items = self._offline_source_items(source)
+        if not items:
+            return proposal
+        anchor_degraded = False
+        try:
+            anchored = _anchor_proposal_source_spans(source, proposal)
+        except ProtocolCompilationError:
+            anchored_criteria: list[CriterionCompilationProposal] = []
+            for criterion in proposal.criteria:
+                try:
+                    anchored_single = _anchor_proposal_source_spans(
+                        source,
+                        proposal.model_copy(update={"criteria": [criterion]}),
+                    )
+                except ProtocolCompilationError:
+                    anchor_degraded = True
+                    continue
+                anchored_criteria.extend(anchored_single.criteria)
+            anchored = proposal.model_copy(update={"criteria": anchored_criteria})
+        completed: list[CriterionCompilationProposal] = []
+        incomplete = False
+        for item in items:
+            item_criteria = [
+                criterion
+                for criterion in anchored.criteria
+                if item.start <= criterion.start and criterion.end <= item.end
+            ]
+            relative = [
+                criterion.model_copy(
+                    update={
+                        "start": criterion.start - item.start,
+                        "end": criterion.end - item.start,
+                    }
+                )
+                for criterion in item_criteria
+            ]
+            item_text = source[item.start : item.end]
+            if item_criteria and calculate_source_coverage(item_text, relative).ratio == 1.0:
+                completed.extend(item_criteria)
+                continue
+            incomplete = True
+            completed.append(
+                self._opaque_item_proposal(
+                    trial,
+                    item,
+                    source_order=1,
+                    reason_code="LIVE_MODEL_ITEM_INCOMPLETE",
+                    warning_code="LIVE_INCOMPLETE_SOURCE_ITEM_OPAQUE",
+                )
+            )
+        direction_orders: dict[SourceDirection, int] = {}
+        ordered: list[CriterionCompilationProposal] = []
+        for criterion in sorted(completed, key=lambda item: (item.start, item.end)):
+            source_order = direction_orders.get(criterion.source_direction, 0) + 1
+            direction_orders[criterion.source_direction] = source_order
+            ordered.append(criterion.model_copy(update={"source_order": source_order}))
+        warnings = list(proposal.compiler_warnings)
+        if incomplete:
+            warnings.append("LIVE_INCOMPLETE_SOURCE_OPAQUE")
+        if anchor_degraded:
+            warnings.append("LIVE_UNANCHORED_SOURCE_ITEM_OPAQUE")
+        return proposal.model_copy(
+            update={"criteria": ordered, "compiler_warnings": sorted(set(warnings))}
         )
 
     async def _generate_offline_compilation(
@@ -577,11 +667,12 @@ class ProtocolCompilationService:
                 base_proposal=base_proposal,
                 session_id=session_id,
             )
-        return await self._generate_compilation(
+        proposal, used_fallback = await self._generate_compilation(
             trial,
             repair_issues=repair_issues,
             session_id=session_id,
         )
+        return self._complete_live_source_coverage(trial, proposal), used_fallback
 
     async def _review(
         self, compilation: TrustedCompilation, *, session_id: str = "unscoped"
@@ -624,11 +715,19 @@ class ProtocolCompilationService:
                 output_model=ProtocolReviewProposal,
                 primary_thinking_level="MEDIUM",
                 fallback_thinking_level="HIGH",
-                primary_max_output_tokens=1500,
-                fallback_max_output_tokens=1500,
+                primary_max_output_tokens=4000,
+                fallback_max_output_tokens=4000,
                 primary_max_attempts=self.primary_max_attempts,
-                primary_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
-                fallback_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
+                primary_attempt_timeout_seconds=(
+                    max(20.0, self.generation_attempt_timeout_seconds)
+                    if self.generation_attempt_timeout_seconds is not None
+                    else None
+                ),
+                fallback_attempt_timeout_seconds=(
+                    max(20.0, self.generation_attempt_timeout_seconds)
+                    if self.generation_attempt_timeout_seconds is not None
+                    else None
+                ),
                 session_id=session_id,
             )
             proposals.append(proposal)
@@ -763,11 +862,28 @@ class ProtocolCompilationService:
                 compiler_model_id=(
                     "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                 ),
-                compiler_prompt_version="1.0.6",
+                compiler_prompt_version="1.0.9",
                 created_at=now,
                 evaluation_date=evaluation_date,
             )
-            review, reviewer_fallback = await self._review(compilation, session_id=session_id)
+            if "LIVE_INCOMPLETE_SOURCE_OPAQUE" in compilation.compiled_trial.warnings:
+                return CompilationWorkflowResult(
+                    compilation=compilation,
+                    review_artifact=None,
+                    review_attempts=[],
+                    repair_attempted=False,
+                    degradation_codes=["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"],
+                )
+            try:
+                review, reviewer_fallback = await self._review(compilation, session_id=session_id)
+            except StructuredGenerationUnavailable:
+                return CompilationWorkflowResult(
+                    compilation=compilation,
+                    review_artifact=None,
+                    review_attempts=[],
+                    repair_attempted=False,
+                    degradation_codes=["PROTOCOL_REVIEW_UNAVAILABLE_UNVERIFIED"],
+                )
             review_attempts.append(review)
             validation_issues = self._trusted_validation_repair_issues(compilation)
             if (
@@ -794,7 +910,7 @@ class ProtocolCompilationService:
                         compiler_model_id=(
                             "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                         ),
-                        compiler_prompt_version="1.0.6",
+                        compiler_prompt_version="1.0.9",
                         created_at=now,
                         evaluation_date=evaluation_date,
                     )
@@ -876,6 +992,8 @@ class ProtocolCompilationService:
                 compiler_used_fallback=compiler_fallback,
                 reviewer_used_fallback=reviewer_fallback,
             )
+            if "LIVE_INCOMPLETE_SOURCE_OPAQUE" in compilation.compiled_trial.warnings:
+                degradation_codes.append("PROTOCOL_COMPILATION_PARTIAL_COVERAGE")
             return CompilationWorkflowResult(
                 compilation=TrustedCompilation(
                     compiled_trial=reviewed.compiled_trial,
@@ -886,9 +1004,9 @@ class ProtocolCompilationService:
                 review_attempts=review_attempts,
                 repair_attempted=repair_attempted,
                 degradation_codes=(
-                    [*degradation_codes, "DOUBLE_LITE_FALLBACK_UNVERIFIED"]
+                    [*sorted(set(degradation_codes)), "DOUBLE_LITE_FALLBACK_UNVERIFIED"]
                     if compiler_fallback and reviewer_fallback
-                    else degradation_codes
+                    else sorted(set(degradation_codes))
                 ),
             )
         except (StructuredGenerationUnavailable, ProtocolCompilationError, ValueError) as error:

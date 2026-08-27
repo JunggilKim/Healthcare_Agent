@@ -25,6 +25,7 @@ def build_sort_tuple(evaluation: TrialEvaluation) -> tuple[object, ...]:
         )
     return (
         key.tier_order,
+        evaluation.opaque_critical_count,
         key.critical_unknown_count,
         -proof,
         -retrieval,

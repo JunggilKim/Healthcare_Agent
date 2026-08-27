@@ -8,16 +8,22 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.domain.base import StrictModel
+from backend.app.domain.values import StringValue
 from backend.app.infrastructure.cache import LocalModelResultCache, model_cache_key
 from backend.app.infrastructure.structured_generation import (
     StructuredGenerationUnavailable,
     StructuredGenerator,
+    _normalize_model_json_artifacts,
 )
 from backend.app.infrastructure.usage_guard import InMemoryUsageGuard, default_pricing_estimator
 
 
 class _Output(StrictModel):
     value: str
+
+
+class _TypedOutput(StrictModel):
+    value: StringValue
 
 
 class _FakeModels:
@@ -56,6 +62,26 @@ class _FallbackModels:
         self.calls.append(model)
         text = '{"value":"fallback"}' if model == "gemini-3.5-flash-lite" else "invalid"
         return SimpleNamespace(text=text, usage_metadata=None)
+
+
+class _NullStringSystemModels:
+    async def generate_content(self, *, model, contents, config):
+        del model, contents, config
+        return SimpleNamespace(
+            text='{"value":{"kind":"string","value":"other","system":null}}',
+            usage_metadata=None,
+            candidates=[],
+        )
+
+
+class _TruncatedModels:
+    async def generate_content(self, *, model, contents, config):
+        del model, contents, config
+        return SimpleNamespace(
+            text='{"value":"unfinished',
+            usage_metadata=None,
+            candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+        )
 
 
 class _FailureModels:
@@ -229,6 +255,92 @@ async def test_schema_exhaustion_reports_safe_issue_locations(tmp_path: Path) ->
             output_schema_version="test-v1",
             slot_catalog_version="slot-catalog-v1",
             normalized_input={"x": 1},
+            output_model=_Output,
+            thinking_level="MEDIUM",
+            max_output_tokens=100,
+            max_attempts=1,
+        )
+
+
+async def test_null_categorical_system_on_string_value_is_normalized(tmp_path: Path) -> None:
+    client = _FakeClient()
+    client.aio.models = _NullStringSystemModels()
+    generator = StructuredGenerator(
+        client=client,
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+    )
+
+    output, _record = await generator.generate(
+        model_id="gemini-3.5-flash-lite",
+        task_name="typed-value-test",
+        prompt="return json",
+        prompt_version="1",
+        output_schema_version="test-v1",
+        slot_catalog_version="slot-catalog-v1",
+        normalized_input={},
+        output_model=_TypedOutput,
+        thinking_level="MEDIUM",
+        max_output_tokens=100,
+        max_attempts=1,
+    )
+
+    assert output.value == StringValue(kind="string", value="other")
+
+
+def test_numeric_bound_shape_is_normalized_for_value_and_values() -> None:
+    normalized = _normalize_model_json_artifacts(
+        {
+            "op": "LTE",
+            "value": {"kind": "number", "upper": 2, "upper_inclusive": True, "unit": "score"},
+            "values": [
+                {
+                    "kind": "number",
+                    "lower": 1,
+                    "upper": 2,
+                    "lower_inclusive": True,
+                    "upper_inclusive": True,
+                }
+            ],
+        }
+    )
+
+    assert normalized == {
+        "op": "LTE",
+        "value": {"kind": "number", "value": 2, "unit": "score"},
+        "values": [
+            {
+                "kind": "range",
+                "lower": 1,
+                "upper": 2,
+                "lower_inclusive": True,
+                "upper_inclusive": True,
+            }
+        ],
+    }
+
+
+async def test_max_token_finish_reason_is_reported_as_truncation(tmp_path: Path) -> None:
+    client = _FakeClient()
+    client.aio.models = _TruncatedModels()
+    generator = StructuredGenerator(
+        client=client,
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+    )
+
+    with pytest.raises(
+        StructuredGenerationUnavailable,
+        match="last_error=ModelOutputTruncated",
+    ):
+        await generator.generate(
+            model_id="gemini-3.5-flash-lite",
+            task_name="truncation-test",
+            prompt="return json",
+            prompt_version="1",
+            output_schema_version="test-v1",
+            slot_catalog_version="slot-catalog-v1",
+            normalized_input={},
             output_model=_Output,
             thinking_level="MEDIUM",
             max_output_tokens=100,

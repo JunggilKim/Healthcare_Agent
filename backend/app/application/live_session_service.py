@@ -760,11 +760,13 @@ class LiveSessionService:
                 latency_ms=(time.monotonic() - compilation_started) * 1000,
                 mode=retrieval.mode,
                 candidate_count=len(compilation_results),
-                degradation_codes=[
-                    code
-                    for _nct_id, result in compilation_results
-                    for code in result.degradation_codes
-                ],
+                degradation_codes=list(
+                    dict.fromkeys(
+                        code
+                        for _nct_id, result in compilation_results
+                        for code in result.degradation_codes
+                    )
+                ),
             )
         )
         for nct_id, result in compilation_results:
@@ -783,6 +785,7 @@ class LiveSessionService:
                     "protocol_verified": compiled.protocol_verified,
                 },
             )
+        payload["degradation_codes"] = list(dict.fromkeys(payload["degradation_codes"]))
         state = SessionState.COMPILING
         event = await self._transition(
             payload, state, SessionState.EVALUATING, "COMPILATION_COMPLETED", {}

@@ -118,6 +118,25 @@ test("question value buttons submit the backend typed value instead of the displ
   });
 });
 
+test("limited sessions do not claim that every evidence check is complete", () => {
+  const limited = sessionSchema.parse({
+    ...session,
+    degradation_codes: ["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"],
+    current_question: {
+      selected: null,
+      stop_reason: "UTILITY_BELOW_THRESHOLD",
+      top_alternatives: [],
+      patient_facing_question: null,
+      deterministic_rationale: "추가 질문의 예상 효용이 중단 기준보다 낮습니다.",
+    },
+  });
+
+  render(<QuestionPanel session={limited} busy={false} onAnswer={() => undefined} />);
+  expect(screen.getByText("현재 제한적 결과에서 선택된 다음 질문이 없습니다.")).toBeVisible();
+  expect(screen.getByText("추가 질문의 예상 효용이 중단 기준보다 낮습니다.")).toBeVisible();
+  expect(screen.queryByText(/근거 평가를 모두 마쳤습니다/)).not.toBeInTheDocument();
+});
+
 test("agent timeline communicates degraded state in text", () => {
   render(
     <AgentTimeline

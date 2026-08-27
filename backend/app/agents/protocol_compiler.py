@@ -60,14 +60,42 @@ def _exact_source_offsets(source: str, *, start: int, end: int, quote: str) -> t
 def _anchor_proposal_source_spans(
     source: str, proposal: CompiledTrialProposal
 ) -> CompiledTrialProposal:
-    criteria = []
-    for criterion in proposal.criteria:
-        start, end = _exact_source_offsets(
-            source,
-            start=criterion.start,
-            end=criterion.end,
-            quote=criterion.quote,
+    repeated_assignments: dict[int, int] = {}
+    quote_groups: dict[str, list[int]] = {}
+    for index, criterion in enumerate(proposal.criteria):
+        quote_groups.setdefault(criterion.quote, []).append(index)
+    for quote, indexes in quote_groups.items():
+        if len(indexes) < 2:
+            continue
+        matches: list[int] = []
+        offset = source.find(quote)
+        while offset >= 0:
+            matches.append(offset)
+            offset = source.find(quote, offset + 1)
+        if len(matches) != len(indexes):
+            continue
+        ordered_indexes = sorted(
+            indexes,
+            key=lambda index: (
+                proposal.criteria[index].start,
+                proposal.criteria[index].end,
+                index,
+            ),
         )
+        repeated_assignments.update(zip(ordered_indexes, sorted(matches), strict=True))
+
+    criteria = []
+    for index, criterion in enumerate(proposal.criteria):
+        if index in repeated_assignments:
+            start = repeated_assignments[index]
+            end = start + len(criterion.quote)
+        else:
+            start, end = _exact_source_offsets(
+                source,
+                start=criterion.start,
+                end=criterion.end,
+                quote=criterion.quote,
+            )
         criteria.append(
             criterion.model_copy(update={"start": start, "end": end, "quote": source[start:end]})
         )

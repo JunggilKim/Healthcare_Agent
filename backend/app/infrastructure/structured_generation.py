@@ -34,6 +34,73 @@ class StructuredGenerationUnavailable(RuntimeError):
     pass
 
 
+class ModelOutputTruncated(RuntimeError):
+    pass
+
+
+def _normalize_model_json_artifacts(value: object) -> object:
+    """Repair schema-shape artifacts without changing clinical meaning.
+
+    Gemini occasionally carries the categorical ``system`` property into the
+    adjacent string branch, emits the placeholder discriminator ``value``, or
+    places a one-sided numeric bound inside a ``number`` object.  The emitted
+    fields and AST comparison operator uniquely determine the intended schema
+    branch.  Ambiguous shapes remain strict validation failures.
+    """
+
+    if isinstance(value, list):
+        return [_normalize_model_json_artifacts(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized = {
+        key: _normalize_model_json_artifacts(item)
+        for key, item in value.items()
+        if not (value.get("kind") == "string" and key == "system" and item is None)
+    }
+    if normalized.get("kind") == "value":
+        if "system" in normalized:
+            normalized["kind"] = "categorical"
+        elif "normalized" in normalized:
+            normalized["kind"] = "string"
+    if normalized.get("kind") == "number" and ("lower" in normalized or "upper" in normalized):
+        normalized["kind"] = "range"
+    typed_value = normalized.get("value")
+    if (
+        isinstance(typed_value, dict)
+        and typed_value.get("kind") in {"number", "range"}
+        and ("lower" in typed_value or "upper" in typed_value)
+    ):
+        operator = normalized.get("op")
+        bound_key = (
+            "lower" if operator in {"GTE", "GT"} else "upper" if operator in {"LTE", "LT"} else None
+        )
+        if bound_key is not None and typed_value.get(bound_key) is not None:
+            normalized["value"] = {
+                "kind": "number",
+                "value": typed_value[bound_key],
+                **({"unit": typed_value["unit"]} if "unit" in typed_value else {}),
+            }
+        elif operator == "BETWEEN_INCLUSIVE":
+            normalized["value"] = {**typed_value, "kind": "range"}
+    return normalized
+
+
+def _validate_generated_json[ValidatedModel: BaseModel](
+    output_model: type[ValidatedModel], response_text: str
+) -> ValidatedModel:
+    try:
+        return output_model.model_validate_json(response_text)
+    except ValidationError as original_error:
+        try:
+            raw = orjson.loads(response_text)
+        except orjson.JSONDecodeError:
+            raise original_error from None
+        normalized = _normalize_model_json_artifacts(raw)
+        if normalized == raw:
+            raise original_error
+        return output_model.model_validate(normalized)
+
+
 class StructuredGenerator:
     def __init__(
         self,
@@ -182,7 +249,14 @@ class StructuredGenerator:
                     output_tokens=output_tokens,
                     reasoning_tokens=reasoning_tokens,
                 )
-                parsed = output_model.model_validate_json(response.text or "")
+                candidates = getattr(response, "candidates", None)
+                candidate = candidates[0] if candidates else None
+                finish_reason = str(getattr(candidate, "finish_reason", ""))
+                if finish_reason.endswith("MAX_TOKENS"):
+                    raise ModelOutputTruncated(
+                        f"model output reached max_output_tokens={max_output_tokens}"
+                    )
+                parsed = _validate_generated_json(output_model, response.text or "")
                 if reservation is not None:
                     assert self.usage_guard is not None
                     await self.usage_guard.reconcile_async(

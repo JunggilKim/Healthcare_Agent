@@ -379,6 +379,9 @@ export function App() {
 
   if (location.pathname === "/about") return <AboutPage />;
 
+  const hasDegradation = degradationCodes.length > 0;
+  const completionLabel = hasDegradation ? "제한적 분석 결과" : "분석 완료";
+
   return (
     <main className="app-shell min-h-screen" aria-busy={busy}>
       <header className={`app-header sticky top-0 z-20 ${session ? "workspace-command-bar" : "landing-product-bar"}`}>
@@ -388,7 +391,7 @@ export function App() {
             <p className="brand-descriptor">{ko.product.descriptor}</p>
           </Link>
           <div className="header-meta flex flex-wrap items-center gap-2">
-            {session ? <span className="workspace-context">{inputMode === "seed" ? `${selectedCase} 데모` : "직접 입력 사례"} · 분석 완료</span> : null}
+            {session ? <span className="workspace-context">{inputMode === "seed" ? `${selectedCase} 데모` : "직접 입력 사례"} · {completionLabel}</span> : null}
             <span className="mode-badge">{!session ? ko.mode.snapshot : session.mode === "snapshot" ? ko.mode.snapshotShort : ko.mode.liveShort}</span>
             <span className="mode-badge">기준일 2026.08.11</span>
             <span className="mode-badge hidden sm:inline-flex">저장된 분석 · 비용 $0.000</span>
@@ -465,7 +468,7 @@ export function App() {
         <div className="session-layout">
           <aside className="clinical-sidebar" aria-label="Clinical intelligence navigation">
             <div className="sidebar-brand"><span aria-hidden="true">+</span><strong>TRIAL-OPT</strong></div>
-            <div className="sidebar-case"><small>{inputMode === "seed" ? "데모 사례" : "직접 입력 사례"}</small><strong>{inputMode === "seed" ? selectedCase : "직접 입력"} · {session.mode === "snapshot" ? "스냅샷" : "라이브"}</strong><span>조건별 근거 평가 완료</span></div>
+            <div className="sidebar-case"><small>{inputMode === "seed" ? "데모 사례" : "직접 입력 사례"}</small><strong>{inputMode === "seed" ? selectedCase : "직접 입력"} · {session.mode === "snapshot" ? "스냅샷" : "라이브"}</strong><span>{hasDegradation ? "조건별 근거 평가 제한적 완료" : "조건별 근거 평가 완료"}</span></div>
             <nav>
               <Link to="/" className="sidebar-nav-item"><span aria-hidden="true">⌂</span><span><strong>사전 선별</strong><small>새 사례 선택</small></span></Link>
               <button className={`sidebar-nav-item ${tab === "patient" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("patient")}><span aria-hidden="true">◇</span><span><strong>Trial Workspace</strong><small>조건별 판정과 다음 질문</small></span></button>
@@ -475,7 +478,7 @@ export function App() {
             <p className="sidebar-disclaimer">연구용 프로토타입<br />의료 조언이나 최종 적격 판정이 아닙니다.</p>
           </aside>
           <div className="workspace-shell mx-auto max-w-[1500px] px-5 py-4">
-          {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>완료된 분석 결과는 그대로 보존했습니다.</strong> 일부 외부 기능을 사용할 수 없어 대체 경로로 전환했습니다. <span className="status-code">{degradationCodes.join(" · ")}</span></p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>S004 스냅샷 데모로 새로 시작</button></div> : null}
+          {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>제한적 분석 결과입니다.</strong> 확인된 조건의 결과는 보존했지만 일부 조건은 자동 검증에 사용할 수 없습니다. <span className="status-code">{degradationCodes.join(" · ")}</span></p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>S004 스냅샷 데모로 새로 시작</button></div> : null}
           <div className="workspace-toolbar mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-2">
             <p className="text-sm text-slate-300">{statusText}</p>
             <div className="flex flex-wrap gap-2"><button aria-label="Replay Proof" className="secondary-button py-2" onClick={() => void replay()}>{ko.action.replay}</button><button aria-label="Export report" className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : "일부 저장 기능을 사용할 수 없어 보고서를 저장할 수 없습니다."} onClick={() => credentials && void exportReport(credentials)}>{ko.action.export}</button><button aria-label="Reset session" className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>{ko.action.reset}</button><button aria-label="Delete session" className="danger-button py-2" disabled={busy} onClick={() => void deleteCurrentSession()}>{ko.action.delete}</button></div>

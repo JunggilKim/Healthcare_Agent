@@ -15,7 +15,15 @@ interface Props {
 export function QuestionPanel({ session, busy, onAnswer }: Props) {
   const selection = session.current_question;
   const question = selection?.selected;
-  if (!selection || !question) return <section className="panel empty-question">현재 기록으로 가능한 근거 평가를 모두 마쳤습니다. 추가로 확인할 항목이 없습니다.</section>;
+  if (!selection || !question) {
+    const degraded = session.degradation_codes.length > 0;
+    return (
+      <section className="panel empty-question">
+        <strong>{degraded ? "현재 제한적 결과에서 선택된 다음 질문이 없습니다." : "현재 기록으로 선택된 다음 질문이 없습니다."}</strong>
+        {selection?.deterministic_rationale ? <p className="mt-2">{selection.deterministic_rationale}</p> : null}
+      </section>
+    );
+  }
   const isHistology = question.slot_id === "pathology.histology";
   return (
     <section className="panel question-panel min-h-0 flex-1 overflow-y-auto" aria-labelledby="question-title">
