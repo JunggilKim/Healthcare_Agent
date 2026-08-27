@@ -37,7 +37,10 @@ async def request_id_middleware(
             or request.url.path == "/about"
             or request.url.path.startswith("/session/")
         ):
-            response.headers["Cache-Control"] = "no-cache"
+            # The HTML shell contains content-hashed asset names. It must never be
+            # reused across deployments, otherwise a browser can keep booting an
+            # old bundle even though the new revision is already serving traffic.
+            response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
         return response
     finally:
         route = request.scope.get("route")

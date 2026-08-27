@@ -29,7 +29,7 @@ def test_declared_spa_routes_support_direct_navigation() -> None:
 def test_frontend_cache_and_compression_contracts() -> None:
     client = TestClient(app)
     index = client.get("/")
-    assert index.headers["cache-control"] == "no-cache"
+    assert index.headers["cache-control"] == "no-store, max-age=0, must-revalidate"
 
     asset_app = FastAPI()
     asset_app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
