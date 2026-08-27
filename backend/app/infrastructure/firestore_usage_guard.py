@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -43,6 +44,11 @@ class FirestoreUsageGuard:
         self.daily_cap_usd = daily_cap_usd
         self.total_cap_usd = total_cap_usd
         self.stale_after = stale_after
+        # Every reservation touches the shared total document. Serializing only
+        # the short accounting transactions inside one Cloud Run process avoids
+        # self-inflicted Firestore ABORTED conflicts while model calls still run
+        # concurrently after their reservations have been acquired.
+        self._transaction_lock = asyncio.Lock()
 
     @staticmethod
     def _projected(data: dict[str, Any], reservations: dict[str, dict[str, Any]]) -> Decimal:
@@ -103,7 +109,8 @@ class FirestoreUsageGuard:
                     },
                 )
 
-        await reserve(transaction)
+        async with self._transaction_lock:
+            await reserve(transaction)
         return reservation
 
     async def _finish(self, reservation_id: str, *, actual_usd: Decimal | None) -> None:
@@ -145,7 +152,8 @@ class FirestoreUsageGuard:
                     },
                 )
 
-        await finish(transaction)
+        async with self._transaction_lock:
+            await finish(transaction)
 
     async def reconcile_async(self, reservation_id: str, *, actual_usd: Decimal) -> None:
         if actual_usd < 0:

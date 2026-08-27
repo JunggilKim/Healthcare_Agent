@@ -32,7 +32,12 @@ from backend.app.settings import get_settings
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    for logger_name in ("trial_opt.request", "trial_opt.model", "trial_opt.persistence"):
+    for logger_name in (
+        "trial_opt.request",
+        "trial_opt.model",
+        "trial_opt.persistence",
+        "trial_opt.live",
+    ):
         audit_logger = logging.getLogger(logger_name)
         audit_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
         audit_logger.propagate = False
