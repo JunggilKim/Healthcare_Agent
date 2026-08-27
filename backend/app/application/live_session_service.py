@@ -238,6 +238,13 @@ class LiveSessionService:
             if isinstance(store, (GcpSessionStore, PersistenceResilientStore))
             else None
         )
+        shared_embedding_bucket = (
+            store.bucket
+            if isinstance(store, GcpSessionStore)
+            else store.delegate.bucket
+            if isinstance(store, PersistenceResilientStore)
+            else None
+        )
         usage_guard = (
             FirestoreUsageGuard(
                 firestore_client,
@@ -255,9 +262,16 @@ class LiveSessionService:
         self.generator = StructuredGenerator(
             client=client,
             cache=(
-                FirestoreModelResultCache(firestore_client)
+                FirestoreModelResultCache(
+                    firestore_client,
+                    namespace=settings.model_cache_namespace,
+                )
                 if firestore_client is not None
-                else LocalModelResultCache(settings.local_store_dir / "model-cache")
+                else LocalModelResultCache(
+                    settings.local_store_dir / "model-cache" / settings.model_cache_namespace
+                    if settings.model_cache_namespace
+                    else settings.local_store_dir / "model-cache"
+                )
             ),
             pricing=default_pricing_estimator(),
             usage_guard=usage_guard,
@@ -278,7 +292,13 @@ class LiveSessionService:
                 client,
                 model=settings.gemini_embedding_model,
                 dimension=settings.embedding_dim,
-                cache_root=settings.local_store_dir / "embedding-cache",
+                cache_root=(
+                    settings.local_store_dir
+                    / "embedding-cache"
+                    / settings.embedding_cache_namespace
+                ),
+                shared_cache_bucket=shared_embedding_bucket,
+                cache_namespace=settings.embedding_cache_namespace,
             ),
             snapshot_root=REPOSITORY_ROOT / "data/fixtures/retrieval/S004",
             snapshot_embeddings=RecordedEmbeddingProvider(

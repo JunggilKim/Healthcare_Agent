@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     gemini_lite_model: str = "gemini-3.5-flash-lite"
     gemini_embedding_model: str = "gemini-embedding-001"
     embedding_dim: int = 768
+    embedding_cache_namespace: str = Field(default="v1", min_length=1, pattern=r"^[A-Za-z0-9_.-]+$")
+    model_cache_namespace: str = Field(default="", pattern=r"^[A-Za-z0-9_.-]*$")
     demo_snapshot_version: str = ""
     demo_snapshot_dir: Path = Path("data/demo/current")
     app_enable_fault_injection: bool = False

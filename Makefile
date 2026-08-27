@@ -1,4 +1,4 @@
-.PHONY: bootstrap lint typecheck test test-offline frontend-build docker-build demo-offline live-local eval build-snapshot verify-release deploy smoke-prod
+.PHONY: bootstrap lint typecheck test test-offline frontend-build docker-build demo-offline live-local eval accuracy-gate build-snapshot verify-release deploy smoke-prod
 
 bootstrap:
 	uv sync --python 3.12
@@ -36,6 +36,10 @@ eval:
 	uv run python scripts/evaluate.py --suite all --config config/eval.yaml
 	uv run python scripts/acquire_trec.py
 	uv run python scripts/render_eval_report.py --latest
+
+accuracy-gate:
+	uv run python scripts/evaluate.py --suite all --config config/eval.yaml
+	uv run python scripts/check_accuracy_gate.py
 
 build-snapshot:
 	uv run python scripts/build_demo_snapshot.py --cases S004,S008,S001 --mode live --manual-review-manifest data/demo/manual_review.yaml --output data/demo/current

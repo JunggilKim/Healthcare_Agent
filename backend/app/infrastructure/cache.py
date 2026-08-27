@@ -76,18 +76,22 @@ class LocalModelResultCache:
 class FirestoreModelResultCache:
     """Shared immutable small-result cache for Cloud Run instances."""
 
-    def __init__(self, client: firestore.AsyncClient) -> None:
+    def __init__(self, client: firestore.AsyncClient, *, namespace: str = "") -> None:
         self._collection = client.collection("llm_cache")
+        self._key_prefix = f"{namespace}:" if namespace else ""
+
+    def _document_key(self, key: str) -> str:
+        return f"{self._key_prefix}{key}"
 
     async def get(self, key: str) -> StructuredGenerationRecord | None:
-        snapshot = await self._collection.document(key).get()
+        snapshot = await self._collection.document(self._document_key(key)).get()
         if not snapshot.exists:
             return None
         data = snapshot.to_dict() or {}
         return StructuredGenerationRecord.model_validate(data["record"])
 
     async def put(self, record: StructuredGenerationRecord) -> str:
-        reference = self._collection.document(record.cache_key)
+        reference = self._collection.document(self._document_key(record.cache_key))
         await reference.set(
             {
                 "record": record.model_dump(mode="json"),

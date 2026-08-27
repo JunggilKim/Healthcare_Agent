@@ -17,6 +17,7 @@ jobs:
       - run: uv sync --frozen
       - run: npm ci
       - run: make lint typecheck test-offline frontend-build
+      - run: make accuracy-gate
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
       - run: docker build -t trial-opt:ci .
