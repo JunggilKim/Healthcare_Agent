@@ -38,7 +38,7 @@ eval:
 	uv run python scripts/render_eval_report.py --latest
 
 accuracy-gate:
-	uv run python scripts/evaluate.py --suite all --config config/eval.yaml
+	uv run python scripts/evaluate.py --suite all --config config/eval.yaml --benchmark tests/fixtures/evaluation/benchmark.json
 	uv run python scripts/check_accuracy_gate.py
 
 build-snapshot:
