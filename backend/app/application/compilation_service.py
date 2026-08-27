@@ -115,15 +115,26 @@ class ProtocolCompilationService:
         *,
         offline_reviewer_chunk_size: int | None = None,
         offline_compiler_chunk_size: int | None = None,
+        primary_max_attempts: int = 3,
+        generation_attempt_timeout_seconds: float | None = None,
     ) -> None:
         if offline_reviewer_chunk_size is not None and offline_reviewer_chunk_size < 1:
             raise ValueError("offline_reviewer_chunk_size must be positive")
         if offline_compiler_chunk_size is not None and offline_compiler_chunk_size < 1:
             raise ValueError("offline_compiler_chunk_size must be positive")
+        if primary_max_attempts < 1:
+            raise ValueError("primary_max_attempts must be positive")
+        if (
+            generation_attempt_timeout_seconds is not None
+            and generation_attempt_timeout_seconds <= 0
+        ):
+            raise ValueError("generation_attempt_timeout_seconds must be positive")
         self.generator = generator
         self.slot_catalog = slot_catalog
         self.offline_reviewer_chunk_size = offline_reviewer_chunk_size
         self.offline_compiler_chunk_size = offline_compiler_chunk_size
+        self.primary_max_attempts = primary_max_attempts
+        self.generation_attempt_timeout_seconds = generation_attempt_timeout_seconds
 
     def _compiler_prompt(
         self,
@@ -181,6 +192,9 @@ class ProtocolCompilationService:
             fallback_max_output_tokens=2500,
             primary_thinking_budget=1024,
             fallback_thinking_budget=1024,
+            primary_max_attempts=self.primary_max_attempts,
+            primary_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
+            fallback_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
             session_id=session_id,
         )
         return proposal, record.used_fallback
@@ -609,6 +623,9 @@ class ProtocolCompilationService:
                 fallback_thinking_level="HIGH",
                 primary_max_output_tokens=1500,
                 fallback_max_output_tokens=1500,
+                primary_max_attempts=self.primary_max_attempts,
+                primary_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
+                fallback_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
                 session_id=session_id,
             )
             proposals.append(proposal)

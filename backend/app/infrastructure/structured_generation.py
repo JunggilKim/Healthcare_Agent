@@ -79,8 +79,13 @@ class StructuredGenerator:
         max_output_tokens: int,
         max_attempts: int,
         thinking_budget: int | None = None,
+        attempt_timeout_seconds: float | None = None,
         session_id: str = "unscoped",
     ) -> tuple[OutputModel, StructuredGenerationRecord]:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        if attempt_timeout_seconds is not None and attempt_timeout_seconds <= 0:
+            raise ValueError("attempt_timeout_seconds must be positive")
         thinking_config, thinking_cache_config = self._thinking_config(
             thinking_level=thinking_level,
             thinking_budget=thinking_budget,
@@ -152,7 +157,7 @@ class StructuredGenerator:
                     reservation = await self.usage_guard.reserve_async(
                         session_id=session_id, amount_usd=reserved_cost
                     )
-                response = await self.client.aio.models.generate_content(
+                request = self.client.aio.models.generate_content(
                     model=model_id,
                     contents=retry_prompt,
                     config=types.GenerateContentConfig(
@@ -162,6 +167,11 @@ class StructuredGenerator:
                         thinking_config=thinking_config,
                     ),
                 )
+                if attempt_timeout_seconds is None:
+                    response = await request
+                else:
+                    async with asyncio.timeout(attempt_timeout_seconds):
+                        response = await request
                 metadata = response.usage_metadata
                 prompt_tokens = int(metadata.prompt_token_count or 0) if metadata else 0
                 output_tokens = int(metadata.candidates_token_count or 0) if metadata else 0
@@ -232,6 +242,16 @@ class StructuredGenerator:
                             reservation.reservation_id, actual_usd=billed_cost
                         )
                 last_error = error
+                logger.warning(
+                    self._attempt_failure_log(
+                        model_id=model_id,
+                        task_name=task_name,
+                        session_id=session_id,
+                        latency_ms=(time.monotonic() - call_started) * 1000,
+                        retry_count=attempt,
+                        error=error,
+                    )
+                )
                 if attempt < max_attempts - 1:
                     issue = (
                         self._validation_issue_text(error)
@@ -322,6 +342,39 @@ class StructuredGenerator:
             }
         ).decode()
 
+    @staticmethod
+    def _attempt_failure_log(
+        *,
+        model_id: str,
+        task_name: str,
+        session_id: str,
+        latency_ms: float,
+        retry_count: int,
+        error: Exception,
+    ) -> str:
+        return orjson.dumps(
+            {
+                "timestamp": datetime.now(UTC).isoformat(),
+                "severity": "WARNING",
+                "request_id": None,
+                "session_id_hash": hashlib.sha256(session_id.encode()).hexdigest(),
+                "event_type": "model_call_attempt_failed",
+                "stage": task_name,
+                "mode": None,
+                "model_id": model_id,
+                "task_name": task_name,
+                "cache_hit": False,
+                "input_tokens": None,
+                "output_tokens": None,
+                "estimated_cost_usd": None,
+                "latency_ms": round(latency_ms, 3),
+                "retry_count": retry_count,
+                "degradation_code": None,
+                "error_code": type(error).__name__,
+                "git_sha": os.getenv("APP_VERSION", "dev"),
+            }
+        ).decode()
+
     async def generate_primary_with_lite_fallback(
         self,
         *,
@@ -340,6 +393,10 @@ class StructuredGenerator:
         fallback_max_output_tokens: int,
         primary_thinking_budget: int | None = None,
         fallback_thinking_budget: int | None = None,
+        primary_max_attempts: int = 3,
+        fallback_max_attempts: int = 1,
+        primary_attempt_timeout_seconds: float | None = None,
+        fallback_attempt_timeout_seconds: float | None = None,
         session_id: str = "unscoped",
     ) -> tuple[OutputModel, StructuredGenerationRecord]:
         try:
@@ -355,7 +412,8 @@ class StructuredGenerator:
                 thinking_level=primary_thinking_level,
                 thinking_budget=primary_thinking_budget,
                 max_output_tokens=primary_max_output_tokens,
-                max_attempts=3,
+                max_attempts=primary_max_attempts,
+                attempt_timeout_seconds=primary_attempt_timeout_seconds,
                 session_id=session_id,
             )
         except (StructuredGenerationUnavailable, CircuitOpenError):
@@ -371,7 +429,8 @@ class StructuredGenerator:
                 thinking_level=fallback_thinking_level,
                 thinking_budget=fallback_thinking_budget,
                 max_output_tokens=fallback_max_output_tokens,
-                max_attempts=1,
+                max_attempts=fallback_max_attempts,
+                attempt_timeout_seconds=fallback_attempt_timeout_seconds,
                 session_id=session_id,
             )
             return parsed, record.model_copy(update={"used_fallback": True})

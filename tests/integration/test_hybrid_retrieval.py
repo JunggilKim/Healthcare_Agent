@@ -37,6 +37,7 @@ def _retriever(
     embeddings: RecordedEmbeddingProvider | DisabledEmbeddingProvider,
     snapshot_embeddings: RecordedEmbeddingProvider | None = None,
     client: httpx.AsyncClient | None = None,
+    dense_timeout_seconds: float | None = None,
 ) -> HybridRetriever:
     return HybridRetriever(
         ctgov=ClinicalTrialsGovClient(
@@ -48,6 +49,7 @@ def _retriever(
         embeddings=embeddings,
         snapshot_root=FIXTURE_ROOT,
         snapshot_embeddings=snapshot_embeddings,
+        dense_timeout_seconds=dense_timeout_seconds,
     )
 
 
@@ -204,6 +206,45 @@ async def test_live_condition_queries_are_fetched_concurrently_in_stable_order(
     assert max_active_studies == 3
     assert sorted(study_queries) == ["first", "second", "third"]
     assert result.mode == "hybrid_degraded"
+
+
+@pytest.mark.asyncio
+async def test_live_embedding_timeout_keeps_live_registry_candidates_and_uses_lexical_rank(
+    tmp_path: Path,
+) -> None:
+    search = (FIXTURE_ROOT / "search_response.json").read_bytes()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/version"):
+            return httpx.Response(
+                200,
+                json={"apiVersion": "2.0.5", "dataTimestamp": "2026-08-11T09:00:06"},
+                headers={"content-type": "application/json"},
+            )
+        return httpx.Response(200, content=search, headers={"content-type": "application/json"})
+
+    class SlowEmbeddings:
+        async def embed_query(self, _text: str):
+            await asyncio.sleep(1)
+
+        async def embed_documents(self, _texts):
+            await asyncio.sleep(1)
+
+    async with httpx.AsyncClient(
+        base_url="https://clinicaltrials.gov/api/v2",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        result = await _retriever(
+            tmp_path,
+            embeddings=SlowEmbeddings(),  # type: ignore[arg-type]
+            client=http_client,
+            dense_timeout_seconds=0.01,
+        ).retrieve(_query(), mode="live", allow_snapshot_fallback=False)
+
+    assert result.mode == "hybrid_degraded"
+    assert result.degradation_codes == ["EMBEDDING_TIMEOUT_LEXICAL_FALLBACK"]
+    assert result.dense_source_used is False
+    assert len(result.ranked_candidates) == 20
 
 
 def test_corrupt_local_reference_is_a_cache_miss(tmp_path: Path) -> None:

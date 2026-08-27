@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import numpy as np
@@ -183,6 +183,56 @@ class GeminiEmbeddingProvider:
     async def embed_documents(self, texts: Sequence[str]) -> list[np.ndarray]:
         if len(texts) > 20:
             raise ValueError("at most 20 uncached document embeddings are allowed")
-        return await asyncio.gather(
-            *(self._embed_one(text, "RETRIEVAL_DOCUMENT") for text in texts)
+        if not texts:
+            return []
+
+        cached = await asyncio.gather(
+            *(asyncio.to_thread(self._load_cached, text, "RETRIEVAL_DOCUMENT") for text in texts)
         )
+        results: list[np.ndarray | None] = list(cached)
+        missing_indexes = [index for index, vector in enumerate(results) if vector is None]
+        if not missing_indexes:
+            return cast(list[np.ndarray], results)
+
+        missing_texts = [texts[index] for index in missing_indexes]
+        async with self._semaphore:
+            try:
+                response = await self.client.aio.models.embed_content(
+                    model=self.model,
+                    # The SDK accepts a list of strings at runtime, but its nested
+                    # invariant input union does not type-check as list[str].
+                    contents=cast(Any, missing_texts),
+                    config=types.EmbedContentConfig(
+                        task_type="RETRIEVAL_DOCUMENT",
+                        output_dimensionality=self.dimension,
+                    ),
+                )
+            except Exception as error:
+                raise EmbeddingUnavailableError("Gemini embedding batch request failed") from error
+
+        embeddings = response.embeddings or []
+        if len(embeddings) != len(missing_indexes):
+            raise EmbeddingUnavailableError("Gemini returned an incomplete embedding batch")
+
+        writes = []
+        for index, embedding in zip(missing_indexes, embeddings, strict=True):
+            if embedding.values is None:
+                raise EmbeddingUnavailableError("Gemini returned no document embedding")
+            vector = np.asarray(embedding.values, dtype=np.float64)
+            if vector.shape != (self.dimension,) or not np.isfinite(vector).all():
+                raise EmbeddingUnavailableError("Gemini returned an invalid document embedding")
+            norm = float(np.linalg.norm(vector))
+            if norm == 0:
+                raise EmbeddingUnavailableError("Gemini returned a zero document embedding")
+            normalized = vector / norm
+            results[index] = normalized
+            writes.append(
+                asyncio.to_thread(
+                    self._store_cached,
+                    texts[index],
+                    "RETRIEVAL_DOCUMENT",
+                    normalized,
+                )
+            )
+        await asyncio.gather(*writes)
+        return cast(list[np.ndarray], results)

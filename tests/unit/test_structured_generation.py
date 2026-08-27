@@ -71,6 +71,18 @@ class _FailureModels:
         raise RuntimeError("429 RESOURCE_EXHAUSTED")
 
 
+class _SlowPrimaryModels:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def generate_content(self, *, model, contents, config):
+        del contents, config
+        self.calls.append(model)
+        if model == "gemini-3.6-flash":
+            await asyncio.sleep(1)
+        return SimpleNamespace(text='{"value":"fallback"}', usage_metadata=None)
+
+
 class _FailingWriteCache:
     async def get(self, _key: str):
         return None
@@ -257,6 +269,53 @@ async def test_primary_schema_exhaustion_uses_single_lite_fallback(tmp_path: Pat
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
     ]
+
+
+async def test_live_profile_bounds_primary_attempt_and_falls_back_after_timeout(
+    tmp_path: Path,
+) -> None:
+    client = _FakeClient()
+    models = _SlowPrimaryModels()
+    client.aio.models = models
+    generator = StructuredGenerator(
+        client=client,
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+        sleep=_no_sleep,
+        jitter=lambda _low, _high: 0,
+    )
+
+    output, record = await generator.generate_primary_with_lite_fallback(
+        primary_model_id="gemini-3.6-flash",
+        lite_model_id="gemini-3.5-flash-lite",
+        task_name="compiler",
+        prompt="return json",
+        prompt_version="1.0.0",
+        output_schema_version="test-v1",
+        slot_catalog_version="slot-catalog-v1",
+        normalized_input={"x": 1},
+        output_model=_Output,
+        primary_thinking_level="HIGH",
+        fallback_thinking_level="HIGH",
+        primary_max_output_tokens=100,
+        fallback_max_output_tokens=100,
+        primary_max_attempts=1,
+        primary_attempt_timeout_seconds=0.01,
+    )
+
+    assert output.value == "fallback"
+    assert record.used_fallback is True
+    assert models.calls == ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    failure_log = generator._attempt_failure_log(
+        model_id="gemini-3.6-flash",
+        task_name="compiler",
+        session_id="synthetic-session",
+        latency_ms=10,
+        retry_count=0,
+        error=TimeoutError(),
+    )
+    assert '"event_type":"model_call_attempt_failed"' in failure_log
+    assert '"error_code":"TimeoutError"' in failure_log
 
 
 async def test_explicit_thinking_budget_is_sent_and_cache_bound(tmp_path: Path) -> None:
