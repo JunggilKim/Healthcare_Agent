@@ -22,9 +22,13 @@ def _request(*, forwarded_for: str | None) -> Request:
 
 
 def test_rate_limit_subject_uses_google_appended_client_hop() -> None:
-    request = _request(forwarded_for="203.0.113.99, 219.254.21.212, 34.120.0.1")
+    request = _request(forwarded_for="203.0.113.99, 219.254.21.212")
 
     assert rate_limit_subject(request) == "219.254.21.212"
+
+
+def test_rate_limit_subject_accepts_cloud_run_single_hop_header() -> None:
+    assert rate_limit_subject(_request(forwarded_for="219.254.21.212")) == "219.254.21.212"
 
 
 def test_rate_limit_subject_falls_back_when_forwarded_chain_is_untrusted() -> None:

@@ -21,19 +21,18 @@ def get_session_service(request: Request) -> SessionService:
 def rate_limit_subject(request: Request) -> str:
     """Return the client address added by the trusted Google frontend.
 
-    Google load balancers append ``client-ip, load-balancer-ip`` to any
-    caller-supplied X-Forwarded-For values. Reading the second-to-last hop
-    avoids both the shared Cloud Run proxy address and spoofable leading hops.
+    The managed Cloud Run frontend appends its observed client address to any
+    caller-supplied X-Forwarded-For values. Reading the rightmost valid hop
+    avoids both the shared container proxy address and spoofable leading hops.
     """
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         hops = [item.strip() for item in forwarded.split(",")]
-        if len(hops) >= 2:
-            candidate = hops[-2]
+        for candidate in reversed(hops):
             try:
                 return str(ipaddress.ip_address(candidate))
             except ValueError:
-                pass
+                continue
     return request.client.host if request.client is not None else "unknown"
 
 
