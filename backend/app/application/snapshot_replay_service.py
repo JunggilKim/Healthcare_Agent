@@ -63,8 +63,7 @@ class SnapshotReplayService:
             for branch in branches
             if isinstance(branch, dict)
             and branch.get("question_id") == question_id
-            and str(PurePosixPath(str(branch.get("artifact_path", ""))).parent)
-            == branch_prefix
+            and str(PurePosixPath(str(branch.get("artifact_path", ""))).parent) == branch_prefix
         ]
 
     @classmethod
@@ -88,9 +87,7 @@ class SnapshotReplayService:
                 branch_prefix = "branches"
             else:
                 branch_prefix = ""
-        if cls._available_branches(
-            questions, question_id=question_id, branch_prefix=branch_prefix
-        ):
+        if cls._available_branches(questions, question_id=question_id, branch_prefix=branch_prefix):
             return False
 
         limited = dict(selection)
@@ -304,9 +301,7 @@ class SnapshotReplayService:
                 "expires_at",
             )
         }
-        protected["snapshot_branch_prefix"] = self._branch_prefix(
-            str(matching[0]["artifact_path"])
-        )
+        protected["snapshot_branch_prefix"] = self._branch_prefix(str(matching[0]["artifact_path"]))
         payload.update(branch_payload)
         payload.update(protected)
         self._hide_unreplayable_question(payload, questions)
