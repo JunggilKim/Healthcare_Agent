@@ -92,12 +92,21 @@ test("structured question branches preserve their typed value", async () => {
     () => undefined,
   );
 
-  expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
-    question_id: "question-muscle-invasion",
-    answer_text: null,
-    structured_value: { kind: "boolean", value: true },
-    unknown: false,
-    declined: false,
+  expect(fetchMock).toHaveBeenCalledWith("/api/v1/sessions/session-s004/answers", {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "answer-turn-muscle-invasion",
+      "X-Session-Token": "token-s004",
+    },
+    body: JSON.stringify({
+      question_id: "question-muscle-invasion",
+      answer_text: null,
+      structured_value: { kind: "boolean", value: true },
+      unknown: false,
+      declined: false,
+    }),
   });
 });
 
