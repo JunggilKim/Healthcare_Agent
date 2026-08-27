@@ -65,6 +65,25 @@ if [[ "$LIVE" -eq 1 ]]; then
   LIVE_SESSION_TOKEN="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_token"])' "$TMP_DIR/live-created.json")"
   request live_analysis POST "$BASE_URL/api/v1/sessions/$LIVE_SESSION_ID/analysis" "$TMP_DIR/live-analysis.sse" -H 'Accept: text/event-stream' -H "X-Session-Token: ${LIVE_SESSION_TOKEN}"
   grep -q '^event: completed' "$TMP_DIR/live-analysis.sse"
+  request live_session GET "$BASE_URL/api/v1/sessions/$LIVE_SESSION_ID" "$TMP_DIR/live-session.json" -H "X-Session-Token: ${LIVE_SESSION_TOKEN}"
+  python3 - "$TMP_DIR/live-session.json" <<'PY'
+import json, sys
+session = json.load(open(sys.argv[1]))
+ranked_ids = session.get("full_state", {}).get("aggregate", {}).get("ranked_nct_ids", [])
+selected_ids = session.get("retrieval", {}).get("selected_for_compilation", [])
+degradation_codes = session.get("degradation_codes", [])
+assert ranked_ids, "Live analysis completed without any ranked trials"
+assert 1 <= len(selected_ids) <= 4, "Live compilation budget was not enforced"
+assert session.get("current_question", {}).get("selected"), "Live analysis produced no next question"
+assert "LIVE_RETRIEVAL_TIMEOUT_SNAPSHOT_USED" not in degradation_codes, (
+    "Live registry retrieval timed out and silently became a snapshot analysis"
+)
+print(
+    "live_result: "
+    f"mode={session.get('mode')}, ranked={len(ranked_ids)}, "
+    f"compiled={len(selected_ids)}, degradations={','.join(degradation_codes) or 'none'}"
+)
+PY
   unset LIVE_SESSION_TOKEN
   echo "Exactly one explicit Live Mode session creation and analysis was issued."
 fi
