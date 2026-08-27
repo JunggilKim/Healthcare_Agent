@@ -32,8 +32,10 @@ async def request_id_middleware(
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         elif request.url.path.startswith("/api/v1/sessions"):
             response.headers["Cache-Control"] = "no-store"
-        elif request.url.path == "/" or request.url.path == "/about" or request.url.path.startswith(
-            "/session/"
+        elif (
+            request.url.path == "/"
+            or request.url.path == "/about"
+            or request.url.path.startswith("/session/")
         ):
             response.headers["Cache-Control"] = "no-cache"
         return response
