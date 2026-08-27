@@ -584,6 +584,11 @@ class LiveSessionService:
             evaluation_date=date.fromisoformat(payload["evaluation_date"]),
             asserted_at=now,
             pinned_fallback=pinned_proposal,
+            prefer_pinned_fallback=pinned_proposal is not None,
+            primary_max_attempts=1,
+            generation_attempt_timeout_seconds=(
+                self.settings.live_generation_attempt_timeout_seconds
+            ),
             session_id=session_id,
         )
         if extraction_degraded:

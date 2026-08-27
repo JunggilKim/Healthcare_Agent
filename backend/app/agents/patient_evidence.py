@@ -399,6 +399,9 @@ class PatientEvidenceAgent:
         evaluation_date: date,
         asserted_at: datetime,
         pinned_fallback: PatientExtractionResult | None = None,
+        prefer_pinned_fallback: bool = False,
+        primary_max_attempts: int = 3,
+        generation_attempt_timeout_seconds: float | None = None,
         session_id: str = "unscoped",
     ) -> tuple[MaterializedPatientExtraction, bool]:
         normalized_input = {
@@ -438,7 +441,10 @@ class PatientEvidenceAgent:
                 language = "other"
             return deterministic_surface_fallback(patient_text, language=language)
 
-        if degraded:
+        if prefer_pinned_fallback and pinned_fallback is not None:
+            proposal = pinned_fallback
+            degraded = False
+        elif degraded:
             proposal = fallback_proposal()
         else:
             try:
@@ -456,6 +462,9 @@ class PatientEvidenceAgent:
                     fallback_thinking_level="HIGH",
                     primary_max_output_tokens=2000,
                     fallback_max_output_tokens=2000,
+                    primary_max_attempts=primary_max_attempts,
+                    primary_attempt_timeout_seconds=generation_attempt_timeout_seconds,
+                    fallback_attempt_timeout_seconds=generation_attempt_timeout_seconds,
                     session_id=session_id,
                 )
             except StructuredGenerationUnavailable as error:
