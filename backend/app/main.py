@@ -103,12 +103,17 @@ def _phase_zero_html() -> str:
 <p>{DISCLAIMER}</p></main></body></html>"""
 
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)
 async def spa_root() -> Response:
     return FileResponse(_INDEX_FILE) if _INDEX_FILE.is_file() else HTMLResponse(_phase_zero_html())
 
 
-@app.get("/{frontend_path:path}", response_class=HTMLResponse, include_in_schema=False)
+@app.api_route(
+    "/{frontend_path:path}",
+    methods=["GET", "HEAD"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
 async def spa_route(frontend_path: str) -> Response:
     candidate = (_STATIC_DIR / frontend_path).resolve()
     if _STATIC_DIR.resolve() in candidate.parents and candidate.is_file():
