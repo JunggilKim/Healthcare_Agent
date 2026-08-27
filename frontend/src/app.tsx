@@ -60,6 +60,28 @@ function initialStages(): Record<string, StageState> {
   return Object.fromEntries(stageNames.map((stage) => [stage, "pending"]));
 }
 
+function completedStatus(nextSession: SessionView): string {
+  if (nextSession.current_question?.selected) {
+    return "분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.";
+  }
+  if (nextSession.degradation_codes.length > 0) {
+    return "제한적 분석 완료 · 현재 결과에서는 제안할 다음 확인 항목이 없습니다.";
+  }
+  return "분석 완료 · 현재 기록에서 추가로 제안할 확인 항목이 없습니다.";
+}
+
+function displayDate(value: string): string {
+  return value.replaceAll("-", ".");
+}
+
+function localToday(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function AboutPage() {
   return (
     <main className="about-page min-h-screen px-6 py-16">
@@ -146,7 +168,9 @@ export function App() {
         setSession(restored);
         setDegradationCodes(restored.degradation_codes);
         setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
-        setStatusText("분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.");
+        setMode(restored.mode === "live" ? "live" : "snapshot");
+        setEvaluationDate(restored.evaluation_date);
+        setStatusText(completedStatus(restored));
         const parsed = retrievalSchema.safeParse(restored.retrieval);
         if (parsed.success) setRetrieval(parsed.data);
         else if (restored.top_trial?.nct_id === "NCT05239624") {
@@ -226,7 +250,7 @@ export function App() {
       const parsedRetrieval = retrievalSchema.safeParse(nextSession.retrieval);
       if (parsedRetrieval.success) setRetrieval(parsedRetrieval.data);
       setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
-      setStatusText("분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.");
+      setStatusText(completedStatus(nextSession));
       void navigate(
         `/session/${nextCredentials.sessionId}${showDemoTools ? "?demo-tools=1" : ""}`,
       );
@@ -377,6 +401,15 @@ export function App() {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   }
 
+  function selectMode(nextMode: "snapshot" | "live") {
+    setMode(nextMode);
+    setEvaluationDate(
+      nextMode === "live"
+        ? localToday()
+        : (configQuery.data?.snapshot_data_date ?? "2026-08-11"),
+    );
+  }
+
   if (location.pathname === "/about") return <AboutPage />;
 
   const hasDegradation = degradationCodes.length > 0;
@@ -392,9 +425,9 @@ export function App() {
           </Link>
           <div className="header-meta flex flex-wrap items-center gap-2">
             {session ? <span className="workspace-context">{inputMode === "seed" ? `${selectedCase} 데모` : "직접 입력 사례"} · {completionLabel}</span> : null}
-            <span className="mode-badge">{!session ? ko.mode.snapshot : session.mode === "snapshot" ? ko.mode.snapshotShort : ko.mode.liveShort}</span>
-            <span className="mode-badge">기준일 2026.08.11</span>
-            <span className="mode-badge hidden sm:inline-flex">저장된 분석 · 비용 $0.000</span>
+            <span className="mode-badge">{!session ? (mode === "snapshot" ? ko.mode.snapshot : ko.mode.live) : session.mode === "snapshot" ? ko.mode.snapshotShort : ko.mode.liveShort}</span>
+            <span className="mode-badge">기준일 {displayDate(session?.evaluation_date ?? evaluationDate)}</span>
+            <span className="mode-badge hidden sm:inline-flex">{(session?.mode ?? mode) === "live" ? "라이브 분석 · 비용 guard 적용" : "저장된 분석 · 비용 $0.000"}</span>
             {degradationCodes.length ? <span className="degraded-badge">일부 기능 제한 {degradationCodes.length}건</span> : null}
             <Link className="secondary-button px-3 py-2" to="/about">데모 안내</Link>
           </div>
@@ -429,10 +462,10 @@ export function App() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><p className="eyebrow">STEP 1 OF 2 · 데모 입력</p><h2 id="input-title" className="panel-title">어떤 환자 정보로 시작할까요?</h2><p className="section-description">준비된 사례를 선택하거나 환자 정보를 직접 입력하세요.</p></div>
                 <div className="segmented-control flex rounded-xl p-1">
-                  {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? ko.mode.snapshot : ko.mode.live}</button>)}
+                  {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => selectMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? ko.mode.snapshot : ko.mode.live}</button>)}
                 </div>
               </div>
-              {mode === "live" ? <p className="runtime-banner runtime-warning mt-3">{configQuery.data?.live_available ? "라이브 모드 활성화 · first-party Google Cloud ADC와 비용 guard를 사용합니다." : "라이브 모드는 Google Cloud ADC·결제·quota 외부 검증 전까지 비활성입니다. 스냅샷 데모는 계속 사용할 수 있습니다."}</p> : null}
+              {mode === "live" ? <p className="runtime-banner runtime-warning mt-3">{configQuery.isPending ? "라이브 모드 사용 가능 여부를 확인하고 있습니다…" : configQuery.data?.live_available ? "라이브 모드 활성화 · first-party Google Cloud ADC와 비용 guard를 사용합니다." : "라이브 모드는 Google Cloud ADC·결제·quota 외부 검증 전까지 비활성입니다. 스냅샷 데모는 계속 사용할 수 있습니다."}</p> : null}
               <div className="input-tabs mt-5 flex gap-2 pb-3">
                 <button className={`tab-button ${inputMode === "seed" ? "tab-active" : ""}`} onClick={() => setInputMode("seed")}>준비된 데모 사례</button>
                 <button className={`tab-button ${inputMode === "text" ? "tab-active" : ""}`} onClick={() => setInputMode("text")}>환자 설명 직접 입력</button>
@@ -455,7 +488,7 @@ export function App() {
                 </div>
               )}
               <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
-                <label className="text-xs font-bold text-slate-400">평가 기준일<input type="date" value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} className="clinical-input mt-1 block w-full px-3 py-2 text-sm" /></label>
+                <label className="text-xs font-bold text-slate-400">평가 기준일<input type="date" value={evaluationDate} max={mode === "live" ? localToday() : undefined} disabled={mode === "snapshot"} onChange={(event) => setEvaluationDate(event.target.value)} className="clinical-input mt-1 block w-full px-3 py-2 text-sm" /></label>
                 <button aria-label={busy ? "분석 중…" : mode === "live" ? "라이브 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} 데모 분석 시작` : "전체 데모가 준비되지 않은 사례"} className="primary-button self-end" disabled={!canStart} onClick={() => void start()}>{busy ? "근거 분석 중…" : mode === "live" ? "라이브 근거 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} 근거 분석 시작` : "전체 데모가 준비되지 않은 사례"}</button>
               </div>
               <p aria-live="polite" className="mt-3 text-center text-xs text-slate-500">{statusText}</p>

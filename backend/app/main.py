@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from backend.app.api.errors import ApiProblem, problem_handler, validation_problem_handler
 from backend.app.api.middleware import request_id_middleware
@@ -78,6 +79,7 @@ app = FastAPI(
     description="Proof-carrying active evidence acquisition for clinical-trial pre-screening.",
     lifespan=lifespan,
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 app.middleware("http")(request_id_middleware)
 app.add_exception_handler(ApiProblem, problem_handler)
 app.add_exception_handler(RequestValidationError, validation_problem_handler)

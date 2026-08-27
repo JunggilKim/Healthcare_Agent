@@ -39,6 +39,29 @@ test("Korean display localization does not alter the analysis request contract",
   });
 });
 
+test("session creation translates rate limits into an actionable Korean retry message", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: "RATE_LIMITED", detail: "Too many requests" }),
+        {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "12" },
+        },
+      ),
+    ),
+  );
+
+  await expect(
+    createSession({
+      mode: "live",
+      seedCaseId: "S004",
+      evaluationDate: "2026-08-28",
+    }),
+  ).rejects.toThrow("요청 한도를 초과했습니다. 12초 후 다시 시도해주세요.");
+});
+
 test("question answers preserve the exact English evidence payload", async () => {
   const fetchMock = vi.fn().mockResolvedValue(
     new Response('event: completed\ndata: {"state":"complete"}\n\n', {

@@ -12,6 +12,7 @@ const session = sessionSchema.parse({
   session_id: "session-test",
   state: "QUESTION_READY",
   mode: "snapshot",
+  evaluation_date: "2026-08-11",
   patient_text: "Synthetic patient text",
   patient_state_version: 0,
   facts: [],
@@ -42,6 +43,12 @@ const session = sessionSchema.parse({
     decision: "POTENTIAL_MATCH",
     display_score: 47,
     proof_completeness: 1,
+  },
+  top_trial: {
+    nct_id: "NCT05239624",
+    title: "Snapshot trial",
+    overall_status: "RECRUITING",
+    data_timestamp: "2026-08-11T00:00:00Z",
   },
   current_question: {
     selected: {
@@ -115,6 +122,43 @@ test("question value buttons submit the backend typed value instead of the displ
   fireEvent.click(screen.getByRole("button", { name: "기존 기록에서 확인됨" }));
   expect(onAnswer).toHaveBeenCalledWith({
     structuredValue: { kind: "boolean", value: true },
+  });
+});
+
+test("live histology questions use their server-provided typed branches", () => {
+  const onAnswer = vi.fn();
+  const liveSession = sessionSchema.parse({
+    ...session,
+    mode: "live",
+    current_question: {
+      ...session.current_question,
+      selected: {
+        ...session.current_question?.selected,
+        branches: [
+          {
+            branch_id: "q:histology:0",
+            label: "adenocarcinoma",
+            response_kind: "VALUE",
+            synthetic_value: {
+              kind: "categorical",
+              system: "trial-opt-canonical-v1",
+              value: "adenocarcinoma",
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  render(<QuestionPanel session={liveSession} busy={false} onAnswer={onAnswer} />);
+  expect(screen.queryByText("병리기록에서 고등급 요로상피암 확인")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "adenocarcinoma" }));
+  expect(onAnswer).toHaveBeenCalledWith({
+    structuredValue: {
+      kind: "categorical",
+      system: "trial-opt-canonical-v1",
+      value: "adenocarcinoma",
+    },
   });
 });
 

@@ -56,6 +56,7 @@ export const sessionSchema = z
     session_id: z.string(),
     state: z.string(),
     mode: z.string(),
+    evaluation_date: z.string(),
     degradation_codes: z.array(z.string()).default([]),
     export_available: z.boolean().default(true),
     durable_replay: z.boolean().default(true),

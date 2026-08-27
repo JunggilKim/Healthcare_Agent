@@ -16,7 +16,7 @@ async def public_config() -> dict[str, object]:
         "default_mode": "snapshot",
         "live_available": (settings.allow_live_model_calls and settings.allow_live_ctgov_calls),
         "snapshot_data_date": "2026-08-11",
-        "snapshot_version": "phase1-s004-v1",
+        "snapshot_version": settings.demo_snapshot_version or "phase1-s004-v1",
         "disclaimer": DISCLAIMER,
         "limits": {"max_patient_chars": 12000, "max_answer_chars": 4000, "max_questions": 5},
         "model_labels": {

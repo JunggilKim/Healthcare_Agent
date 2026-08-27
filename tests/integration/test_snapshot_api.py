@@ -92,6 +92,27 @@ def test_s004_snapshot_api_vertical_slice(tmp_path, monkeypatch) -> None:
     get_settings.cache_clear()
 
 
+def test_snapshot_rejects_a_date_that_does_not_match_the_frozen_artifact(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "snapshot-date-store"))
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/sessions",
+            json={
+                "mode": "snapshot",
+                "seed_case_id": "S004",
+                "evaluation_date": "2026-08-28",
+                "language": "ko",
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "INVALID_INPUT"
+        assert "SNAPSHOT_EVALUATION_DATE_MISMATCH" in response.json()["detail"]
+    get_settings.cache_clear()
+
+
 def test_arbitrary_input_identifier_warning_precedes_snapshot_unavailable(
     tmp_path, monkeypatch
 ) -> None:

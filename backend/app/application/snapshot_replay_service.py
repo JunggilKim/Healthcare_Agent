@@ -59,6 +59,12 @@ class SnapshotReplayService:
             raise ValueError("SnapshotReplayService accepts Snapshot Mode only")
         case_root = self._case_root(seed_case_id)
         initial = self._load(case_root / "initial.json")
+        snapshot_evaluation_date = str(initial.get("evaluation_date", ""))
+        if evaluation_date.isoformat() != snapshot_evaluation_date:
+            raise ValueError(
+                "SNAPSHOT_EVALUATION_DATE_MISMATCH:"
+                f"expected {snapshot_evaluation_date}, got {evaluation_date.isoformat()}"
+            )
         session_id = str(uuid4())
         token = secrets.token_urlsafe(32)
         payload: dict[str, Any] = {

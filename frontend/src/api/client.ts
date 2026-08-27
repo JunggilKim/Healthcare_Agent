@@ -43,7 +43,7 @@ export interface DemoCase {
 }
 
 async function jsonOrThrow(response: Response) {
-  if (!response.ok) throw new Error(`API request failed: ${response.status}`);
+  if (!response.ok) throw await responseError(response, "API request failed");
   return (await response.json()) as unknown;
 }
 

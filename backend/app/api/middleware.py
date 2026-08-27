@@ -28,8 +28,14 @@ async def request_id_middleware(
         response.headers["X-Request-Id"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        if request.url.path.startswith("/api/v1/sessions"):
+        if request.url.path.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif request.url.path.startswith("/api/v1/sessions"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path == "/" or request.url.path == "/about" or request.url.path.startswith(
+            "/session/"
+        ):
+            response.headers["Cache-Control"] = "no-cache"
         return response
     finally:
         route = request.scope.get("route")
