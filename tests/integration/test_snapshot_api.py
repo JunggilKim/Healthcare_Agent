@@ -333,9 +333,7 @@ def test_s004_structured_value_advances_each_question_and_rejects_stale_turn(
     with TestClient(app) as client:
         session_id, headers, initial = _create_and_analyze(client)
         first_question_id = initial["current_question"]["selected"]["question_id"]
-        first_value = initial["current_question"]["selected"]["branches"][0][
-            "synthetic_value"
-        ]
+        first_value = initial["current_question"]["selected"]["branches"][0]["synthetic_value"]
         with client.stream(
             "POST",
             f"/api/v1/sessions/{session_id}/answers",
@@ -351,9 +349,7 @@ def test_s004_structured_value_advances_each_question_and_rejects_stale_turn(
             assert response.status_code == 200
             assert "event: question_selected" in "".join(response.iter_text())
 
-        after_first = client.get(
-            f"/api/v1/sessions/{session_id}", headers=headers
-        ).json()
+        after_first = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
         second = after_first["current_question"]["selected"]
         assert after_first["patient_state_version"] == 1
         assert second["question_id"] != first_question_id
@@ -392,9 +388,7 @@ def test_s004_structured_value_advances_each_question_and_rejects_stale_turn(
             assert response.status_code == 200
             assert "event: question_selected" in "".join(response.iter_text())
 
-        after_second = client.get(
-            f"/api/v1/sessions/{session_id}", headers=headers
-        ).json()
+        after_second = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
         assert after_second["patient_state_version"] == 2
         next_selected = (after_second.get("current_question") or {}).get("selected")
         assert next_selected is None or next_selected["question_id"] != second["question_id"]
