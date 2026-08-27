@@ -95,6 +95,7 @@ class ClinicalTrialsGovClient:
         self._jitter = jitter
         self._api_version: str | None = None
         self._data_timestamp: str | None = None
+        self._version_lock = asyncio.Lock()
 
     async def _request(self, path: str, params: dict[str, str | int | bool] | None = None) -> bytes:
         self.circuit.before_call()
@@ -143,16 +144,18 @@ class ClinicalTrialsGovClient:
 
     async def version(self) -> tuple[str, str]:
         if self._api_version is None or self._data_timestamp is None:
-            raw = await self._request("/version")
-            try:
-                parsed = _VersionResponse.model_validate(orjson.loads(raw))
-            except (orjson.JSONDecodeError, ValidationError) as error:
-                self.circuit.record_failure()
-                raise CtgovUnavailableError(
-                    "invalid ClinicalTrials.gov version response"
-                ) from error
-            self._api_version = parsed.apiVersion
-            self._data_timestamp = parsed.dataTimestamp
+            async with self._version_lock:
+                if self._api_version is None or self._data_timestamp is None:
+                    raw = await self._request("/version")
+                    try:
+                        parsed = _VersionResponse.model_validate(orjson.loads(raw))
+                    except (orjson.JSONDecodeError, ValidationError) as error:
+                        self.circuit.record_failure()
+                        raise CtgovUnavailableError(
+                            "invalid ClinicalTrials.gov version response"
+                        ) from error
+                    self._api_version = parsed.apiVersion
+                    self._data_timestamp = parsed.dataTimestamp
         return self._api_version, self._data_timestamp
 
     async def search(self, condition: str, *, page_size: int = 100) -> CtgovResponse:
@@ -160,17 +163,16 @@ class ClinicalTrialsGovClient:
             raise ValueError("page_size must be between 1 and 100")
         cache_material = f"{condition}\0{page_size}\0{STATUS_FILTER}".encode()
         cache_key = hashlib.sha256(cache_material).hexdigest()
-        reference = self.cache.read_reference("ctgov/search-index", cache_key)
+        reference = await asyncio.to_thread(
+            self.cache.read_reference, "ctgov/search-index", cache_key
+        )
         if reference is not None:
-            cache_path = Path(str(reference["cache_path"]))
-            digest = str(reference["sha256"])
             try:
-                content = self.cache.read_verified(cache_path, digest)
-                validate_study_page(content)
-            except (ArtifactCorruptionError, CtgovSchemaError):
-                pass
-            else:
-                return CtgovResponse(
+                cache_path = Path(str(reference["cache_path"]))
+                digest = str(reference["sha256"])
+                content = await asyncio.to_thread(self.cache.read_verified, cache_path, digest)
+                await asyncio.to_thread(validate_study_page, content)
+                cached_response = CtgovResponse(
                     content=content,
                     api_version=str(reference["api_version"]),
                     data_timestamp=str(reference["data_timestamp"]),
@@ -178,6 +180,17 @@ class ClinicalTrialsGovClient:
                     cache_sha256=digest,
                     cache_path=cache_path,
                 )
+            except (
+                ArtifactCorruptionError,
+                CtgovSchemaError,
+                KeyError,
+                OSError,
+                TypeError,
+                ValueError,
+            ):
+                pass
+            else:
+                return cached_response
         api_version, data_timestamp = await self.version()
         content = await self._request(
             "/studies",
@@ -190,11 +203,11 @@ class ClinicalTrialsGovClient:
             },
         )
         try:
-            validate_study_page(content)
+            await asyncio.to_thread(validate_study_page, content)
         except CtgovSchemaError as error:
             self.circuit.record_failure()
             raise CtgovUnavailableError("invalid ClinicalTrials.gov studies response") from error
-        digest, path = self.cache.put("ctgov/search", content)
+        digest, path = await asyncio.to_thread(self.cache.put, "ctgov/search", content)
         response = CtgovResponse(
             content=content,
             api_version=api_version,
@@ -203,7 +216,8 @@ class ClinicalTrialsGovClient:
             cache_sha256=digest,
             cache_path=path,
         )
-        self.cache.put_reference(
+        await asyncio.to_thread(
+            self.cache.put_reference,
             "ctgov/search-index",
             cache_key,
             {
@@ -220,11 +234,11 @@ class ClinicalTrialsGovClient:
         api_version, data_timestamp = await self.version()
         content = await self._request(f"/studies/{quote(nct_id, safe='')}")
         try:
-            validate_single_study(content)
+            await asyncio.to_thread(validate_single_study, content)
         except CtgovSchemaError as error:
             self.circuit.record_failure()
             raise CtgovUnavailableError("invalid ClinicalTrials.gov study response") from error
-        digest, path = self.cache.put(f"ctgov/raw/{nct_id}", content)
+        digest, path = await asyncio.to_thread(self.cache.put, f"ctgov/raw/{nct_id}", content)
         return CtgovResponse(
             content=content,
             api_version=api_version,

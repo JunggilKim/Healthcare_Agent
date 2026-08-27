@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -109,10 +110,13 @@ class HybridRetriever:
             )
         else:
             try:
-                for condition_query in sorted(
+                ordered_queries = sorted(
                     query.condition_queries, key=lambda item: (item.priority, item.text)
-                ):
-                    response = await self.ctgov.search(condition_query.text, page_size=100)
+                )
+                responses = await asyncio.gather(
+                    *(self.ctgov.search(item.text, page_size=100) for item in ordered_queries)
+                )
+                for condition_query, response in zip(ordered_queries, responses, strict=True):
                     api_version = response.api_version
                     data_timestamp = response.data_timestamp
                     retrieved_at = response.retrieved_at

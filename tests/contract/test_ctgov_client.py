@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -83,6 +84,31 @@ async def test_complete_study_response_is_validated_and_cached_by_exact_bytes(
     assert (
         response.cache_sha256 == "6e342382edc485fd43d567e5b5029b7f4bff550354698199af4320bb6d034532"
     )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_version_requests_share_one_network_dispatch(tmp_path: Path) -> None:
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        return httpx.Response(
+            200,
+            json={"apiVersion": "2.0.5", "dataTimestamp": "2026-08-11T09:00:06"},
+            headers={"content-type": "application/json"},
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://clinicaltrials.gov/api/v2",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        client = ClinicalTrialsGovClient(LocalArtifactStore(tmp_path), client=http_client)
+        versions = await asyncio.gather(*(client.version() for _ in range(5)))
+
+    assert calls == 1
+    assert versions == [("2.0.5", "2026-08-11T09:00:06")] * 5
 
 
 @pytest.mark.asyncio

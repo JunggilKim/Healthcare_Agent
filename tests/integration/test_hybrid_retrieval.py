@@ -19,7 +19,7 @@ from backend.app.retrieval.embeddings import (
     DisabledEmbeddingProvider,
     RecordedEmbeddingProvider,
 )
-from backend.app.retrieval.models import RetrievalQuery
+from backend.app.retrieval.models import ConditionQuery, RetrievalQuery
 from backend.app.retrieval.retriever import HybridRetriever
 from backend.app.retrieval.snapshot import load_retrieval_snapshot
 
@@ -154,6 +154,65 @@ async def test_live_retrieval_is_identical_from_exact_raw_cache_when_network_the
     assert [item.model_dump() for item in first.ranked_candidates] == [
         item.model_dump() for item in second.ranked_candidates
     ]
+
+
+@pytest.mark.asyncio
+async def test_live_condition_queries_are_fetched_concurrently_in_stable_order(
+    tmp_path: Path,
+) -> None:
+    search = (FIXTURE_ROOT / "search_response.json").read_bytes()
+    active_studies = 0
+    max_active_studies = 0
+    version_calls = 0
+    study_queries: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active_studies, max_active_studies, version_calls
+        if request.url.path.endswith("/version"):
+            version_calls += 1
+            return httpx.Response(
+                200,
+                json={"apiVersion": "2.0.5", "dataTimestamp": "2026-08-11T09:00:06"},
+                headers={"content-type": "application/json"},
+            )
+        active_studies += 1
+        max_active_studies = max(max_active_studies, active_studies)
+        study_queries.append(request.url.params["query.cond"])
+        await asyncio.sleep(0.02)
+        active_studies -= 1
+        return httpx.Response(200, content=search, headers={"content-type": "application/json"})
+
+    query = RetrievalQuery(
+        condition_queries=[
+            ConditionQuery(text="third", priority=3),
+            ConditionQuery(text="first", priority=1),
+            ConditionQuery(text="second", priority=2),
+        ],
+        dense_query="first; second; third",
+    )
+    async with httpx.AsyncClient(
+        base_url="https://clinicaltrials.gov/api/v2",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        result = await _retriever(
+            tmp_path,
+            embeddings=DisabledEmbeddingProvider(),
+            client=http_client,
+        ).retrieve(query, mode="live", allow_snapshot_fallback=False)
+
+    assert version_calls == 1
+    assert max_active_studies == 3
+    assert sorted(study_queries) == ["first", "second", "third"]
+    assert result.mode == "hybrid_degraded"
+
+
+def test_corrupt_local_reference_is_a_cache_miss(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path)
+    reference = tmp_path / "ctgov" / "search-index" / "broken.json"
+    reference.parent.mkdir(parents=True)
+    reference.write_text("not-json", encoding="utf-8")
+
+    assert store.read_reference("ctgov/search-index", "broken") is None
 
 
 def test_snapshot_corruption_is_rejected(tmp_path: Path) -> None:

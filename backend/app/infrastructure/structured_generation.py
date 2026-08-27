@@ -98,21 +98,40 @@ class StructuredGenerator:
             normalized_input=normalized_input,
             generation_config=generation_config,
         )
-        cached = await self.cache.get(cache_key)
-        if cached is not None:
-            parsed = output_model.model_validate(cached.parsed_json)
-            cache_record = cached.model_copy(
-                update={"usage": cached.usage.model_copy(update={"cache_hit": True})}
+        try:
+            cached = await self.cache.get(cache_key)
+        except Exception as error:
+            logger.warning(
+                "model cache read failed; continuing without cache "
+                "(model_id=%s task_name=%s error=%s)",
+                model_id,
+                task_name,
+                type(error).__name__,
             )
-            logger.info(
-                self._usage_log(
-                    cache_record,
-                    session_id=session_id,
-                    latency_ms=0,
-                    retry_count=0,
+            cached = None
+        if cached is not None and cached.cache_key == cache_key:
+            try:
+                parsed = output_model.model_validate(cached.parsed_json)
+            except ValidationError:
+                logger.warning(
+                    "model cache payload validation failed; continuing without cache "
+                    "(model_id=%s task_name=%s)",
+                    model_id,
+                    task_name,
                 )
-            )
-            return parsed, cache_record
+            else:
+                cache_record = cached.model_copy(
+                    update={"usage": cached.usage.model_copy(update={"cache_hit": True})}
+                )
+                logger.info(
+                    self._usage_log(
+                        cache_record,
+                        session_id=session_id,
+                        latency_ms=0,
+                        retry_count=0,
+                    )
+                )
+                return parsed, cache_record
 
         circuit = self.circuit(model_id)
         circuit.before_call()
@@ -180,7 +199,18 @@ class StructuredGenerator:
                     parsed_json=parsed.model_dump(mode="json"),
                     usage=usage,
                 )
-                await self.cache.put(record)
+                try:
+                    await self.cache.put(record)
+                except Exception as error:
+                    # The model response is already validated and any reservation is reconciled.
+                    # A cache outage must not trigger another paid model dispatch.
+                    logger.warning(
+                        "model cache write failed; returning validated response "
+                        "(model_id=%s task_name=%s error=%s)",
+                        model_id,
+                        task_name,
+                        type(error).__name__,
+                    )
                 logger.info(
                     self._usage_log(
                         record,

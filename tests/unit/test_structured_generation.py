@@ -71,6 +71,14 @@ class _FailureModels:
         raise RuntimeError("429 RESOURCE_EXHAUSTED")
 
 
+class _FailingWriteCache:
+    async def get(self, _key: str):
+        return None
+
+    async def put(self, _record):
+        raise OSError("cache volume unavailable")
+
+
 async def _no_sleep(_delay: float) -> None:
     await asyncio.sleep(0)
 
@@ -105,6 +113,44 @@ def test_cache_key_binds_all_normative_parts() -> None:
     )
     assert first == same
     assert first != changed
+
+
+async def test_corrupt_local_cache_is_treated_as_a_miss(tmp_path: Path) -> None:
+    cache = LocalModelResultCache(tmp_path)
+    path = tmp_path / "llm" / "expected-key.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("not-json", encoding="utf-8")
+
+    assert await cache.get("expected-key") is None
+
+
+async def test_cache_write_failure_does_not_repeat_validated_model_dispatch() -> None:
+    client = _FakeClient()
+    generator = StructuredGenerator(
+        client=client,
+        cache=_FailingWriteCache(),
+        pricing=default_pricing_estimator(),
+        sleep=_no_sleep,
+        jitter=lambda _low, _high: 0,
+    )
+
+    output, record = await generator.generate(
+        model_id="gemini-3.6-flash",
+        task_name="cache-failure-test",
+        prompt="return json",
+        prompt_version="1.0.0",
+        output_schema_version="test-v1",
+        slot_catalog_version="slot-catalog-v1",
+        normalized_input={"x": 1},
+        output_model=_Output,
+        thinking_level="MEDIUM",
+        max_output_tokens=100,
+        max_attempts=3,
+    )
+
+    assert output.value == "ok"
+    assert record.usage.cache_hit is False
+    assert client.aio.models.calls == ["gemini-3.6-flash", "gemini-3.6-flash"]
 
 
 async def test_schema_failure_retries_then_exact_cache_prevents_second_dispatch(
