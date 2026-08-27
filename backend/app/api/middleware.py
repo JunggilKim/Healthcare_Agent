@@ -14,6 +14,8 @@ from backend.app.settings import get_settings
 
 logger = logging.getLogger("trial_opt.request")
 
+SHELL_VERSION_COOKIE = "__Host-trial_opt_shell_version"
+
 
 async def request_id_middleware(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
@@ -25,6 +27,7 @@ async def request_id_middleware(
     try:
         response = await call_next(request)
         status_code = response.status_code
+        settings = get_settings()
         response.headers["X-Request-Id"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -41,6 +44,24 @@ async def request_id_middleware(
             # reused across deployments, otherwise a browser can keep booting an
             # old bundle even though the new revision is already serving traffic.
             response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+
+        if (
+            request.url.path.startswith("/api/v1/")
+            and request.cookies.get(SHELL_VERSION_COOKIE) != settings.app_version
+        ):
+            # Older releases allowed the SPA shell to enter Chrome's HTTP cache.
+            # The first API response after each deployment clears that stale cache
+            # once, then a version cookie prevents repeated cache eviction.
+            response.headers["Clear-Site-Data"] = '"cache"'
+            response.set_cookie(
+                SHELL_VERSION_COOKIE,
+                settings.app_version,
+                max_age=31_536_000,
+                path="/",
+                secure=True,
+                httponly=True,
+                samesite="lax",
+            )
         return response
     finally:
         route = request.scope.get("route")

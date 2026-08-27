@@ -43,3 +43,18 @@ def test_frontend_cache_and_compression_contracts() -> None:
     assert asset.status_code == 200
     assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert asset.headers["content-encoding"] == "gzip"
+
+
+def test_api_clears_a_stale_shell_cache_once_per_release() -> None:
+    client = TestClient(app, base_url="https://testserver")
+
+    first = client.get("/api/v1/config/public")
+    assert first.status_code == 200
+    assert first.headers["clear-site-data"] == '"cache"'
+    assert "__Host-trial_opt_shell_version=" in first.headers["set-cookie"]
+    assert "HttpOnly" in first.headers["set-cookie"]
+    assert "Secure" in first.headers["set-cookie"]
+
+    second = client.get("/api/v1/config/public")
+    assert second.status_code == 200
+    assert "clear-site-data" not in second.headers
