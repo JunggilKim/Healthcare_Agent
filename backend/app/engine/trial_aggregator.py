@@ -59,6 +59,7 @@ def aggregate_trial(
     proofs: list[ProofPacket],
     retrieval_score: float,
     irrelevant: bool = False,
+    degradation_codes: list[str] | None = None,
 ) -> TrialEvaluation:
     proof_by_criterion = {proof.criterion_id: proof for proof in proofs}
     if set(proof_by_criterion) != {criterion.criterion_id for criterion in compiled_trial.criteria}:
@@ -155,5 +156,5 @@ def aggregate_trial(
         opaque_critical_count=opaque_critical_count,
         ranking_key=ranking_key,
         display_score=float(display_score),
-        degradation_codes=[],
+        degradation_codes=list(dict.fromkeys(degradation_codes or [])),
     )

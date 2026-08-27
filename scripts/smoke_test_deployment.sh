@@ -75,19 +75,18 @@ degradation_codes = session.get("degradation_codes", [])
 question_selection = session.get("current_question", {})
 selected_question = question_selection.get("selected")
 stop_reason = question_selection.get("stop_reason")
-valid_stop_reasons = {
-    "NO_RELEVANT_TRIALS",
-    "NO_ACTIONABLE_MISSING_SLOT",
-    "UTILITY_BELOW_THRESHOLD",
-    "MAX_QUESTION_BUDGET",
-    "TOP_RESULT_STABLE",
-    "ALL_RECORD_ACTIONS_DECLINED",
-    "TOP3_BRANCH_STABLE",
-}
 assert ranked_ids, "Live analysis completed without any ranked trials"
 assert 1 <= len(selected_ids) <= 4, "Live compilation budget was not enforced"
-assert selected_question or stop_reason in valid_stop_reasons, (
-    "Live analysis neither selected a next question nor recorded a valid stop reason"
+top_id = ranked_ids[0]
+aggregate = session["full_state"]["aggregate"]
+top_evaluation = aggregate["trial_evaluations"][top_id]
+top_compiled = aggregate["compiled_trials"][top_id]
+assert top_compiled["protocol_verified"], "Top Live trial protocol is not fully verified"
+assert not top_evaluation.get("degradation_codes"), "Top Live trial used a degraded compilation"
+assert top_evaluation["decision"] != "REVIEW_REQUIRED", "Top Live trial requires manual review"
+assert top_evaluation["proof_completeness"] >= 0.9, "Top Live proof completeness is below 90%"
+assert selected_question, (
+    f"S004 Live did not select a usable next question (stop_reason={stop_reason})"
 )
 assert "LIVE_RETRIEVAL_TIMEOUT_SNAPSHOT_USED" not in degradation_codes, (
     "Live registry retrieval timed out and silently became a snapshot analysis"
@@ -98,6 +97,39 @@ print(
     f"compiled={len(selected_ids)}, "
     f"next_action={selected_question.get('question_id') if selected_question else stop_reason}, "
     f"degradations={','.join(degradation_codes) or 'none'}"
+)
+PY
+  python3 - "$TMP_DIR/live-session.json" >"$TMP_DIR/live-answer.json" <<'PY'
+import json, sys
+session = json.load(open(sys.argv[1]))
+question = session["current_question"]["selected"]
+branch = next(
+    (item for item in question.get("branches", []) if item.get("response_kind") == "VALUE"),
+    None,
+)
+assert branch and branch.get("synthetic_value") is not None, (
+    "Live next question has no typed answer branch"
+)
+print(json.dumps({
+    "question_id": question["question_id"],
+    "answer_text": None,
+    "structured_value": branch["synthetic_value"],
+    "unknown": False,
+    "declined": False,
+}))
+PY
+  request live_answer POST "$BASE_URL/api/v1/sessions/$LIVE_SESSION_ID/answers" "$TMP_DIR/live-answer.sse" -H 'Content-Type: application/json' -H 'Accept: text/event-stream' -H "X-Session-Token: ${LIVE_SESSION_TOKEN}" -H 'Idempotency-Key: production-live-smoke-turn-1' --data-binary "@$TMP_DIR/live-answer.json"
+  grep -q '^event: completed' "$TMP_DIR/live-answer.sse"
+  request live_updated GET "$BASE_URL/api/v1/sessions/$LIVE_SESSION_ID" "$TMP_DIR/live-updated.json" -H "X-Session-Token: ${LIVE_SESSION_TOKEN}"
+  python3 - "$TMP_DIR/live-session.json" "$TMP_DIR/live-updated.json" <<'PY'
+import json, sys
+before, after = (json.load(open(path)) for path in sys.argv[1:])
+before_question = before["current_question"]["selected"]["question_id"]
+after_selected = (after.get("current_question") or {}).get("selected")
+assert after["patient_state_version"] > before["patient_state_version"]
+assert after_selected is not None, "Live answer stopped before selecting the next question"
+assert after_selected["question_id"] != before_question, (
+    "Live answer did not advance beyond the submitted question"
 )
 PY
   unset LIVE_SESSION_TOKEN

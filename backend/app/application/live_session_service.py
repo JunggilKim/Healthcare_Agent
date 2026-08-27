@@ -733,6 +733,7 @@ class LiveSessionService:
         compiled_trials: dict[str, CompiledTrial] = {}
         reviews: dict[str, ProtocolReviewArtifact] = {}
         raw_trials: dict[str, RawTrialRecord] = {}
+        compilation_degradations: dict[str, list[str]] = {}
         # Compilation is external I/O. Live Mode compiles at most four trials
         # in one wave while the process-level guard caps cold sessions at two.
         compilation_semaphore = asyncio.Semaphore(4)
@@ -775,6 +776,7 @@ class LiveSessionService:
             compiled_trials[nct_id] = compiled
             reviews[nct_id] = result.review_artifact or _unapproved_review(compiled, now)
             raw_trials[nct_id] = candidate.trial
+            compilation_degradations[nct_id] = result.degradation_codes
             payload["degradation_codes"].extend(result.degradation_codes)
             yield (
                 "trial_compiled",
@@ -830,6 +832,7 @@ class LiveSessionService:
                         compiled_trial=compiled,
                         facts=context.facts,
                     ),
+                    degradation_codes=compilation_degradations[nct_id],
                 )
             )
         state = SessionState.EVALUATING

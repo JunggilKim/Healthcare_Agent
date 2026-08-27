@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     allow_live_ctgov_calls: bool = False
     live_retrieval_timeout_seconds: float = Field(default=18.0, ge=5.0, le=60.0)
     live_embedding_timeout_seconds: float = Field(default=6.0, ge=1.0, le=30.0)
-    live_generation_attempt_timeout_seconds: float = Field(default=10.0, ge=2.0, le=30.0)
+    live_generation_attempt_timeout_seconds: float = Field(default=15.0, ge=2.0, le=30.0)
     live_compilation_candidate_limit: int = Field(default=4, ge=1, le=8)
     session_cost_cap_usd: float = Field(default=1.25, gt=0)
     daily_dev_cost_cap_usd: float = Field(default=10, gt=0)

@@ -61,6 +61,13 @@ def reevaluate_for_answered_slot(
     next_evaluations = dict(aggregate.trial_evaluations)
 
     for nct_id, compiled in aggregate.compiled_trials.items():
+        previous_evaluation = aggregate.trial_evaluations[nct_id]
+        if any(code.startswith("PROTOCOL_") for code in previous_evaluation.degradation_codes):
+            # A protocol that failed compilation/review is excluded from question
+            # utility. Re-evaluating its unverifiable criteria would add latency and
+            # could incorrectly let an answer influence a manual-review candidate.
+            next_proofs[nct_id] = list(proofs_by_trial[nct_id])
+            continue
         previous = {packet.criterion_id: packet for packet in proofs_by_trial[nct_id]}
         changed_ids = affected_by_trial.get(nct_id, set())
         packets: list[ProofPacket] = []
@@ -86,7 +93,6 @@ def reevaluate_for_answered_slot(
             )
         next_proofs[nct_id] = packets
         if changed_ids:
-            previous_evaluation = aggregate.trial_evaluations[nct_id]
             remains_irrelevant = (
                 previous_evaluation.decision is TrialDecision.IRRELEVANT
                 and is_trial_irrelevant(
@@ -104,6 +110,7 @@ def reevaluate_for_answered_slot(
                 proofs=packets,
                 retrieval_score=previous_evaluation.retrieval_score,
                 irrelevant=remains_irrelevant,
+                degradation_codes=previous_evaluation.degradation_codes,
             )
 
     ranked = rank_trials(list(next_evaluations.values()))

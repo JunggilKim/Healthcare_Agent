@@ -82,6 +82,7 @@ export const sessionSchema = z
         decision: z.string(),
         display_score: z.number(),
         proof_completeness: z.number(),
+        degradation_codes: z.array(z.string()).default([]),
       })
       .passthrough()
       .nullable(),

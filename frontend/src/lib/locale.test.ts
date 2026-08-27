@@ -5,6 +5,10 @@ import { localizedCode, localizedQuestionValue, stageLabels, verdictLabels } fro
 describe("Korean display mapping", () => {
   it("uses conservative verdict language and preserves raw codes", () => {
     expect(localizedCode("POTENTIAL_MATCH")).toBe("잠재적 적합 · POTENTIAL_MATCH");
+    expect(localizedCode("PRE_SCREEN_PASS")).toBe(
+      "확인된 핵심 조건 충족 · PRE_SCREEN_PASS",
+    );
+    expect(localizedCode("REVIEW_REQUIRED")).toBe("전문가 검토 필요 · REVIEW_REQUIRED");
     expect(localizedCode("UNKNOWN")).toBe("근거 부족 · UNKNOWN");
     expect(localizedCode("CONFLICT")).toBe("근거 충돌 · CONFLICT");
     expect(verdictLabels.UNKNOWN).not.toContain("부적합");

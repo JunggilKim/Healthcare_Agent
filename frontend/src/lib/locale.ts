@@ -56,7 +56,11 @@ export const verdictLabels: Record<string, string> = {
   UNKNOWN: "근거 부족",
   NOT_APPLICABLE: "해당 없음",
   CONFLICT: "근거 충돌",
+  PRE_SCREEN_PASS: "확인된 핵심 조건 충족",
   POTENTIAL_MATCH: "잠재적 적합",
+  REVIEW_REQUIRED: "전문가 검토 필요",
+  INELIGIBLE: "확인된 핵심 조건 불충족",
+  IRRELEVANT: "검색 관련성 낮음",
 };
 
 export function localizedCode(code: string): string {
@@ -80,6 +84,11 @@ export const slotLabels: Record<string, string> = {
   "prior_treatment.mibc_systemic": "이전 전신 치료",
   "performance_status.ecog": "ECOG 활동도",
   "organ_function.renal.gfr_or_crcl": "신장 기능 수치",
+  "smoking.pack_years": "누적 흡연량",
+  "occupation.high_risk_exposure_years": "고위험 직업성 노출 기간",
+  "medical_history.genitourinary_cancer": "비뇨기계 암 과거력",
+  "procedure.hematuria_evaluation_within_2_years": "최근 혈뇨 평가 이력",
+  "consent.informed_provided": "연구 참여 동의 절차",
 };
 
 export const questionActionLabels: Record<string, string> = {

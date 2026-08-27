@@ -264,10 +264,13 @@ def construct_trusted_compilation(
             normalization_warnings.append("AST_TRUSTED_VALIDATION_OPAQUE_FALLBACK")
         required_slots = _required_slots(ast)
         contains_opaque = any(node.op is AstOperator.OPAQUE for node in ast.nodes)
+        criticality = "CRITICAL" if contains_opaque else item.criticality
         if sorted(set(item.required_slots)) != required_slots:
             normalization_warnings.append("MODEL_REQUIRED_SLOTS_NORMALIZED")
         if item.opaque != contains_opaque:
             normalization_warnings.append("MODEL_OPAQUE_FLAG_NORMALIZED")
+        if contains_opaque and item.criticality != "CRITICAL":
+            normalization_warnings.append("OPAQUE_CRITICALITY_NORMALIZED")
         compiled_criteria.append(
             CompiledCriterion(
                 criterion_id=criterion_id,
@@ -286,7 +289,7 @@ def construct_trusted_compilation(
                 normalized_summary=item.normalized_summary,
                 ast=ast,
                 required_slots=required_slots,
-                criticality=item.criticality,
+                criticality=criticality,
                 compiler_confidence=item.compiler_confidence,
                 protocol_verified=False,
                 opaque=contains_opaque,

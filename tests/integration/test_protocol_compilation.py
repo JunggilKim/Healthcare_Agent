@@ -16,6 +16,7 @@ from backend.app.agents.protocol_reviewer import bind_semantic_review
 from backend.app.application.catalog import load_slot_catalog
 from backend.app.application.compilation_service import ProtocolCompilationService
 from backend.app.application.vertical_slice import load_vertical_slice
+from backend.app.domain.ast import AstNode, AstOperator, CriterionAst
 from backend.app.domain.canonical import canonical_sha256
 from backend.app.domain.evidence import EligibilityContext
 from backend.app.domain.model_outputs import (
@@ -372,6 +373,38 @@ def test_invalid_criterion_ast_becomes_source_bound_opaque_only() -> None:
     assert "AST_TRUSTED_VALIDATION_OPAQUE_FALLBACK" in criterion.warnings
 
 
+def test_opaque_criterion_cannot_be_downgraded_to_noncritical() -> None:
+    raw, proposal = _trial_and_proposal()
+    proposal.criteria[0].ast = CriterionAst(
+        root_node_id="n0",
+        nodes=[
+            AstNode(
+                node_id="n0",
+                op=AstOperator.OPAQUE,
+                metadata={"reason_code": "UNSUPPORTED_SOURCE"},
+            )
+        ],
+    )
+    proposal.criteria[0].opaque = True
+    proposal.criteria[0].criticality = "NONCRITICAL"
+    proposal.criteria[0].required_slots = []
+
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.11",
+        created_at=datetime(2026, 8, 28, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 28),
+    )
+
+    criterion = result.compiled_trial.criteria[0]
+    assert criterion.opaque is True
+    assert criterion.criticality == "CRITICAL"
+    assert "OPAQUE_CRITICALITY_NORMALIZED" in criterion.warnings
+
+
 @pytest.mark.asyncio
 async def test_model_schema_failure_becomes_opaque_unknown_without_hard_verdict() -> None:
     class FailingGenerator:
@@ -470,18 +503,18 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     initial_compile = generator.arguments[0]
     repair_compile = generator.arguments[2]
     reviewer_call = generator.arguments[1]
-    assert initial_compile["prompt_version"] == "1.0.9"
+    assert initial_compile["prompt_version"] == "1.0.11"
     assert initial_compile["primary_thinking_level"] is None
     assert initial_compile["fallback_thinking_level"] is None
     assert initial_compile["primary_thinking_budget"] == 1024
     assert initial_compile["fallback_thinking_budget"] == 1024
     assert initial_compile["primary_max_output_tokens"] == 4000
     assert initial_compile["fallback_max_output_tokens"] == 8000
-    assert initial_compile["primary_attempt_timeout_seconds"] == 4.0
+    assert initial_compile["primary_attempt_timeout_seconds"] == 10.0
     assert initial_compile["fallback_attempt_timeout_seconds"] == 20.0
     assert repair_compile["primary_thinking_budget"] == 1024
-    assert repair_compile["primary_max_output_tokens"] == 2500
-    assert reviewer_call["prompt_version"] == "1.0.4"
+    assert repair_compile["primary_max_output_tokens"] == 4000
+    assert reviewer_call["prompt_version"] == "1.0.5"
     assert reviewer_call["primary_max_output_tokens"] == 4000
     assert reviewer_call["fallback_max_output_tokens"] == 4000
     assert reviewer_call["primary_attempt_timeout_seconds"] == 20.0
@@ -493,6 +526,9 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
         "criterion_id",
         "source_direction",
         "source_quote",
+        "normalized_summary",
+        "criticality",
+        "opaque",
         "ast",
     }
 
@@ -623,7 +659,10 @@ async def test_offline_repair_failure_quarantines_rejected_criterion() -> None:
     )
     assert result.review_artifact is not None
     assert result.compilation.compiled_trial.criteria[0].opaque is True
-    assert result.degradation_codes == ["REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE"]
+    assert result.degradation_codes == [
+        "PROTOCOL_OPAQUE_CRITERIA_REVIEW_REQUIRED",
+        "REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE",
+    ]
 
 
 @pytest.mark.asyncio
@@ -746,7 +785,7 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert proposal.criteria[0].warnings == ["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"]
     assert proposal.criteria[1].warnings == ["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"]
     assert all(source[item.start : item.end] == item.quote for item in proposal.criteria)
-    assert all(call["prompt_version"] == "1.0.9" for call in generator.calls)
+    assert all(call["prompt_version"] == "1.0.11" for call in generator.calls)
     assert all(call["primary_thinking_budget"] == 1024 for call in generator.calls)
     assert all(
         call["normalized_input"]["trial"]["minimum_age"] is None
@@ -773,7 +812,7 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert len(generator.calls) == 3
     assert repaired.criteria[0] == proposal.criteria[0]
     assert generator.calls[-1]["task_name"] == "protocol_compiler_repair"
-    assert generator.calls[-1]["primary_max_output_tokens"] == 2500
+    assert generator.calls[-1]["primary_max_output_tokens"] == 4000
 
 
 def test_offline_compiler_splits_ctgov_escaped_numbered_items() -> None:

@@ -180,7 +180,7 @@ class ProtocolCompilationService:
             lite_model_id="gemini-3.5-flash-lite",
             task_name="protocol_compiler_repair" if repair_issues else "protocol_compiler",
             prompt=prompt,
-            prompt_version="1.0.9",
+            prompt_version="1.0.11",
             output_schema_version="compiled-trial-proposal-v1",
             slot_catalog_version=self.slot_catalog.version,
             normalized_input=compiler_generation_input(
@@ -191,16 +191,12 @@ class ProtocolCompilationService:
             output_model=CompiledTrialProposal,
             primary_thinking_level=None,
             fallback_thinking_level=None,
-            primary_max_output_tokens=4000 if repair_issues is None else 2500,
+            primary_max_output_tokens=4000,
             fallback_max_output_tokens=8000,
             primary_thinking_budget=1024,
             fallback_thinking_budget=1024,
             primary_max_attempts=self.primary_max_attempts,
-            primary_attempt_timeout_seconds=(
-                min(4.0, self.generation_attempt_timeout_seconds)
-                if self.generation_attempt_timeout_seconds is not None
-                else None
-            ),
+            primary_attempt_timeout_seconds=self.generation_attempt_timeout_seconds,
             fallback_attempt_timeout_seconds=(
                 max(20.0, self.generation_attempt_timeout_seconds)
                 if self.generation_attempt_timeout_seconds is not None
@@ -683,6 +679,9 @@ class ProtocolCompilationService:
                 "criterion_id": criterion.criterion_id,
                 "source_direction": criterion.source_direction.value,
                 "source_quote": criterion.source_span.quote,
+                "normalized_summary": criterion.normalized_summary,
+                "criticality": criterion.criticality,
+                "opaque": criterion.opaque,
                 "ast": criterion.ast.model_dump(mode="json"),
             }
             for criterion in compiled.criteria
@@ -708,7 +707,7 @@ class ProtocolCompilationService:
                     else f"protocol_reviewer_chunk_{chunk_index:03d}"
                 ),
                 prompt=prompt,
-                prompt_version="1.0.4",
+                prompt_version="1.0.5",
                 output_schema_version="protocol-review-proposal-v1",
                 slot_catalog_version=self.slot_catalog.version,
                 normalized_input=review_payload,
@@ -862,7 +861,7 @@ class ProtocolCompilationService:
                 compiler_model_id=(
                     "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                 ),
-                compiler_prompt_version="1.0.9",
+                compiler_prompt_version="1.0.11",
                 created_at=now,
                 evaluation_date=evaluation_date,
             )
@@ -910,7 +909,7 @@ class ProtocolCompilationService:
                         compiler_model_id=(
                             "gemini-3.5-flash-lite" if compiler_fallback else "gemini-3.6-flash"
                         ),
-                        compiler_prompt_version="1.0.9",
+                        compiler_prompt_version="1.0.11",
                         created_at=now,
                         evaluation_date=evaluation_date,
                     )
@@ -987,13 +986,15 @@ class ProtocolCompilationService:
                 reviewer_model_id=(
                     "gemini-3.5-flash-lite" if reviewer_fallback else "gemini-3.6-flash"
                 ),
-                reviewer_prompt_version="1.0.4",
+                reviewer_prompt_version="1.0.5",
                 reviewed_at=now,
                 compiler_used_fallback=compiler_fallback,
                 reviewer_used_fallback=reviewer_fallback,
             )
             if "LIVE_INCOMPLETE_SOURCE_OPAQUE" in compilation.compiled_trial.warnings:
                 degradation_codes.append("PROTOCOL_COMPILATION_PARTIAL_COVERAGE")
+            if not reviewed.compiled_trial.protocol_verified:
+                degradation_codes.append("PROTOCOL_OPAQUE_CRITERIA_REVIEW_REQUIRED")
             return CompilationWorkflowResult(
                 compilation=TrustedCompilation(
                     compiled_trial=reviewed.compiled_trial,

@@ -25,6 +25,7 @@ from backend.app.domain.questions import (
     QuestionSelection,
     UtilityComponents,
 )
+from backend.app.domain.ranking import TrialEvaluation
 from backend.app.domain.sessions import SessionAggregate
 from backend.app.domain.trials import ProtocolReviewArtifact, RawTrialRecord
 from backend.app.engine.branch_builder import build_branches, deterministic_question_id
@@ -88,6 +89,10 @@ def rank_discount(rank: int) -> float:
     return 1.0 / math.log2(rank + 1)
 
 
+def _has_protocol_degradation(evaluation: TrialEvaluation) -> bool:
+    return any(code.startswith("PROTOCOL_") for code in evaluation.degradation_codes)
+
+
 def compute_topk_risk(state: FullOptimizationState) -> float:
     aggregate = state.aggregate
     top_ids = aggregate.ranked_nct_ids[: aggregate.config.top_k]
@@ -96,6 +101,9 @@ def compute_topk_risk(state: FullOptimizationState) -> float:
     numerator = 0.0
     denominator = 0.0
     for rank, nct_id in enumerate(top_ids, start=1):
+        evaluation = aggregate.trial_evaluations[nct_id]
+        if _has_protocol_degradation(evaluation):
+            continue
         compiled = aggregate.compiled_trials[nct_id]
         critical_ids = {
             criterion.criterion_id
@@ -111,7 +119,6 @@ def compute_topk_risk(state: FullOptimizationState) -> float:
             if critical_proofs
             else 0.0
         )
-        evaluation = aggregate.trial_evaluations[nct_id]
         conflict_ratio = min(1.0, evaluation.conflict_count / 2)
         proof_gap = 1.0 - evaluation.proof_completeness
         trial_risk = 0.55 * unknown_ratio + 0.25 * conflict_ratio + 0.20 * proof_gap
@@ -132,6 +139,8 @@ def generate_slot_candidates(
     # composition and utility depend on Python's hash seed.
     top_ids = aggregate.ranked_nct_ids[: aggregate.config.top_k]
     for nct_id in top_ids:
+        if _has_protocol_degradation(aggregate.trial_evaluations[nct_id]):
+            continue
         proof_by_criterion = {
             proof.criterion_id: proof for proof in state.proofs_by_trial.get(nct_id, [])
         }
@@ -332,6 +341,8 @@ def decision_resolution(before: SessionAggregate, after: SessionAggregate) -> fl
     denominator = 0.0
     for rank, nct_id in enumerate(before.ranked_nct_ids[: before.config.top_k], start=1):
         before_decision = before.trial_evaluations[nct_id].decision
+        if _has_protocol_degradation(before.trial_evaluations[nct_id]):
+            continue
         if before_decision not in _UNRESOLVED:
             continue
         discount = rank_discount(rank)

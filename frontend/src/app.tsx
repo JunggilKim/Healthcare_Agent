@@ -64,8 +64,11 @@ function completedStatus(nextSession: SessionView): string {
   if (nextSession.current_question?.selected) {
     return "분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.";
   }
+  if ((nextSession.trial_evaluation?.degradation_codes.length ?? 0) > 0) {
+    return "상위 후보 검토 필요 · 자동 판정에 사용할 수 없는 조건이 남아 있습니다.";
+  }
   if (nextSession.degradation_codes.length > 0) {
-    return "제한적 분석 완료 · 현재 결과에서는 제안할 다음 확인 항목이 없습니다.";
+    return "분석 완료 · 일부 하위 후보는 원문 검토가 필요합니다.";
   }
   return "분석 완료 · 현재 기록에서 추가로 제안할 확인 항목이 없습니다.";
 }
@@ -413,7 +416,13 @@ export function App() {
   if (location.pathname === "/about") return <AboutPage />;
 
   const hasDegradation = degradationCodes.length > 0;
-  const completionLabel = hasDegradation ? "제한적 분석 결과" : "분석 완료";
+  const topDegradationCodes = session?.trial_evaluation?.degradation_codes ?? [];
+  const hasTopDegradation = topDegradationCodes.length > 0;
+  const completionLabel = hasTopDegradation
+    ? "상위 후보 검토 필요"
+    : hasDegradation
+      ? "일부 후보 검토 필요"
+      : "분석 완료";
 
   return (
     <main className="app-shell min-h-screen" aria-busy={busy}>
@@ -511,7 +520,7 @@ export function App() {
             <p className="sidebar-disclaimer">연구용 프로토타입<br />의료 조언이나 최종 적격 판정이 아닙니다.</p>
           </aside>
           <div className="workspace-shell mx-auto max-w-[1500px] px-5 py-4">
-          {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>제한적 분석 결과입니다.</strong> 확인된 조건의 결과는 보존했지만 일부 조건은 자동 검증에 사용할 수 없습니다. <span className="status-code">{degradationCodes.join(" · ")}</span></p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>S004 스냅샷 데모로 새로 시작</button></div> : null}
+          {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>{hasTopDegradation ? "상위 후보는 전문가 검토가 필요합니다." : "일부 하위 후보는 원문 검토가 필요합니다."}</strong> 확인된 조건의 결과는 보존했지만 검증되지 않은 조건은 자동 판정과 우선순위에 유리하게 사용하지 않습니다. <span className="status-code">{degradationCodes.join(" · ")}</span></p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>S004 스냅샷 데모로 새로 시작</button></div> : null}
           <div className="workspace-toolbar mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-2">
             <p className="text-sm text-slate-300">{statusText}</p>
             <div className="flex flex-wrap gap-2"><button aria-label="Replay Proof" className="secondary-button py-2" onClick={() => void replay()}>{ko.action.replay}</button><button aria-label="Export report" className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : "일부 저장 기능을 사용할 수 없어 보고서를 저장할 수 없습니다."} onClick={() => credentials && void exportReport(credentials)}>{ko.action.export}</button><button aria-label="Reset session" className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>{ko.action.reset}</button><button aria-label="Delete session" className="danger-button py-2" disabled={busy} onClick={() => void deleteCurrentSession()}>{ko.action.delete}</button></div>
