@@ -185,6 +185,7 @@ class HybridRetriever:
 
         embedding_ranks: dict[str, int] | None = None
         full_scores: dict[str, float] | None = None
+
         async def dense_rank() -> tuple[dict[str, int], dict[str, float]]:
             embedding_provider = (
                 self.snapshot_embeddings

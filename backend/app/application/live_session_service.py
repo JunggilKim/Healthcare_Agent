@@ -268,9 +268,7 @@ class LiveSessionService:
             self.generator,
             self.catalog,
             primary_max_attempts=1,
-            generation_attempt_timeout_seconds=(
-                settings.live_generation_attempt_timeout_seconds
-            ),
+            generation_attempt_timeout_seconds=(settings.live_generation_attempt_timeout_seconds),
         )
         self.retriever = HybridRetriever(
             ctgov=ClinicalTrialsGovClient(
@@ -671,10 +669,7 @@ class LiveSessionService:
             yield "degraded", event
             yield "completed", event
             return
-        if (
-            len(retrieval.selected_for_compilation)
-            > self.settings.live_compilation_candidate_limit
-        ):
+        if len(retrieval.selected_for_compilation) > self.settings.live_compilation_candidate_limit:
             retrieval = retrieval.model_copy(
                 update={
                     "selected_for_compilation": retrieval.selected_for_compilation[
