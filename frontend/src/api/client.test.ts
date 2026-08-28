@@ -39,6 +39,29 @@ test("Korean display localization does not alter the analysis request contract",
   });
 });
 
+test("session creation translates rate limits into an actionable Korean retry message", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ code: "RATE_LIMITED", detail: "Too many requests" }),
+        {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "12" },
+        },
+      ),
+    ),
+  );
+
+  await expect(
+    createSession({
+      mode: "live",
+      seedCaseId: "S004",
+      evaluationDate: "2026-08-28",
+    }),
+  ).rejects.toThrow("요청 한도를 초과했습니다. 12초 후 다시 시도해주세요.");
+});
+
 test("question answers preserve the exact English evidence payload", async () => {
   const fetchMock = vi.fn().mockResolvedValue(
     new Response('event: completed\ndata: {"state":"complete"}\n\n', {
@@ -51,7 +74,10 @@ test("question answers preserve the exact English evidence payload", async () =>
   await submitAnswer(
     { sessionId: "session-s004", token: "token-s004" },
     "question-pathology",
-    { answerText: "Existing pathology report confirms high-grade urothelial carcinoma." },
+    {
+      answerText: "Existing pathology report confirms high-grade urothelial carcinoma.",
+      idempotencyKey: "answer-turn-pathology",
+    },
     () => undefined,
   );
 
@@ -60,6 +86,7 @@ test("question answers preserve the exact English evidence payload", async () =>
     headers: {
       Accept: "text/event-stream",
       "Content-Type": "application/json",
+      "Idempotency-Key": "answer-turn-pathology",
       "X-Session-Token": "token-s004",
     },
     body: JSON.stringify({
@@ -70,6 +97,65 @@ test("question answers preserve the exact English evidence payload", async () =>
       declined: false,
     }),
   });
+});
+
+test("structured question branches preserve their typed value", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(
+    new Response('event: completed\ndata: {"state":"QUESTION_READY"}\n\n', { status: 200 }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+
+  await submitAnswer(
+    { sessionId: "session-s004", token: "token-s004" },
+    "question-muscle-invasion",
+    {
+      structuredValue: { kind: "boolean", value: true },
+      idempotencyKey: "answer-turn-muscle-invasion",
+    },
+    () => undefined,
+  );
+
+  expect(fetchMock).toHaveBeenCalledWith("/api/v1/sessions/session-s004/answers", {
+    method: "POST",
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "answer-turn-muscle-invasion",
+      "X-Session-Token": "token-s004",
+    },
+    body: JSON.stringify({
+      question_id: "question-muscle-invasion",
+      answer_text: null,
+      structured_value: { kind: "boolean", value: true },
+      unknown: false,
+      declined: false,
+    }),
+  });
+});
+
+test("SSE error events reject instead of looking like successful answers", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response('event: error\ndata: {"code":"SNAPSHOT_BRANCH_UNAVAILABLE"}\n\n', {
+        status: 200,
+      }),
+    ),
+  );
+
+  await expect(
+    submitAnswer(
+      { sessionId: "session-s004", token: "token-s004" },
+      "question-muscle-invasion",
+      {
+        structuredValue: { kind: "boolean", value: true },
+        idempotencyKey: "answer-turn-error",
+      },
+      () => undefined,
+    ),
+  ).rejects.toThrow(
+    "이 스냅샷 데모에는 선택한 답변 이후의 저장된 분석 경로가 없습니다.",
+  );
 });
 
 test("live analysis reports an eight-second event-stream stall", async () => {

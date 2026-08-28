@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,12 +39,16 @@ class HybridRetriever:
         snapshot_root: Path,
         snapshot_embeddings: EmbeddingProvider | None = None,
         tokenizer: RegexMedicalTokenizer | None = None,
+        dense_timeout_seconds: float | None = None,
     ) -> None:
+        if dense_timeout_seconds is not None and dense_timeout_seconds <= 0:
+            raise ValueError("dense_timeout_seconds must be positive")
         self.ctgov = ctgov
         self.embeddings = embeddings
         self.snapshot_embeddings = snapshot_embeddings
         self.snapshot_root = snapshot_root
         self.tokenizer = tokenizer or RegexMedicalTokenizer()
+        self.dense_timeout_seconds = dense_timeout_seconds
 
     @staticmethod
     def _merge_page(
@@ -109,10 +114,13 @@ class HybridRetriever:
             )
         else:
             try:
-                for condition_query in sorted(
+                ordered_queries = sorted(
                     query.condition_queries, key=lambda item: (item.priority, item.text)
-                ):
-                    response = await self.ctgov.search(condition_query.text, page_size=100)
+                )
+                responses = await asyncio.gather(
+                    *(self.ctgov.search(item.text, page_size=100) for item in ordered_queries)
+                )
+                for condition_query, response in zip(ordered_queries, responses, strict=True):
                     api_version = response.api_version
                     data_timestamp = response.data_timestamp
                     retrieved_at = response.retrieved_at
@@ -177,7 +185,8 @@ class HybridRetriever:
 
         embedding_ranks: dict[str, int] | None = None
         full_scores: dict[str, float] | None = None
-        try:
+
+        async def dense_rank() -> tuple[dict[str, int], dict[str, float]]:
             embedding_provider = (
                 self.snapshot_embeddings
                 if result_mode in {"snapshot", "hybrid_degraded"}
@@ -189,19 +198,31 @@ class HybridRetriever:
             vectors = await embedding_provider.embed_documents(documents)
             if len(vectors) != len(stage_a):
                 raise EmbeddingUnavailableError("incomplete dense document set")
-            embedding_ranks = cosine_ranks(
+            ranks_by_embedding = cosine_ranks(
                 query_vector,
                 {item.trial.nct_id: vector for item, vector in zip(stage_a, vectors, strict=True)},
             )
-            full_scores = {
+            scores = {
                 item.trial.nct_id: rrf_score(
                     item.registry_rank,
                     ranks[item.trial.nct_id],
-                    embedding_ranks[item.trial.nct_id],
+                    ranks_by_embedding[item.trial.nct_id],
                     exact_match=exact[item.trial.nct_id],
                 )
                 for item in stage_a
             }
+            return ranks_by_embedding, scores
+
+        try:
+            if self.dense_timeout_seconds is None:
+                embedding_ranks, full_scores = await dense_rank()
+            else:
+                async with asyncio.timeout(self.dense_timeout_seconds):
+                    embedding_ranks, full_scores = await dense_rank()
+        except TimeoutError:
+            degradation_codes.append("EMBEDDING_TIMEOUT_LEXICAL_FALLBACK")
+            if result_mode == "live":
+                result_mode = "hybrid_degraded"
         except (EmbeddingUnavailableError, ValueError):
             degradation_codes.append("EMBEDDING_UNAVAILABLE_LEXICAL_FALLBACK")
             if result_mode == "live":

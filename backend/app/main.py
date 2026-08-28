@@ -7,8 +7,9 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from backend.app.api.errors import ApiProblem, problem_handler, validation_problem_handler
 from backend.app.api.middleware import request_id_middleware
@@ -32,7 +33,12 @@ from backend.app.settings import get_settings
 @asynccontextmanager
 async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    for logger_name in ("trial_opt.request", "trial_opt.model", "trial_opt.persistence"):
+    for logger_name in (
+        "trial_opt.request",
+        "trial_opt.model",
+        "trial_opt.persistence",
+        "trial_opt.live",
+    ):
         audit_logger = logging.getLogger(logger_name)
         audit_logger.setLevel(getattr(logging, settings.log_level.upper(), logging.INFO))
         audit_logger.propagate = False
@@ -73,6 +79,7 @@ app = FastAPI(
     description="Proof-carrying active evidence acquisition for clinical-trial pre-screening.",
     lifespan=lifespan,
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 app.middleware("http")(request_id_middleware)
 app.add_exception_handler(ApiProblem, problem_handler)
 app.add_exception_handler(RequestValidationError, validation_problem_handler)
@@ -96,12 +103,27 @@ def _phase_zero_html() -> str:
 <p>{DISCLAIMER}</p></main></body></html>"""
 
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)
 async def spa_root() -> Response:
     return FileResponse(_INDEX_FILE) if _INDEX_FILE.is_file() else HTMLResponse(_phase_zero_html())
 
 
-@app.get("/{frontend_path:path}", response_class=HTMLResponse, include_in_schema=False)
+@app.api_route(
+    "/favicon.ico",
+    methods=["GET", "HEAD"],
+    response_class=RedirectResponse,
+    include_in_schema=False,
+)
+async def legacy_favicon() -> Response:
+    return RedirectResponse(url="/favicon.svg", status_code=308)
+
+
+@app.api_route(
+    "/{frontend_path:path}",
+    methods=["GET", "HEAD"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
 async def spa_route(frontend_path: str) -> Response:
     candidate = (_STATIC_DIR / frontend_path).resolve()
     if _STATIC_DIR.resolve() in candidate.parents and candidate.is_file():

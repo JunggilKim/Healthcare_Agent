@@ -34,6 +34,73 @@ class StructuredGenerationUnavailable(RuntimeError):
     pass
 
 
+class ModelOutputTruncated(RuntimeError):
+    pass
+
+
+def _normalize_model_json_artifacts(value: object) -> object:
+    """Repair schema-shape artifacts without changing clinical meaning.
+
+    Gemini occasionally carries the categorical ``system`` property into the
+    adjacent string branch, emits the placeholder discriminator ``value``, or
+    places a one-sided numeric bound inside a ``number`` object.  The emitted
+    fields and AST comparison operator uniquely determine the intended schema
+    branch.  Ambiguous shapes remain strict validation failures.
+    """
+
+    if isinstance(value, list):
+        return [_normalize_model_json_artifacts(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized = {
+        key: _normalize_model_json_artifacts(item)
+        for key, item in value.items()
+        if not (value.get("kind") == "string" and key == "system" and item is None)
+    }
+    if normalized.get("kind") == "value":
+        if "system" in normalized:
+            normalized["kind"] = "categorical"
+        elif "normalized" in normalized:
+            normalized["kind"] = "string"
+    if normalized.get("kind") == "number" and ("lower" in normalized or "upper" in normalized):
+        normalized["kind"] = "range"
+    typed_value = normalized.get("value")
+    if (
+        isinstance(typed_value, dict)
+        and typed_value.get("kind") in {"number", "range"}
+        and ("lower" in typed_value or "upper" in typed_value)
+    ):
+        operator = normalized.get("op")
+        bound_key = (
+            "lower" if operator in {"GTE", "GT"} else "upper" if operator in {"LTE", "LT"} else None
+        )
+        if bound_key is not None and typed_value.get(bound_key) is not None:
+            normalized["value"] = {
+                "kind": "number",
+                "value": typed_value[bound_key],
+                **({"unit": typed_value["unit"]} if "unit" in typed_value else {}),
+            }
+        elif operator == "BETWEEN_INCLUSIVE":
+            normalized["value"] = {**typed_value, "kind": "range"}
+    return normalized
+
+
+def _validate_generated_json[ValidatedModel: BaseModel](
+    output_model: type[ValidatedModel], response_text: str
+) -> ValidatedModel:
+    try:
+        return output_model.model_validate_json(response_text)
+    except ValidationError as original_error:
+        try:
+            raw = orjson.loads(response_text)
+        except orjson.JSONDecodeError:
+            raise original_error from None
+        normalized = _normalize_model_json_artifacts(raw)
+        if normalized == raw:
+            raise original_error
+        return output_model.model_validate(normalized)
+
+
 class StructuredGenerator:
     def __init__(
         self,
@@ -79,8 +146,13 @@ class StructuredGenerator:
         max_output_tokens: int,
         max_attempts: int,
         thinking_budget: int | None = None,
+        attempt_timeout_seconds: float | None = None,
         session_id: str = "unscoped",
     ) -> tuple[OutputModel, StructuredGenerationRecord]:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        if attempt_timeout_seconds is not None and attempt_timeout_seconds <= 0:
+            raise ValueError("attempt_timeout_seconds must be positive")
         thinking_config, thinking_cache_config = self._thinking_config(
             thinking_level=thinking_level,
             thinking_budget=thinking_budget,
@@ -98,21 +170,40 @@ class StructuredGenerator:
             normalized_input=normalized_input,
             generation_config=generation_config,
         )
-        cached = await self.cache.get(cache_key)
-        if cached is not None:
-            parsed = output_model.model_validate(cached.parsed_json)
-            cache_record = cached.model_copy(
-                update={"usage": cached.usage.model_copy(update={"cache_hit": True})}
+        try:
+            cached = await self.cache.get(cache_key)
+        except Exception as error:
+            logger.warning(
+                "model cache read failed; continuing without cache "
+                "(model_id=%s task_name=%s error=%s)",
+                model_id,
+                task_name,
+                type(error).__name__,
             )
-            logger.info(
-                self._usage_log(
-                    cache_record,
-                    session_id=session_id,
-                    latency_ms=0,
-                    retry_count=0,
+            cached = None
+        if cached is not None and cached.cache_key == cache_key:
+            try:
+                parsed = output_model.model_validate(cached.parsed_json)
+            except ValidationError:
+                logger.warning(
+                    "model cache payload validation failed; continuing without cache "
+                    "(model_id=%s task_name=%s)",
+                    model_id,
+                    task_name,
                 )
-            )
-            return parsed, cache_record
+            else:
+                cache_record = cached.model_copy(
+                    update={"usage": cached.usage.model_copy(update={"cache_hit": True})}
+                )
+                logger.info(
+                    self._usage_log(
+                        cache_record,
+                        session_id=session_id,
+                        latency_ms=0,
+                        retry_count=0,
+                    )
+                )
+                return parsed, cache_record
 
         circuit = self.circuit(model_id)
         circuit.before_call()
@@ -133,7 +224,7 @@ class StructuredGenerator:
                     reservation = await self.usage_guard.reserve_async(
                         session_id=session_id, amount_usd=reserved_cost
                     )
-                response = await self.client.aio.models.generate_content(
+                request = self.client.aio.models.generate_content(
                     model=model_id,
                     contents=retry_prompt,
                     config=types.GenerateContentConfig(
@@ -143,6 +234,11 @@ class StructuredGenerator:
                         thinking_config=thinking_config,
                     ),
                 )
+                if attempt_timeout_seconds is None:
+                    response = await request
+                else:
+                    async with asyncio.timeout(attempt_timeout_seconds):
+                        response = await request
                 metadata = response.usage_metadata
                 prompt_tokens = int(metadata.prompt_token_count or 0) if metadata else 0
                 output_tokens = int(metadata.candidates_token_count or 0) if metadata else 0
@@ -153,7 +249,14 @@ class StructuredGenerator:
                     output_tokens=output_tokens,
                     reasoning_tokens=reasoning_tokens,
                 )
-                parsed = output_model.model_validate_json(response.text or "")
+                candidates = getattr(response, "candidates", None)
+                candidate = candidates[0] if candidates else None
+                finish_reason = str(getattr(candidate, "finish_reason", ""))
+                if finish_reason.endswith("MAX_TOKENS"):
+                    raise ModelOutputTruncated(
+                        f"model output reached max_output_tokens={max_output_tokens}"
+                    )
+                parsed = _validate_generated_json(output_model, response.text or "")
                 if reservation is not None:
                     assert self.usage_guard is not None
                     await self.usage_guard.reconcile_async(
@@ -180,7 +283,18 @@ class StructuredGenerator:
                     parsed_json=parsed.model_dump(mode="json"),
                     usage=usage,
                 )
-                await self.cache.put(record)
+                try:
+                    await self.cache.put(record)
+                except Exception as error:
+                    # The model response is already validated and any reservation is reconciled.
+                    # A cache outage must not trigger another paid model dispatch.
+                    logger.warning(
+                        "model cache write failed; returning validated response "
+                        "(model_id=%s task_name=%s error=%s)",
+                        model_id,
+                        task_name,
+                        type(error).__name__,
+                    )
                 logger.info(
                     self._usage_log(
                         record,
@@ -202,6 +316,16 @@ class StructuredGenerator:
                             reservation.reservation_id, actual_usd=billed_cost
                         )
                 last_error = error
+                logger.warning(
+                    self._attempt_failure_log(
+                        model_id=model_id,
+                        task_name=task_name,
+                        session_id=session_id,
+                        latency_ms=(time.monotonic() - call_started) * 1000,
+                        retry_count=attempt,
+                        error=error,
+                    )
+                )
                 if attempt < max_attempts - 1:
                     issue = (
                         self._validation_issue_text(error)
@@ -292,6 +416,39 @@ class StructuredGenerator:
             }
         ).decode()
 
+    @staticmethod
+    def _attempt_failure_log(
+        *,
+        model_id: str,
+        task_name: str,
+        session_id: str,
+        latency_ms: float,
+        retry_count: int,
+        error: Exception,
+    ) -> str:
+        return orjson.dumps(
+            {
+                "timestamp": datetime.now(UTC).isoformat(),
+                "severity": "WARNING",
+                "request_id": None,
+                "session_id_hash": hashlib.sha256(session_id.encode()).hexdigest(),
+                "event_type": "model_call_attempt_failed",
+                "stage": task_name,
+                "mode": None,
+                "model_id": model_id,
+                "task_name": task_name,
+                "cache_hit": False,
+                "input_tokens": None,
+                "output_tokens": None,
+                "estimated_cost_usd": None,
+                "latency_ms": round(latency_ms, 3),
+                "retry_count": retry_count,
+                "degradation_code": None,
+                "error_code": type(error).__name__,
+                "git_sha": os.getenv("APP_VERSION", "dev"),
+            }
+        ).decode()
+
     async def generate_primary_with_lite_fallback(
         self,
         *,
@@ -310,6 +467,10 @@ class StructuredGenerator:
         fallback_max_output_tokens: int,
         primary_thinking_budget: int | None = None,
         fallback_thinking_budget: int | None = None,
+        primary_max_attempts: int = 3,
+        fallback_max_attempts: int = 1,
+        primary_attempt_timeout_seconds: float | None = None,
+        fallback_attempt_timeout_seconds: float | None = None,
         session_id: str = "unscoped",
     ) -> tuple[OutputModel, StructuredGenerationRecord]:
         try:
@@ -325,7 +486,8 @@ class StructuredGenerator:
                 thinking_level=primary_thinking_level,
                 thinking_budget=primary_thinking_budget,
                 max_output_tokens=primary_max_output_tokens,
-                max_attempts=3,
+                max_attempts=primary_max_attempts,
+                attempt_timeout_seconds=primary_attempt_timeout_seconds,
                 session_id=session_id,
             )
         except (StructuredGenerationUnavailable, CircuitOpenError):
@@ -341,7 +503,8 @@ class StructuredGenerator:
                 thinking_level=fallback_thinking_level,
                 thinking_budget=fallback_thinking_budget,
                 max_output_tokens=fallback_max_output_tokens,
-                max_attempts=1,
+                max_attempts=fallback_max_attempts,
+                attempt_timeout_seconds=fallback_attempt_timeout_seconds,
                 session_id=session_id,
             )
             return parsed, record.model_copy(update={"used_fallback": True})

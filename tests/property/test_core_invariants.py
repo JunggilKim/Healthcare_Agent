@@ -201,6 +201,23 @@ def test_verified_fail_never_ranks_above_nonfail_tier(
     assert rank_trials([failed, nonfailed]) == [nonfailed, failed]
 
 
+def test_opaque_review_required_trial_cannot_outrank_transparent_peer() -> None:
+    transparent = _evaluation(
+        nct_id="NCT00000001",
+        decision=TrialDecision.REVIEW_REQUIRED,
+        retrieval=0.2,
+        completeness=0.5,
+    )
+    opaque = _evaluation(
+        nct_id="NCT00000002",
+        decision=TrialDecision.REVIEW_REQUIRED,
+        retrieval=1.0,
+        completeness=1.0,
+    ).model_copy(update={"opaque_critical_count": 1})
+
+    assert rank_trials([opaque, transparent]) == [transparent, opaque]
+
+
 @settings(max_examples=30)
 @given(keep_facts=st.lists(st.booleans(), min_size=1, max_size=12))
 def test_replay_is_deterministic_for_the_same_state(keep_facts: list[bool]) -> None:

@@ -79,14 +79,13 @@ test("unknown and failure-rehearsal paths remain usable", async ({ page }) => {
   await page.goto("/?demo-tools=1");
   await page.getByRole("button", { name: "S004 데모 분석 시작" }).click();
   await page.getByRole("button", { name: "GEMINI_UNAVAILABLE" }).click();
-  await expect(page.getByText(/완료된 분석 결과는 그대로 보존했습니다/)).toBeVisible();
-  await page.getByRole("button", { name: "현재 기록으로는 모르겠어요" }).click();
-  await expect(page.getByRole("heading", { name: /근육 침윤 여부/ })).toBeVisible();
-  await page.getByRole("button", { name: "이 기록을 확인할 수 없어요" }).click();
+  await expect(page.getByText(/일부 하위 후보는 원문 검토가 필요합니다/)).toBeVisible();
+  await page.getByRole("button", { name: "기록 내용이 불명확함" }).click();
   await expect(
     page.getByText("확인할 수 없는 기록으로 표시했습니다. 같은 질문은 다시 제안하지 않습니다."),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: /근육 침윤 여부/ })).toHaveCount(0);
+  await expect(page.getByText("스냅샷 데모의 준비된 질문을 모두 확인했습니다.")).toBeVisible();
+  await expect(page.getByText("SNAPSHOT_BRANCH_UNAVAILABLE")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Export report" })).toBeEnabled();
   await page.getByRole("button", { name: "Experiment Evidence" }).click();
   await expect(page.getByText(/해석 범위에 주의하세요/)).toBeVisible();
@@ -169,5 +168,5 @@ test("loading and API error states remain explicit", async ({ page }) => {
     route.fulfill({ status: 503, contentType: "application/json", body: '{"code":"TEST_UNAVAILABLE"}' }),
   );
   await page.getByRole("button", { name: "S004 데모 분석 시작" }).click();
-  await expect(page.getByRole("alert")).toContainText("API request failed: 503");
+  await expect(page.getByRole("alert")).toContainText("TEST_UNAVAILABLE");
 });

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 from google.cloud import firestore
+from pydantic import ValidationError
 
 from backend.app.domain.canonical import canonical_json_bytes
 from backend.app.domain.generation import StructuredGenerationRecord
@@ -42,34 +45,53 @@ class LocalModelResultCache:
     def __init__(self, root: Path) -> None:
         self.root = root
 
-    async def get(self, key: str) -> StructuredGenerationRecord | None:
+    def _get(self, key: str) -> StructuredGenerationRecord | None:
         path = self.root / "llm" / f"{key}.json"
-        if not path.exists():
+        if not path.is_file():
             return None
-        return StructuredGenerationRecord.model_validate_json(path.read_bytes())
+        try:
+            record = StructuredGenerationRecord.model_validate_json(path.read_bytes())
+        except (OSError, ValidationError):
+            return None
+        return record if record.cache_key == key else None
 
-    async def put(self, record: StructuredGenerationRecord) -> str:
+    async def get(self, key: str) -> StructuredGenerationRecord | None:
+        return await asyncio.to_thread(self._get, key)
+
+    def _put(self, record: StructuredGenerationRecord) -> str:
         path = self.root / "llm" / f"{record.cache_key}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(canonical_json_bytes(record))
+        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            temporary.write_bytes(canonical_json_bytes(record))
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
         return str(path)
+
+    async def put(self, record: StructuredGenerationRecord) -> str:
+        return await asyncio.to_thread(self._put, record)
 
 
 class FirestoreModelResultCache:
     """Shared immutable small-result cache for Cloud Run instances."""
 
-    def __init__(self, client: firestore.AsyncClient) -> None:
+    def __init__(self, client: firestore.AsyncClient, *, namespace: str = "") -> None:
         self._collection = client.collection("llm_cache")
+        self._key_prefix = f"{namespace}:" if namespace else ""
+
+    def _document_key(self, key: str) -> str:
+        return f"{self._key_prefix}{key}"
 
     async def get(self, key: str) -> StructuredGenerationRecord | None:
-        snapshot = await self._collection.document(key).get()
+        snapshot = await self._collection.document(self._document_key(key)).get()
         if not snapshot.exists:
             return None
         data = snapshot.to_dict() or {}
         return StructuredGenerationRecord.model_validate(data["record"])
 
     async def put(self, record: StructuredGenerationRecord) -> str:
-        reference = self._collection.document(record.cache_key)
+        reference = self._collection.document(self._document_key(record.cache_key))
         await reference.set(
             {
                 "record": record.model_dump(mode="json"),

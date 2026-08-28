@@ -16,6 +16,7 @@ from backend.app.agents.protocol_reviewer import bind_semantic_review
 from backend.app.application.catalog import load_slot_catalog
 from backend.app.application.compilation_service import ProtocolCompilationService
 from backend.app.application.vertical_slice import load_vertical_slice
+from backend.app.domain.ast import AstNode, AstOperator, CriterionAst
 from backend.app.domain.canonical import canonical_sha256
 from backend.app.domain.evidence import EligibilityContext
 from backend.app.domain.model_outputs import (
@@ -24,6 +25,7 @@ from backend.app.domain.model_outputs import (
 )
 from backend.app.domain.trials import CompiledTrial
 from backend.app.engine.boundary_tests import run_boundary_tests
+from backend.app.engine.coverage import calculate_source_coverage
 from backend.app.engine.evaluator import evaluate_criterion
 from backend.app.infrastructure.structured_generation import StructuredGenerationUnavailable
 
@@ -245,6 +247,27 @@ def test_unique_exact_quote_is_deterministically_reanchored() -> None:
     assert raw.eligibility_criteria[span.start : span.end] == span.quote
 
 
+def test_markdown_escaped_comparison_quote_is_rebound_to_exact_source_bytes() -> None:
+    source = r"Adults age \>18 years"
+    raw, proposal = _trial_and_proposal(source)
+    proposal.criteria[0].quote = "Adults age >18 years"
+    proposal.criteria[0].end = len(proposal.criteria[0].quote)
+
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.4",
+        created_at=datetime(2026, 8, 27, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 27),
+    )
+
+    span = result.compiled_trial.criteria[0].source_span
+    assert span.quote == source
+    assert raw.eligibility_criteria[span.start : span.end] == span.quote
+
+
 def test_ambiguous_quote_cannot_be_reanchored() -> None:
     raw, proposal = _trial_and_proposal()
     criterion_text = raw.eligibility_criteria
@@ -260,6 +283,36 @@ def test_ambiguous_quote_cannot_be_reanchored() -> None:
             created_at=datetime(2026, 8, 12, tzinfo=UTC),
             evaluation_date=date(2026, 8, 12),
         )
+
+
+def test_repeated_quotes_are_reanchored_one_to_one_when_all_are_compiled() -> None:
+    raw, proposal = _trial_and_proposal()
+    criterion_text = raw.eligibility_criteria
+    assert criterion_text is not None
+    source = f"{criterion_text}\n{criterion_text}"
+    raw = raw.model_copy(update={"eligibility_criteria": source})
+    second = proposal.criteria[0].model_copy(
+        deep=True,
+        update={"source_order": 2, "start": 1, "end": len(criterion_text) + 1},
+    )
+    proposal = proposal.model_copy(update={"criteria": [proposal.criteria[0], second]})
+
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.5-flash-lite",
+        compiler_prompt_version="1.0.9",
+        created_at=datetime(2026, 8, 27, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 27),
+    )
+
+    spans = [criterion.source_span for criterion in result.compiled_trial.criteria]
+    assert [(span.start, span.end) for span in spans] == [
+        (0, len(criterion_text)),
+        (len(criterion_text) + 1, len(source)),
+    ]
+    assert all(source[span.start : span.end] == span.quote for span in spans)
 
 
 def test_missing_numeric_unit_uses_slot_single_canonical_unit() -> None:
@@ -318,6 +371,38 @@ def test_invalid_criterion_ast_becomes_source_bound_opaque_only() -> None:
     assert node.op.value == "OPAQUE"
     assert node.metadata["residual_source_sha256"] == criterion.source_text_sha256
     assert "AST_TRUSTED_VALIDATION_OPAQUE_FALLBACK" in criterion.warnings
+
+
+def test_opaque_criterion_cannot_be_downgraded_to_noncritical() -> None:
+    raw, proposal = _trial_and_proposal()
+    proposal.criteria[0].ast = CriterionAst(
+        root_node_id="n0",
+        nodes=[
+            AstNode(
+                node_id="n0",
+                op=AstOperator.OPAQUE,
+                metadata={"reason_code": "UNSUPPORTED_SOURCE"},
+            )
+        ],
+    )
+    proposal.criteria[0].opaque = True
+    proposal.criteria[0].criticality = "NONCRITICAL"
+    proposal.criteria[0].required_slots = []
+
+    result = construct_trusted_compilation(
+        trial=raw,
+        proposal=proposal,
+        slot_catalog=load_slot_catalog(),
+        compiler_model_id="gemini-3.6-flash",
+        compiler_prompt_version="1.0.11",
+        created_at=datetime(2026, 8, 28, tzinfo=UTC),
+        evaluation_date=date(2026, 8, 28),
+    )
+
+    criterion = result.compiled_trial.criteria[0]
+    assert criterion.opaque is True
+    assert criterion.criticality == "CRITICAL"
+    assert "OPAQUE_CRITICALITY_NORMALIZED" in criterion.warnings
 
 
 @pytest.mark.asyncio
@@ -399,7 +484,11 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
             return ProtocolReviewProposal(approved=False), SimpleNamespace(used_fallback=False)
 
     generator = RejectingReviewGenerator()
-    service = ProtocolCompilationService(generator, load_slot_catalog())
+    service = ProtocolCompilationService(
+        generator,
+        load_slot_catalog(),
+        generation_attempt_timeout_seconds=10,
+    )
     result = await service.compile_and_review(
         trial=raw,
         evaluation_date=date(2026, 8, 11),
@@ -414,15 +503,22 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
     initial_compile = generator.arguments[0]
     repair_compile = generator.arguments[2]
     reviewer_call = generator.arguments[1]
-    assert initial_compile["prompt_version"] == "1.0.8"
+    assert initial_compile["prompt_version"] == "1.0.11"
     assert initial_compile["primary_thinking_level"] is None
     assert initial_compile["fallback_thinking_level"] is None
     assert initial_compile["primary_thinking_budget"] == 1024
     assert initial_compile["fallback_thinking_budget"] == 1024
     assert initial_compile["primary_max_output_tokens"] == 4000
+    assert initial_compile["fallback_max_output_tokens"] == 8000
+    assert initial_compile["primary_attempt_timeout_seconds"] == 10.0
+    assert initial_compile["fallback_attempt_timeout_seconds"] == 20.0
     assert repair_compile["primary_thinking_budget"] == 1024
-    assert repair_compile["primary_max_output_tokens"] == 2500
-    assert reviewer_call["prompt_version"] == "1.0.4"
+    assert repair_compile["primary_max_output_tokens"] == 4000
+    assert reviewer_call["prompt_version"] == "1.0.5"
+    assert reviewer_call["primary_max_output_tokens"] == 4000
+    assert reviewer_call["fallback_max_output_tokens"] == 4000
+    assert reviewer_call["primary_attempt_timeout_seconds"] == 20.0
+    assert reviewer_call["fallback_attempt_timeout_seconds"] == 20.0
     reviewer_input = reviewer_call["normalized_input"]
     assert isinstance(reviewer_input, dict)
     assert set(reviewer_input) == {"nct_id", "criteria"}
@@ -430,8 +526,86 @@ async def test_rejected_review_gets_exactly_one_repair_then_becomes_opaque() -> 
         "criterion_id",
         "source_direction",
         "source_quote",
+        "normalized_summary",
+        "criticality",
+        "opaque",
         "ast",
     }
+
+
+@pytest.mark.asyncio
+async def test_live_compiler_quarantines_each_incomplete_source_item() -> None:
+    source = (
+        "Inclusion Criteria:\n"
+        "* Patients must be at least 18 years of age.\n"
+        "* ECOG performance status 0-2.\n"
+    )
+    raw, proposal = _trial_and_proposal(source)
+    first_quote = "Patients must be at least 18 years of age."
+    first_start = source.index(first_quote)
+    proposal.criteria[0].start = first_start
+    proposal.criteria[0].end = first_start + len(first_quote)
+    proposal.criteria[0].quote = first_quote
+
+    class PartialGenerator:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate_primary_with_lite_fallback(self, **_kwargs):
+            self.calls += 1
+            return proposal, SimpleNamespace(used_fallback=True)
+
+    generator = PartialGenerator()
+    service = ProtocolCompilationService(generator, load_slot_catalog())
+    completed, used_fallback = await service._compile_proposal(
+        raw,
+        session_id="live-partial-coverage",
+    )
+
+    assert used_fallback is True
+    assert len(completed.criteria) == 2
+    assert completed.criteria[0].opaque is False
+    assert completed.criteria[1].opaque is True
+    assert completed.criteria[1].warnings == ["LIVE_INCOMPLETE_SOURCE_ITEM_OPAQUE"]
+    assert completed.compiler_warnings == ["LIVE_INCOMPLETE_SOURCE_OPAQUE"]
+    assert calculate_source_coverage(source, completed.criteria).ratio == 1.0
+
+    result = await service.compile_and_review(
+        trial=raw,
+        evaluation_date=date(2026, 8, 27),
+        now=datetime(2026, 8, 27, tzinfo=UTC),
+        session_id="live-partial-coverage-workflow",
+    )
+    assert generator.calls == 2
+    assert result.review_artifact is None
+    assert result.repair_attempted is False
+    assert result.degradation_codes == ["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"]
+
+
+@pytest.mark.asyncio
+async def test_live_reviewer_failure_preserves_compiled_criteria_as_unverified() -> None:
+    raw, proposal = _trial_and_proposal()
+
+    class ReviewerFailureGenerator:
+        async def generate_primary_with_lite_fallback(self, **kwargs):
+            if kwargs["output_model"] is CompiledTrialProposal:
+                return proposal, SimpleNamespace(used_fallback=True)
+            raise StructuredGenerationUnavailable("review response was truncated")
+
+    service = ProtocolCompilationService(ReviewerFailureGenerator(), load_slot_catalog())
+    result = await service.compile_and_review(
+        trial=raw,
+        evaluation_date=date(2026, 8, 27),
+        now=datetime(2026, 8, 27, tzinfo=UTC),
+        session_id="live-review-unavailable",
+    )
+
+    criterion = result.compilation.compiled_trial.criteria[0]
+    assert criterion.opaque is False
+    assert criterion.protocol_verified is False
+    assert result.review_artifact is None
+    assert result.review_attempts == []
+    assert result.degradation_codes == ["PROTOCOL_REVIEW_UNAVAILABLE_UNVERIFIED"]
 
 
 @pytest.mark.asyncio
@@ -485,7 +659,10 @@ async def test_offline_repair_failure_quarantines_rejected_criterion() -> None:
     )
     assert result.review_artifact is not None
     assert result.compilation.compiled_trial.criteria[0].opaque is True
-    assert result.degradation_codes == ["REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE"]
+    assert result.degradation_codes == [
+        "PROTOCOL_OPAQUE_CRITERIA_REVIEW_REQUIRED",
+        "REPAIR_GENERATION_FAILED_CRITERIA_QUARANTINED_OPAQUE",
+    ]
 
 
 @pytest.mark.asyncio
@@ -608,7 +785,7 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert proposal.criteria[0].warnings == ["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"]
     assert proposal.criteria[1].warnings == ["OFFLINE_CHUNK_COMPILATION_OPAQUE_FALLBACK"]
     assert all(source[item.start : item.end] == item.quote for item in proposal.criteria)
-    assert all(call["prompt_version"] == "1.0.8" for call in generator.calls)
+    assert all(call["prompt_version"] == "1.0.11" for call in generator.calls)
     assert all(call["primary_thinking_budget"] == 1024 for call in generator.calls)
     assert all(
         call["normalized_input"]["trial"]["minimum_age"] is None
@@ -635,7 +812,7 @@ async def test_offline_compiler_chunks_at_bullets_and_binds_section_direction() 
     assert len(generator.calls) == 3
     assert repaired.criteria[0] == proposal.criteria[0]
     assert generator.calls[-1]["task_name"] == "protocol_compiler_repair"
-    assert generator.calls[-1]["primary_max_output_tokens"] == 2500
+    assert generator.calls[-1]["primary_max_output_tokens"] == 4000
 
 
 def test_offline_compiler_splits_ctgov_escaped_numbered_items() -> None:

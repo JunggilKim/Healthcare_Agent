@@ -46,8 +46,10 @@ def test_exported_logic_schemas_forbid_extra_fields() -> None:
 
 def test_protocol_compiler_prompt_requires_compact_json_and_opaque_metadata() -> None:
     text = (PROMPT_ROOT / "protocol_compiler_v1.md").read_text(encoding="utf-8")
-    assert "version: 1.0.8" in text
+    assert "version: 1.0.11" in text
     assert "compact schema-valid JSON" in text
+    assert "Never use kind=value" in text
+    assert "use lower/upper only with kind=range" in text
     assert "zero-based Unicode code-point offsets" in text
     assert "eligibility_criteria[start:end]" in text
     assert "label nodes exactly n0, n1" in text
@@ -55,6 +57,7 @@ def test_protocol_compiler_prompt_requires_compact_json_and_opaque_metadata() ->
     assert "metadata.reason_code" in text
     assert "metadata.residual_source_sha256" in text
     assert "retain pathology.muscle_invasion=true" in text
+    assert "OPAQUE or otherwise unsupported clause must always remain CRITICAL" in text
 
 
 def test_protocol_compiler_prompt_preserves_explicit_muscle_invasion_semantics() -> None:
@@ -70,10 +73,11 @@ def test_protocol_compiler_prompt_preserves_explicit_muscle_invasion_semantics()
 
 def test_protocol_reviewer_prompt_requires_compact_blocking_issues() -> None:
     text = (PROMPT_ROOT / "protocol_reviewer_v1.md").read_text(encoding="utf-8")
-    assert "version: 1.0.4" in text
+    assert "version: 1.0.5" in text
     assert "pathology.muscle_invasion=true or false" in text
     assert "compact" in text and "schema-valid JSON" in text
     assert "every" in text and "distinct BLOCKING issue" in text
     assert "Every AST is a requirement-to-pass" in text
     assert "EXCLUSION condition is negated" in text
     assert "schema-valid OPAQUE" in text
+    assert "OPAQUE or unsupported" in text

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="TRIAL-OPT">
+  <defs>
+    <linearGradient id="trial-opt-mark" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#trial-opt-mark)"/>
+  <path d="M28 17h8v11h11v8H36v11h-8V36H17v-8h11V17Z" fill="#fff"/>
+</svg>

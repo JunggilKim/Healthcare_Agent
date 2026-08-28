@@ -92,6 +92,27 @@ def test_s004_snapshot_api_vertical_slice(tmp_path, monkeypatch) -> None:
     get_settings.cache_clear()
 
 
+def test_snapshot_rejects_a_date_that_does_not_match_the_frozen_artifact(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "snapshot-date-store"))
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/sessions",
+            json={
+                "mode": "snapshot",
+                "seed_case_id": "S004",
+                "evaluation_date": "2026-08-28",
+                "language": "ko",
+            },
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "INVALID_INPUT"
+        assert "SNAPSHOT_EVALUATION_DATE_MISMATCH" in response.json()["detail"]
+    get_settings.cache_clear()
+
+
 def test_arbitrary_input_identifier_warning_precedes_snapshot_unavailable(
     tmp_path, monkeypatch
 ) -> None:
@@ -206,63 +227,90 @@ def test_s004_branch_b_keeps_histology_unknown_and_never_repeats_question(
 ) -> None:
     monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "branch-b-store"))
     get_settings.cache_clear()
+    with TestClient(app) as client:
+        session_id, headers, initial = _create_and_analyze(client)
+        question_id = initial["current_question"]["selected"]["question_id"]
+        with client.stream(
+            "POST",
+            f"/api/v1/sessions/{session_id}/answers",
+            headers=headers,
+            json={
+                "question_id": question_id,
+                "answer_text": (
+                    "No pathology test has been performed; only the CT finding is available."
+                ),
+                "structured_value": None,
+                "unknown": False,
+                "declined": False,
+            },
+        ) as response:
+            assert response.status_code == 200
+            _ = "".join(response.iter_text())
+        updated = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        histology = next(
+            proof
+            for proof in updated["proofs"]
+            if proof["criterion_id"] == "NCT05239624:INCLUSION:002:5f52ab88"
+        )
+        assert histology["final_verdict"] == "UNKNOWN"
+        assert "pathology.histology" in updated["unavailable_slot_ids"]
+        assert updated["current_question"]["selected"] is None
+        assert updated["current_question"]["stop_reason"] == "SNAPSHOT_BRANCH_COVERAGE_EXHAUSTED"
+    get_settings.cache_clear()
+
+
+def test_s004_snapshot_stops_after_the_last_materialized_branch(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "branch-depth-store"))
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        session_id, headers, initial = _create_and_analyze(client)
+        first_question = initial["current_question"]["selected"]
+        with client.stream(
+            "POST",
+            f"/api/v1/sessions/{session_id}/answers",
+            headers=headers,
+            json={
+                "question_id": first_question["question_id"],
+                "answer_text": (
+                    "Existing pathology report confirms high-grade urothelial carcinoma."
+                ),
+                "structured_value": None,
+                "unknown": False,
+                "declined": False,
+            },
+        ) as response:
+            assert response.status_code == 200
+            _ = "".join(response.iter_text())
+
+        after_first = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        second_question = after_first["current_question"]["selected"]
+        assert second_question["slot_id"] == "pathology.muscle_invasion"
+        with client.stream(
+            "POST",
+            f"/api/v1/sessions/{session_id}/answers",
+            headers=headers,
+            json={
+                "question_id": second_question["question_id"],
+                "answer_text": None,
+                "structured_value": {"kind": "boolean", "value": True},
+                "unknown": False,
+                "declined": False,
+            },
+        ) as response:
+            assert response.status_code == 200
+            stream = "".join(response.iter_text())
+        assert "SNAPSHOT_BRANCH_UNAVAILABLE" not in stream
+
+        completed = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        assert completed["state"] == "COMPLETE"
+        assert completed["current_question"]["selected"] is None
+        assert completed["current_question"]["stop_reason"] == "SNAPSHOT_BRANCH_COVERAGE_EXHAUSTED"
+        assert "라이브 모드" in completed["current_question"]["deterministic_rationale"]
+    get_settings.cache_clear()
 
 
 def test_s004_accepts_contract_structured_value_answer(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "structured-answer-store"))
-    get_settings.cache_clear()
-
-
-def test_public_trial_source_report_reset_and_delete_contracts(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "lifecycle-store"))
-    get_settings.cache_clear()
-
-
-def test_answer_idempotency_key_replays_original_sse(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "idempotency-store"))
-    get_settings.cache_clear()
-    with TestClient(app) as client:
-        session_id, headers, initial = _create_and_analyze(client)
-        headers = {**headers, "Idempotency-Key": "answer-turn-1"}
-        request = {
-            "question_id": initial["current_question"]["selected"]["question_id"],
-            "answer_text": None,
-            "structured_value": None,
-            "unknown": True,
-            "declined": False,
-        }
-        with client.stream(
-            "POST", f"/api/v1/sessions/{session_id}/answers", headers=headers, json=request
-        ) as response:
-            first = "".join(response.iter_text())
-        with client.stream(
-            "POST", f"/api/v1/sessions/{session_id}/answers", headers=headers, json=request
-        ) as response:
-            second = "".join(response.iter_text())
-        assert first == second
-        assert "event: question_selected" in second
-    get_settings.cache_clear()
-    with TestClient(app) as client:
-        trial = client.get("/api/v1/trials/NCT05239624")
-        assert trial.status_code == 200
-        assert trial.json()["source_json_sha256"]
-
-        session_id, headers, _ = _create_and_analyze(client)
-        exported = client.get(f"/api/v1/sessions/{session_id}/export.json", headers=headers)
-        report = client.get(f"/api/v1/sessions/{session_id}/report", headers=headers)
-        assert exported.status_code == 200
-        assert report.status_code == 200
-        assert "Research pre-screening only" in report.text
-
-        reset = client.post(f"/api/v1/sessions/{session_id}/reset", headers=headers)
-        assert reset.status_code == 201
-        assert reset.json()["parent_session_id"] == session_id
-        assert reset.json()["session_id"] != session_id
-
-        deleted = client.delete(f"/api/v1/sessions/{session_id}", headers=headers)
-        assert deleted.status_code == 202
-        assert deleted.json()["cleanup_queued"] is True
-        assert client.get(f"/api/v1/sessions/{session_id}", headers=headers).status_code == 401
     get_settings.cache_clear()
     with TestClient(app) as client:
         session_id, headers, initial = _create_and_analyze(client)
@@ -294,34 +342,128 @@ def test_answer_idempotency_key_replays_original_sse(tmp_path, monkeypatch) -> N
         )
         assert histology["final_verdict"] == "PASS"
     get_settings.cache_clear()
+
+
+def test_public_trial_source_report_reset_and_delete_contracts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "lifecycle-store"))
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        trial = client.get("/api/v1/trials/NCT05239624")
+        assert trial.status_code == 200
+        assert trial.json()["source_json_sha256"]
+
+        session_id, headers, _ = _create_and_analyze(client)
+        exported = client.get(f"/api/v1/sessions/{session_id}/export.json", headers=headers)
+        report = client.get(f"/api/v1/sessions/{session_id}/report", headers=headers)
+        assert exported.status_code == 200
+        assert report.status_code == 200
+        assert "Research pre-screening only" in report.text
+
+        reset = client.post(f"/api/v1/sessions/{session_id}/reset", headers=headers)
+        assert reset.status_code == 201
+        assert reset.json()["parent_session_id"] == session_id
+        assert reset.json()["session_id"] != session_id
+
+        deleted = client.delete(f"/api/v1/sessions/{session_id}", headers=headers)
+        assert deleted.status_code == 202
+        assert deleted.json()["cleanup_queued"] is True
+        assert client.get(f"/api/v1/sessions/{session_id}", headers=headers).status_code == 401
+    get_settings.cache_clear()
+
+
+def test_answer_idempotency_key_replays_original_sse(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "idempotency-store"))
+    get_settings.cache_clear()
     with TestClient(app) as client:
         session_id, headers, initial = _create_and_analyze(client)
-        question_id = initial["current_question"]["selected"]["question_id"]
+        headers = {**headers, "Idempotency-Key": "answer-turn-1"}
+        request = {
+            "question_id": initial["current_question"]["selected"]["question_id"],
+            "answer_text": None,
+            "structured_value": None,
+            "unknown": True,
+            "declined": False,
+        }
+        with client.stream(
+            "POST", f"/api/v1/sessions/{session_id}/answers", headers=headers, json=request
+        ) as response:
+            first = "".join(response.iter_text())
+        with client.stream(
+            "POST", f"/api/v1/sessions/{session_id}/answers", headers=headers, json=request
+        ) as response:
+            second = "".join(response.iter_text())
+        assert first == second
+        assert "event: question_selected" in second
+    get_settings.cache_clear()
+
+
+def test_s004_structured_value_advances_each_question_and_rejects_stale_turn(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("LOCAL_STORE_DIR", str(tmp_path / "structured-turn-store"))
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        session_id, headers, initial = _create_and_analyze(client)
+        first_question_id = initial["current_question"]["selected"]["question_id"]
+        first_value = initial["current_question"]["selected"]["branches"][0]["synthetic_value"]
         with client.stream(
             "POST",
             f"/api/v1/sessions/{session_id}/answers",
-            headers=headers,
+            headers={**headers, "Idempotency-Key": "turn-1"},
             json={
-                "question_id": question_id,
-                "answer_text": (
-                    "No pathology test has been performed; only the CT finding is available."
-                ),
-                "structured_value": None,
+                "question_id": first_question_id,
+                "answer_text": None,
+                "structured_value": first_value,
                 "unknown": False,
                 "declined": False,
             },
         ) as response:
             assert response.status_code == 200
-            _ = "".join(response.iter_text())
-        updated = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
-        histology = next(
-            proof
-            for proof in updated["proofs"]
-            if proof["criterion_id"] == "NCT05239624:INCLUSION:002:5f52ab88"
+            assert "event: question_selected" in "".join(response.iter_text())
+
+        after_first = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        second = after_first["current_question"]["selected"]
+        assert after_first["patient_state_version"] == 1
+        assert second["question_id"] != first_question_id
+
+        stale = client.post(
+            f"/api/v1/sessions/{session_id}/answers",
+            headers={**headers, "Idempotency-Key": "stale-turn"},
+            json={
+                "question_id": first_question_id,
+                "answer_text": None,
+                "structured_value": first_value,
+                "unknown": False,
+                "declined": False,
+            },
         )
-        assert histology["final_verdict"] == "UNKNOWN"
-        assert "pathology.histology" in updated["unavailable_slot_ids"]
-        assert updated["current_question"]["selected"]["slot_id"] == "pathology.muscle_invasion"
+        assert stale.status_code == 409
+        assert stale.json()["code"] == "QUESTION_NOT_CURRENT"
+
+        second_value = next(
+            branch["synthetic_value"]
+            for branch in second["branches"]
+            if branch["response_kind"] == "VALUE"
+        )
+        with client.stream(
+            "POST",
+            f"/api/v1/sessions/{session_id}/answers",
+            headers={**headers, "Idempotency-Key": "turn-2"},
+            json={
+                "question_id": second["question_id"],
+                "answer_text": None,
+                "structured_value": second_value,
+                "unknown": False,
+                "declined": False,
+            },
+        ) as response:
+            assert response.status_code == 200
+            assert "event: question_selected" in "".join(response.iter_text())
+
+        after_second = client.get(f"/api/v1/sessions/{session_id}", headers=headers).json()
+        assert after_second["patient_state_version"] == 2
+        next_selected = (after_second.get("current_question") or {}).get("selected")
+        assert next_selected is None or next_selected["question_id"] != second["question_id"]
     get_settings.cache_clear()
 
 

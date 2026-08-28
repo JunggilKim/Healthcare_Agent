@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import uuid4
 
@@ -47,6 +47,65 @@ class SnapshotReplayService:
             raise ValueError(f"snapshot artifact is not an object: {path.name}")
         return payload
 
+    @staticmethod
+    def _branch_prefix(artifact_path: str) -> str:
+        return str(PurePosixPath(artifact_path).with_suffix(""))
+
+    @staticmethod
+    def _available_branches(
+        questions: dict[str, Any], *, question_id: str, branch_prefix: str
+    ) -> list[dict[str, Any]]:
+        branches = questions.get("branches", [])
+        if not isinstance(branches, list):
+            return []
+        return [
+            branch
+            for branch in branches
+            if isinstance(branch, dict)
+            and branch.get("question_id") == question_id
+            and str(PurePosixPath(str(branch.get("artifact_path", ""))).parent) == branch_prefix
+        ]
+
+    @classmethod
+    def _hide_unreplayable_question(
+        cls, payload: dict[str, Any], questions: dict[str, Any]
+    ) -> bool:
+        selection = payload.get("current_question")
+        if not isinstance(selection, dict):
+            return False
+        selected = selection.get("selected")
+        question_id = selected.get("question_id") if isinstance(selected, dict) else None
+        if not isinstance(question_id, str):
+            return False
+
+        branch_prefix = payload.get("snapshot_branch_prefix")
+        if not isinstance(branch_prefix, str):
+            # Sessions created before branch ancestry was persisted cannot safely
+            # replay a later answer. Keep their initial question available, but
+            # fail closed after the first recorded patient-state change.
+            if int(payload.get("patient_state_version", 0)) == 0:
+                branch_prefix = "branches"
+            else:
+                branch_prefix = ""
+        if cls._available_branches(questions, question_id=question_id, branch_prefix=branch_prefix):
+            return False
+
+        limited = dict(selection)
+        limited.update(
+            {
+                "selected": None,
+                "patient_facing_question": None,
+                "deterministic_rationale": (
+                    "이 스냅샷 데모에서 준비된 답변 경로를 모두 확인했습니다. "
+                    "더 많은 질문을 이어가려면 라이브 모드로 새 분석을 시작하세요."
+                ),
+                "stop_reason": "SNAPSHOT_BRANCH_COVERAGE_EXHAUSTED",
+                "top_alternatives": [],
+            }
+        )
+        payload["current_question"] = limited
+        return True
+
     async def create_session(
         self,
         *,
@@ -59,6 +118,12 @@ class SnapshotReplayService:
             raise ValueError("SnapshotReplayService accepts Snapshot Mode only")
         case_root = self._case_root(seed_case_id)
         initial = self._load(case_root / "initial.json")
+        snapshot_evaluation_date = str(initial.get("evaluation_date", ""))
+        if evaluation_date.isoformat() != snapshot_evaluation_date:
+            raise ValueError(
+                "SNAPSHOT_EVALUATION_DATE_MISMATCH:"
+                f"expected {snapshot_evaluation_date}, got {evaluation_date.isoformat()}"
+            )
         session_id = str(uuid4())
         token = secrets.token_urlsafe(32)
         payload: dict[str, Any] = {
@@ -80,6 +145,7 @@ class SnapshotReplayService:
             "current_question": None,
             "degradation_codes": [],
             "snapshot_case_root": str(case_root.relative_to(self.root)),
+            "snapshot_branch_prefix": "branches",
             "expires_at": (datetime.now(UTC) + timedelta(days=7)).isoformat(),
         }
         await self.store.create_session(session_id, token, payload)
@@ -119,10 +185,13 @@ class SnapshotReplayService:
             "evaluation_date": payload["evaluation_date"],
             "language": payload["language"],
             "snapshot_case_root": payload["snapshot_case_root"],
+            "snapshot_branch_prefix": payload["snapshot_branch_prefix"],
             "expires_at": payload["expires_at"],
         }
         payload.update(initial)
         payload.update(protected)
+        questions = self._load(case_root / "questions.json")
+        self._hide_unreplayable_question(payload, questions)
         selection = payload.get("current_question") or {}
         target = (
             SessionState.QUESTION_READY
@@ -160,7 +229,14 @@ class SnapshotReplayService:
         yield "completed", {"sequence": event.sequence, "state": target.value}
 
     async def read_session(self, session_id: str) -> dict[str, Any] | None:
-        return await self.store.read_session(session_id)
+        payload = await self.store.read_session(session_id)
+        if payload is None:
+            return None
+        payload = dict(payload)
+        case_root = self.root / payload["snapshot_case_root"]
+        questions = self._load(case_root / "questions.json")
+        self._hide_unreplayable_question(payload, questions)
+        return payload
 
     async def submit_answer(
         self,
@@ -181,12 +257,14 @@ class SnapshotReplayService:
         current_state = SessionState(payload["state"])
         case_root = self.root / payload["snapshot_case_root"]
         questions = self._load(case_root / "questions.json")
-        branches = questions.get("branches", [])
+        branch_prefix = str(payload.get("snapshot_branch_prefix", ""))
+        branches = self._available_branches(
+            questions, question_id=question_id, branch_prefix=branch_prefix
+        )
         matching = [
             branch
             for branch in branches
-            if branch.get("question_id") == question_id
-            and (
+            if (
                 (
                     (unknown or declined)
                     and (bool(branch.get("unknown", False)) or bool(branch.get("declined", False)))
@@ -219,11 +297,14 @@ class SnapshotReplayService:
                 "evaluation_date",
                 "language",
                 "snapshot_case_root",
+                "snapshot_branch_prefix",
                 "expires_at",
             )
         }
+        protected["snapshot_branch_prefix"] = self._branch_prefix(str(matching[0]["artifact_path"]))
         payload.update(branch_payload)
         payload.update(protected)
+        self._hide_unreplayable_question(payload, questions)
         next_selection = payload.get("current_question") or {}
         target = (
             SessionState.QUESTION_READY

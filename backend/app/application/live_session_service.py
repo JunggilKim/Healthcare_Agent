@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
+import os
 import secrets
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
+
+import orjson
 
 from backend.app.agents.answer_interpreter import proposal_from_structured_answer
 from backend.app.agents.patient_evidence import PatientEvidenceAgent
@@ -56,6 +62,42 @@ from backend.app.retrieval.retriever import HybridRetriever
 from backend.app.settings import REPOSITORY_ROOT, Settings
 
 SessionStore = LocalSessionStore | GcpSessionStore | PersistenceResilientStore
+logger = logging.getLogger("trial_opt.live")
+
+
+def _live_stage_log(
+    *,
+    session_id: str,
+    stage: str,
+    latency_ms: float,
+    mode: str,
+    candidate_count: int | None = None,
+    degradation_codes: list[str] | None = None,
+) -> str:
+    return orjson.dumps(
+        {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "severity": "INFO",
+            "request_id": None,
+            "session_id_hash": hashlib.sha256(session_id.encode()).hexdigest(),
+            "event_type": "live_stage",
+            "stage": stage,
+            "mode": mode,
+            "model_id": None,
+            "task_name": None,
+            "cache_hit": None,
+            "input_tokens": None,
+            "output_tokens": None,
+            "estimated_cost_usd": None,
+            "latency_ms": round(latency_ms, 3),
+            "retry_count": 0,
+            "candidate_count": candidate_count,
+            "degradation_codes": degradation_codes or [],
+            "degradation_code": None,
+            "error_code": None,
+            "git_sha": os.getenv("APP_VERSION", "dev"),
+        }
+    ).decode()
 
 
 def _seed_text(case_id: str) -> str:
@@ -196,6 +238,13 @@ class LiveSessionService:
             if isinstance(store, (GcpSessionStore, PersistenceResilientStore))
             else None
         )
+        shared_embedding_bucket = (
+            store.bucket
+            if isinstance(store, GcpSessionStore)
+            else store.delegate.bucket
+            if isinstance(store, PersistenceResilientStore)
+            else None
+        )
         usage_guard = (
             FirestoreUsageGuard(
                 firestore_client,
@@ -213,16 +262,28 @@ class LiveSessionService:
         self.generator = StructuredGenerator(
             client=client,
             cache=(
-                FirestoreModelResultCache(firestore_client)
+                FirestoreModelResultCache(
+                    firestore_client,
+                    namespace=settings.model_cache_namespace,
+                )
                 if firestore_client is not None
-                else LocalModelResultCache(settings.local_store_dir / "model-cache")
+                else LocalModelResultCache(
+                    settings.local_store_dir / "model-cache" / settings.model_cache_namespace
+                    if settings.model_cache_namespace
+                    else settings.local_store_dir / "model-cache"
+                )
             ),
             pricing=default_pricing_estimator(),
             usage_guard=usage_guard,
         )
         self.patient_agent = PatientEvidenceAgent(self.generator, self.catalog)
         self.query_agent = RetrievalQueryAgent(self.generator)
-        self.compiler = ProtocolCompilationService(self.generator, self.catalog)
+        self.compiler = ProtocolCompilationService(
+            self.generator,
+            self.catalog,
+            primary_max_attempts=1,
+            generation_attempt_timeout_seconds=(settings.live_generation_attempt_timeout_seconds),
+        )
         self.retriever = HybridRetriever(
             ctgov=ClinicalTrialsGovClient(
                 LocalArtifactStore(settings.local_store_dir / "retrieval")
@@ -231,12 +292,19 @@ class LiveSessionService:
                 client,
                 model=settings.gemini_embedding_model,
                 dimension=settings.embedding_dim,
-                cache_root=settings.local_store_dir / "embedding-cache",
+                cache_root=(
+                    settings.local_store_dir
+                    / "embedding-cache"
+                    / settings.embedding_cache_namespace
+                ),
+                shared_cache_bucket=shared_embedding_bucket,
+                cache_namespace=settings.embedding_cache_namespace,
             ),
             snapshot_root=REPOSITORY_ROOT / "data/fixtures/retrieval/S004",
             snapshot_embeddings=RecordedEmbeddingProvider(
                 REPOSITORY_ROOT / "data/fixtures/retrieval/S004/embeddings.json"
             ),
+            dense_timeout_seconds=settings.live_embedding_timeout_seconds,
         )
 
     async def create_session(
@@ -446,6 +514,7 @@ class LiveSessionService:
                 thinking_level="MINIMAL",
                 max_output_tokens=500,
                 max_attempts=2,
+                attempt_timeout_seconds=self.settings.live_generation_attempt_timeout_seconds,
                 session_id=session_id,
             )
         except StructuredGenerationUnavailable:
@@ -491,6 +560,7 @@ class LiveSessionService:
                 thinking_level="MINIMAL",
                 max_output_tokens=800,
                 max_attempts=2,
+                attempt_timeout_seconds=self.settings.live_generation_attempt_timeout_seconds,
                 session_id=session_id,
             )
             return proposal
@@ -534,6 +604,11 @@ class LiveSessionService:
             evaluation_date=date.fromisoformat(payload["evaluation_date"]),
             asserted_at=now,
             pinned_fallback=pinned_proposal,
+            prefer_pinned_fallback=pinned_proposal is not None,
+            primary_max_attempts=1,
+            generation_attempt_timeout_seconds=(
+                self.settings.live_generation_attempt_timeout_seconds
+            ),
             session_id=session_id,
         )
         if extraction_degraded:
@@ -573,8 +648,9 @@ class LiveSessionService:
         query = await self.query_agent.generate(
             patient_state, self.catalog.version, session_id=session_id
         )
+        retrieval_started = time.monotonic()
         try:
-            async with asyncio.timeout(11):
+            async with asyncio.timeout(self.settings.live_retrieval_timeout_seconds):
                 retrieval = await self.retriever.retrieve(
                     query,
                     mode="live",
@@ -618,6 +694,24 @@ class LiveSessionService:
             yield "degraded", event
             yield "completed", event
             return
+        if len(retrieval.selected_for_compilation) > self.settings.live_compilation_candidate_limit:
+            retrieval = retrieval.model_copy(
+                update={
+                    "selected_for_compilation": retrieval.selected_for_compilation[
+                        : self.settings.live_compilation_candidate_limit
+                    ]
+                }
+            )
+        logger.info(
+            _live_stage_log(
+                session_id=session_id,
+                stage="retrieval",
+                latency_ms=(time.monotonic() - retrieval_started) * 1000,
+                mode=retrieval.mode,
+                candidate_count=len(retrieval.ranked_candidates),
+                degradation_codes=retrieval.degradation_codes,
+            )
+        )
         payload["mode"] = retrieval.mode
         payload["retrieval"] = retrieval.model_dump(mode="json")
         payload["degradation_codes"].extend(retrieval.degradation_codes)
@@ -639,10 +733,11 @@ class LiveSessionService:
         compiled_trials: dict[str, CompiledTrial] = {}
         reviews: dict[str, ProtocolReviewArtifact] = {}
         raw_trials: dict[str, RawTrialRecord] = {}
-        # Compilation is external I/O. Four trials in flight keeps the
-        # eight-trial cold path within the release latency budget while the
-        # process-level guard still caps cold sessions at two.
+        compilation_degradations: dict[str, list[str]] = {}
+        # Compilation is external I/O. Live Mode compiles at most four trials
+        # in one wave while the process-level guard caps cold sessions at two.
         compilation_semaphore = asyncio.Semaphore(4)
+        compilation_started = time.monotonic()
 
         async def compile_one(nct_id: str) -> tuple[str, CompilationWorkflowResult]:
             candidate = candidate_by_id[nct_id]
@@ -659,12 +754,29 @@ class LiveSessionService:
             compilation_results = await asyncio.gather(
                 *(compile_one(nct_id) for nct_id in retrieval.selected_for_compilation)
             )
+        logger.info(
+            _live_stage_log(
+                session_id=session_id,
+                stage="protocol_compilation",
+                latency_ms=(time.monotonic() - compilation_started) * 1000,
+                mode=retrieval.mode,
+                candidate_count=len(compilation_results),
+                degradation_codes=list(
+                    dict.fromkeys(
+                        code
+                        for _nct_id, result in compilation_results
+                        for code in result.degradation_codes
+                    )
+                ),
+            )
+        )
         for nct_id, result in compilation_results:
             candidate = candidate_by_id[nct_id]
             compiled = result.compilation.compiled_trial
             compiled_trials[nct_id] = compiled
             reviews[nct_id] = result.review_artifact or _unapproved_review(compiled, now)
             raw_trials[nct_id] = candidate.trial
+            compilation_degradations[nct_id] = result.degradation_codes
             payload["degradation_codes"].extend(result.degradation_codes)
             yield (
                 "trial_compiled",
@@ -675,6 +787,7 @@ class LiveSessionService:
                     "protocol_verified": compiled.protocol_verified,
                 },
             )
+        payload["degradation_codes"] = list(dict.fromkeys(payload["degradation_codes"]))
         state = SessionState.COMPILING
         event = await self._transition(
             payload, state, SessionState.EVALUATING, "COMPILATION_COMPLETED", {}
@@ -719,6 +832,7 @@ class LiveSessionService:
                         compiled_trial=compiled,
                         facts=context.facts,
                     ),
+                    degradation_codes=compilation_degradations[nct_id],
                 )
             )
         state = SessionState.EVALUATING

@@ -13,8 +13,8 @@ RateLimitKind = Literal["snapshot_session", "live_session", "cold_compile", "ans
 
 _LIMITS: dict[RateLimitKind, int] = {
     "snapshot_session": 20,
-    "live_session": 5,
-    "cold_compile": 2,
+    "live_session": 10,
+    "cold_compile": 10,
     "answer_submission": 30,
 }
 

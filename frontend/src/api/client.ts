@@ -15,6 +15,47 @@ interface StreamEvent {
   data: Record<string, unknown>;
 }
 
+interface ProblemDetail {
+  code?: string;
+  detail?: string;
+  title?: string;
+}
+
+const problemMessages: Record<string, string> = {
+  SNAPSHOT_BRANCH_UNAVAILABLE: (
+    "이 스냅샷 데모에는 선택한 답변 이후의 저장된 분석 경로가 없습니다. " +
+    "새 스냅샷을 시작하거나 라이브 모드를 이용해주세요."
+  ),
+};
+
+function problemMessage(code: unknown, fallback: string): string {
+  return typeof code === "string" ? (problemMessages[code] ?? code) : fallback;
+}
+
+function codedError(code: unknown, fallback: string): Error {
+  const error = new Error(problemMessage(code, fallback));
+  if (typeof code === "string") error.name = code;
+  return error;
+}
+
+async function responseError(response: Response, prefix: string): Promise<Error> {
+  let problem: ProblemDetail | null = null;
+  try {
+    problem = (await response.clone().json()) as ProblemDetail;
+  } catch {
+    // Non-JSON gateway responses still retain their HTTP status below.
+  }
+  if (problem?.code === "RATE_LIMITED") {
+    const retryAfter = response.headers.get("Retry-After");
+    const suffix = retryAfter ? ` ${retryAfter}초 후 다시 시도해주세요.` : " 잠시 후 다시 시도해주세요.";
+    return new Error(`요청 한도를 초과했습니다.${suffix}`);
+  }
+  if (problem?.code) {
+    return codedError(problem.code, problem.detail ?? problem.title ?? prefix);
+  }
+  return new Error(problem?.detail ?? problem?.title ?? `${prefix}: ${response.status}`);
+}
+
 export interface DemoCase {
   id: string;
   text: string;
@@ -22,7 +63,7 @@ export interface DemoCase {
 }
 
 async function jsonOrThrow(response: Response) {
-  if (!response.ok) throw new Error(`API request failed: ${response.status}`);
+  if (!response.ok) throw await responseError(response, "API request failed");
   return (await response.json()) as unknown;
 }
 
@@ -92,7 +133,8 @@ async function readEventStream(
   onEvent: (event: StreamEvent) => void,
   onStall?: () => void,
 ): Promise<void> {
-  if (!response.ok || !response.body) throw new Error(`Streaming request failed: ${response.status}`);
+  if (!response.ok) throw await responseError(response, "Streaming request failed");
+  if (!response.body) throw new Error("Streaming response body is unavailable.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -113,7 +155,11 @@ async function readEventStream(
         const data = frame.match(/^data: (.+)$/m)?.[1];
         if (event && data) {
           armStallTimer();
-          onEvent({ event, data: JSON.parse(data) as Record<string, unknown> });
+          const payload = JSON.parse(data) as Record<string, unknown>;
+          if (event === "error") {
+            throw codedError(payload.code, "분석 스트림을 처리하지 못했습니다.");
+          }
+          onEvent({ event, data: payload });
         }
       }
       if (done) break;
@@ -138,8 +184,10 @@ export async function analyzeSession(
 
 export interface AnswerInput {
   answerText?: string;
+  structuredValue?: Record<string, unknown>;
   unknown?: boolean;
   declined?: boolean;
+  idempotencyKey?: string;
 }
 
 export async function submitAnswer(
@@ -153,12 +201,13 @@ export async function submitAnswer(
     headers: {
       Accept: "text/event-stream",
       "Content-Type": "application/json",
+      "Idempotency-Key": input.idempotencyKey ?? crypto.randomUUID(),
       "X-Session-Token": credentials.token,
     },
     body: JSON.stringify({
       question_id: questionId,
       answer_text: input.answerText ?? null,
-      structured_value: null,
+      structured_value: input.structuredValue ?? null,
       unknown: input.unknown ?? false,
       declined: input.declined ?? false,
     }),

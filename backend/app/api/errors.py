@@ -14,6 +14,7 @@ class ApiProblem(Exception):
     title: str
     detail: str
     retryable: bool = False
+    headers: dict[str, str] | None = None
 
 
 async def problem_handler(request: Request, error: Exception) -> JSONResponse:
@@ -33,6 +34,7 @@ async def problem_handler(request: Request, error: Exception) -> JSONResponse:
             "request_id": request_id,
             "retryable": problem.retryable,
         },
+        headers=problem.headers,
     )
 
 

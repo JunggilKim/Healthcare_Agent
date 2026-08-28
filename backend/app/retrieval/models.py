@@ -3,23 +3,39 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from backend.app.domain.base import StrictModel
 from backend.app.domain.trials import RawTrialRecord
 
 
 class ConditionQuery(StrictModel):
-    text: str
+    text: str = Field(max_length=300)
     source_fact_ids: list[str] = Field(default_factory=list)
     source_hypothesis_ids: list[str] = Field(default_factory=list)
     priority: int = Field(ge=1)
 
+    @field_validator("text")
+    @classmethod
+    def require_non_blank_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("condition query text must not be blank")
+        return normalized
+
 
 class RetrievalQuery(StrictModel):
-    condition_queries: list[ConditionQuery] = Field(max_length=4)
+    condition_queries: list[ConditionQuery] = Field(min_length=1, max_length=4)
     dense_query: str = Field(max_length=800)
     must_not_use_as_eligibility_evidence: Literal[True] = True
+
+    @field_validator("dense_query")
+    @classmethod
+    def require_non_blank_dense_query(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("dense query must not be blank")
+        return normalized
 
 
 class RegistryCandidate(StrictModel):

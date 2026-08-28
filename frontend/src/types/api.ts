@@ -30,6 +30,7 @@ export const questionCandidateSchema = z
             branch_id: z.string(),
             label: z.string(),
             response_kind: z.string(),
+            synthetic_value: z.record(z.string(), z.unknown()).nullable().optional(),
           })
           .passthrough(),
       )
@@ -55,6 +56,7 @@ export const sessionSchema = z
     session_id: z.string(),
     state: z.string(),
     mode: z.string(),
+    evaluation_date: z.string(),
     degradation_codes: z.array(z.string()).default([]),
     export_available: z.boolean().default(true),
     durable_replay: z.boolean().default(true),
@@ -80,6 +82,7 @@ export const sessionSchema = z
         decision: z.string(),
         display_score: z.number(),
         proof_completeness: z.number(),
+        degradation_codes: z.array(z.string()).default([]),
       })
       .passthrough()
       .nullable(),

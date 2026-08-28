@@ -8,16 +8,22 @@ from types import SimpleNamespace
 import pytest
 
 from backend.app.domain.base import StrictModel
+from backend.app.domain.values import StringValue
 from backend.app.infrastructure.cache import LocalModelResultCache, model_cache_key
 from backend.app.infrastructure.structured_generation import (
     StructuredGenerationUnavailable,
     StructuredGenerator,
+    _normalize_model_json_artifacts,
 )
 from backend.app.infrastructure.usage_guard import InMemoryUsageGuard, default_pricing_estimator
 
 
 class _Output(StrictModel):
     value: str
+
+
+class _TypedOutput(StrictModel):
+    value: StringValue
 
 
 class _FakeModels:
@@ -58,6 +64,26 @@ class _FallbackModels:
         return SimpleNamespace(text=text, usage_metadata=None)
 
 
+class _NullStringSystemModels:
+    async def generate_content(self, *, model, contents, config):
+        del model, contents, config
+        return SimpleNamespace(
+            text='{"value":{"kind":"string","value":"other","system":null}}',
+            usage_metadata=None,
+            candidates=[],
+        )
+
+
+class _TruncatedModels:
+    async def generate_content(self, *, model, contents, config):
+        del model, contents, config
+        return SimpleNamespace(
+            text='{"value":"unfinished',
+            usage_metadata=None,
+            candidates=[SimpleNamespace(finish_reason="MAX_TOKENS")],
+        )
+
+
 class _FailureModels:
     def __init__(self, failure: str) -> None:
         self.failure = failure
@@ -69,6 +95,26 @@ class _FailureModels:
         if self.failure == "timeout":
             raise TimeoutError("recorded Gemini timeout")
         raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+
+class _SlowPrimaryModels:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def generate_content(self, *, model, contents, config):
+        del contents, config
+        self.calls.append(model)
+        if model == "gemini-3.6-flash":
+            await asyncio.sleep(1)
+        return SimpleNamespace(text='{"value":"fallback"}', usage_metadata=None)
+
+
+class _FailingWriteCache:
+    async def get(self, _key: str):
+        return None
+
+    async def put(self, _record):
+        raise OSError("cache volume unavailable")
 
 
 async def _no_sleep(_delay: float) -> None:
@@ -105,6 +151,44 @@ def test_cache_key_binds_all_normative_parts() -> None:
     )
     assert first == same
     assert first != changed
+
+
+async def test_corrupt_local_cache_is_treated_as_a_miss(tmp_path: Path) -> None:
+    cache = LocalModelResultCache(tmp_path)
+    path = tmp_path / "llm" / "expected-key.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("not-json", encoding="utf-8")
+
+    assert await cache.get("expected-key") is None
+
+
+async def test_cache_write_failure_does_not_repeat_validated_model_dispatch() -> None:
+    client = _FakeClient()
+    generator = StructuredGenerator(
+        client=client,
+        cache=_FailingWriteCache(),
+        pricing=default_pricing_estimator(),
+        sleep=_no_sleep,
+        jitter=lambda _low, _high: 0,
+    )
+
+    output, record = await generator.generate(
+        model_id="gemini-3.6-flash",
+        task_name="cache-failure-test",
+        prompt="return json",
+        prompt_version="1.0.0",
+        output_schema_version="test-v1",
+        slot_catalog_version="slot-catalog-v1",
+        normalized_input={"x": 1},
+        output_model=_Output,
+        thinking_level="MEDIUM",
+        max_output_tokens=100,
+        max_attempts=3,
+    )
+
+    assert output.value == "ok"
+    assert record.usage.cache_hit is False
+    assert client.aio.models.calls == ["gemini-3.6-flash", "gemini-3.6-flash"]
 
 
 async def test_schema_failure_retries_then_exact_cache_prevents_second_dispatch(
@@ -178,6 +262,92 @@ async def test_schema_exhaustion_reports_safe_issue_locations(tmp_path: Path) ->
         )
 
 
+async def test_null_categorical_system_on_string_value_is_normalized(tmp_path: Path) -> None:
+    client = _FakeClient()
+    client.aio.models = _NullStringSystemModels()
+    generator = StructuredGenerator(
+        client=client,
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+    )
+
+    output, _record = await generator.generate(
+        model_id="gemini-3.5-flash-lite",
+        task_name="typed-value-test",
+        prompt="return json",
+        prompt_version="1",
+        output_schema_version="test-v1",
+        slot_catalog_version="slot-catalog-v1",
+        normalized_input={},
+        output_model=_TypedOutput,
+        thinking_level="MEDIUM",
+        max_output_tokens=100,
+        max_attempts=1,
+    )
+
+    assert output.value == StringValue(kind="string", value="other")
+
+
+def test_numeric_bound_shape_is_normalized_for_value_and_values() -> None:
+    normalized = _normalize_model_json_artifacts(
+        {
+            "op": "LTE",
+            "value": {"kind": "number", "upper": 2, "upper_inclusive": True, "unit": "score"},
+            "values": [
+                {
+                    "kind": "number",
+                    "lower": 1,
+                    "upper": 2,
+                    "lower_inclusive": True,
+                    "upper_inclusive": True,
+                }
+            ],
+        }
+    )
+
+    assert normalized == {
+        "op": "LTE",
+        "value": {"kind": "number", "value": 2, "unit": "score"},
+        "values": [
+            {
+                "kind": "range",
+                "lower": 1,
+                "upper": 2,
+                "lower_inclusive": True,
+                "upper_inclusive": True,
+            }
+        ],
+    }
+
+
+async def test_max_token_finish_reason_is_reported_as_truncation(tmp_path: Path) -> None:
+    client = _FakeClient()
+    client.aio.models = _TruncatedModels()
+    generator = StructuredGenerator(
+        client=client,
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+    )
+
+    with pytest.raises(
+        StructuredGenerationUnavailable,
+        match="last_error=ModelOutputTruncated",
+    ):
+        await generator.generate(
+            model_id="gemini-3.5-flash-lite",
+            task_name="truncation-test",
+            prompt="return json",
+            prompt_version="1",
+            output_schema_version="test-v1",
+            slot_catalog_version="slot-catalog-v1",
+            normalized_input={},
+            output_model=_Output,
+            thinking_level="MEDIUM",
+            max_output_tokens=100,
+            max_attempts=1,
+        )
+
+
 async def test_primary_schema_exhaustion_uses_single_lite_fallback(tmp_path: Path) -> None:
     client = _FakeClient()
     client.aio.models = _FallbackModels()
@@ -211,6 +381,53 @@ async def test_primary_schema_exhaustion_uses_single_lite_fallback(tmp_path: Pat
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
     ]
+
+
+async def test_live_profile_bounds_primary_attempt_and_falls_back_after_timeout(
+    tmp_path: Path,
+) -> None:
+    client = _FakeClient()
+    models = _SlowPrimaryModels()
+    client.aio.models = models
+    generator = StructuredGenerator(
+        client=client,
+        cache=LocalModelResultCache(tmp_path),
+        pricing=default_pricing_estimator(),
+        sleep=_no_sleep,
+        jitter=lambda _low, _high: 0,
+    )
+
+    output, record = await generator.generate_primary_with_lite_fallback(
+        primary_model_id="gemini-3.6-flash",
+        lite_model_id="gemini-3.5-flash-lite",
+        task_name="compiler",
+        prompt="return json",
+        prompt_version="1.0.0",
+        output_schema_version="test-v1",
+        slot_catalog_version="slot-catalog-v1",
+        normalized_input={"x": 1},
+        output_model=_Output,
+        primary_thinking_level="HIGH",
+        fallback_thinking_level="HIGH",
+        primary_max_output_tokens=100,
+        fallback_max_output_tokens=100,
+        primary_max_attempts=1,
+        primary_attempt_timeout_seconds=0.01,
+    )
+
+    assert output.value == "fallback"
+    assert record.used_fallback is True
+    assert models.calls == ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    failure_log = generator._attempt_failure_log(
+        model_id="gemini-3.6-flash",
+        task_name="compiler",
+        session_id="synthetic-session",
+        latency_ms=10,
+        retry_count=0,
+        error=TimeoutError(),
+    )
+    assert '"event_type":"model_call_attempt_failed"' in failure_log
+    assert '"error_code":"TimeoutError"' in failure_log
 
 
 async def test_explicit_thinking_budget_is_sent_and_cache_bound(tmp_path: Path) -> None:

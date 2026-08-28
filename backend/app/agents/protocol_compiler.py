@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -34,24 +35,70 @@ def _exact_source_offsets(source: str, *, start: int, end: int, quote: str) -> t
     while offset >= 0:
         matches.append(offset)
         offset = source.find(quote, offset + 1)
+    escaped_pattern: str | None = None
+    if not matches and any(symbol in quote for symbol in "<>"):
+        # ClinicalTrials.gov markdown can retain a presentation backslash in
+        # the source while a model returns the same visible quote without it.
+        # Match only optional escapes before comparison symbols; every other
+        # byte remains exact and the final quote is rebound to source bytes.
+        escaped_pattern = "".join(
+            rf"\\?{re.escape(character)}" if character in "<>" else re.escape(character)
+            for character in quote
+        )
+        matches = [match.start() for match in re.finditer(escaped_pattern, source)]
     if len(matches) != 1:
         raise ProtocolCompilationError("criterion quote is not uniquely anchored in source")
     anchored_start = matches[0]
-    return anchored_start, anchored_start + len(quote)
+    if escaped_pattern is None:
+        return anchored_start, anchored_start + len(quote)
+    escaped_match = re.match(escaped_pattern, source[anchored_start:])
+    if escaped_match is None:
+        raise ProtocolCompilationError("criterion quote is not uniquely anchored in source")
+    return anchored_start, anchored_start + escaped_match.end()
 
 
 def _anchor_proposal_source_spans(
     source: str, proposal: CompiledTrialProposal
 ) -> CompiledTrialProposal:
-    criteria = []
-    for criterion in proposal.criteria:
-        start, end = _exact_source_offsets(
-            source,
-            start=criterion.start,
-            end=criterion.end,
-            quote=criterion.quote,
+    repeated_assignments: dict[int, int] = {}
+    quote_groups: dict[str, list[int]] = {}
+    for index, criterion in enumerate(proposal.criteria):
+        quote_groups.setdefault(criterion.quote, []).append(index)
+    for quote, indexes in quote_groups.items():
+        if len(indexes) < 2:
+            continue
+        matches: list[int] = []
+        offset = source.find(quote)
+        while offset >= 0:
+            matches.append(offset)
+            offset = source.find(quote, offset + 1)
+        if len(matches) != len(indexes):
+            continue
+        ordered_indexes = sorted(
+            indexes,
+            key=lambda index: (
+                proposal.criteria[index].start,
+                proposal.criteria[index].end,
+                index,
+            ),
         )
-        criteria.append(criterion.model_copy(update={"start": start, "end": end}))
+        repeated_assignments.update(zip(ordered_indexes, sorted(matches), strict=True))
+
+    criteria = []
+    for index, criterion in enumerate(proposal.criteria):
+        if index in repeated_assignments:
+            start = repeated_assignments[index]
+            end = start + len(criterion.quote)
+        else:
+            start, end = _exact_source_offsets(
+                source,
+                start=criterion.start,
+                end=criterion.end,
+                quote=criterion.quote,
+            )
+        criteria.append(
+            criterion.model_copy(update={"start": start, "end": end, "quote": source[start:end]})
+        )
     unassigned = []
     for span in proposal.unassigned_source_spans:
         start, end = _exact_source_offsets(
@@ -60,7 +107,9 @@ def _anchor_proposal_source_spans(
             end=span.end,
             quote=span.quote,
         )
-        unassigned.append(span.model_copy(update={"start": start, "end": end}))
+        unassigned.append(
+            span.model_copy(update={"start": start, "end": end, "quote": source[start:end]})
+        )
     return proposal.model_copy(update={"criteria": criteria, "unassigned_source_spans": unassigned})
 
 
@@ -215,10 +264,13 @@ def construct_trusted_compilation(
             normalization_warnings.append("AST_TRUSTED_VALIDATION_OPAQUE_FALLBACK")
         required_slots = _required_slots(ast)
         contains_opaque = any(node.op is AstOperator.OPAQUE for node in ast.nodes)
+        criticality = "CRITICAL" if contains_opaque else item.criticality
         if sorted(set(item.required_slots)) != required_slots:
             normalization_warnings.append("MODEL_REQUIRED_SLOTS_NORMALIZED")
         if item.opaque != contains_opaque:
             normalization_warnings.append("MODEL_OPAQUE_FLAG_NORMALIZED")
+        if contains_opaque and item.criticality != "CRITICAL":
+            normalization_warnings.append("OPAQUE_CRITICALITY_NORMALIZED")
         compiled_criteria.append(
             CompiledCriterion(
                 criterion_id=criterion_id,
@@ -237,7 +289,7 @@ def construct_trusted_compilation(
                 normalized_summary=item.normalized_summary,
                 ast=ast,
                 required_slots=required_slots,
-                criticality=item.criticality,
+                criticality=criticality,
                 compiler_confidence=item.compiler_confidence,
                 protocol_verified=False,
                 opaque=contains_opaque,

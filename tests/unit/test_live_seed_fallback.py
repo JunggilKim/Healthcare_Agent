@@ -110,6 +110,31 @@ async def test_seed_model_failure_uses_full_pinned_extraction() -> None:
 
 
 @pytest.mark.asyncio
+async def test_preferred_seed_extraction_avoids_unnecessary_live_model_calls() -> None:
+    text = _seed_text("S004")
+    pinned = _pinned_seed_proposal("S004", text)
+    assert pinned is not None
+    generator = _UnavailableGenerator()
+    agent = PatientEvidenceAgent(generator, load_slot_catalog())  # type: ignore[arg-type]
+
+    materialized, degraded = await agent.extract(
+        patient_text=text,
+        source_id="seed:S004",
+        language_hint="en",
+        evaluation_date=date(2026, 8, 11),
+        asserted_at=datetime(2026, 8, 13, tzinfo=UTC),
+        pinned_fallback=pinned,
+        prefer_pinned_fallback=True,
+        primary_max_attempts=1,
+        generation_attempt_timeout_seconds=10,
+    )
+
+    assert degraded is False
+    assert len(materialized.state.confirmed_facts) == 5
+    assert generator.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_domain_invalid_model_output_uses_conservative_fallback() -> None:
     agent = PatientEvidenceAgent(_InvalidDomainGenerator(), load_slot_catalog())  # type: ignore[arg-type]
 

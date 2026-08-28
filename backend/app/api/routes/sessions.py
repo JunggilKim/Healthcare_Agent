@@ -256,8 +256,28 @@ async def submit_answer(
         if claim_status == "COMPLETED":
             replay = stored or []
     if replay is None:
+        current = await service.read_session(session_id)
+        if current is None:
+            if key_hash is not None:
+                await service.abandon_answer_idempotency(session_id, key_hash)
+            raise ApiProblem(
+                404, "SESSION_NOT_FOUND", "Session not found", "The session does not exist."
+            )
+        selected_question_id = ((current.get("current_question") or {}).get("selected") or {}).get(
+            "question_id"
+        )
+        if selected_question_id != body.question_id:
+            if key_hash is not None:
+                await service.abandon_answer_idempotency(session_id, key_hash)
+            raise ApiProblem(
+                409,
+                "QUESTION_NOT_CURRENT",
+                "Question is no longer current",
+                "Refresh the session before submitting another answer.",
+                retryable=False,
+            )
         try:
-            await enforce_rate_limit(request, "answer_submission")
+            await enforce_rate_limit(request, "answer_submission", subject=f"session:{session_id}")
         except Exception:
             if key_hash is not None:
                 await service.abandon_answer_idempotency(session_id, key_hash)

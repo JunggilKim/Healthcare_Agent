@@ -25,6 +25,7 @@ from backend.app.engine.multi_trial_optimizer import (
     FullOptimizationState,
     OptimizerScoringFlags,
     branch_discrimination,
+    compute_topk_risk,
     generate_slot_candidates,
     select_next_action,
 )
@@ -112,6 +113,64 @@ def test_full_optimizer_uses_real_utility_and_exposes_top_candidates() -> None:
     assert 1 <= len(selection.top_alternatives) <= 3
     assert all(item.utility_components is not None for item in selection.top_alternatives)
     assert state.recompiled_trial_ids == []
+
+
+def test_opaque_critical_protocol_forces_review_and_preserves_degradation() -> None:
+    state = _full_state()
+    compiled = state.aggregate.compiled_trials["NCT05239624"]
+    criteria = list(compiled.criteria)
+    criteria[0] = criteria[0].model_copy(
+        update={"opaque": True, "protocol_verified": False, "criticality": "CRITICAL"}
+    )
+    degraded = compiled.model_copy(update={"criteria": criteria, "protocol_verified": False})
+
+    evaluation = aggregate_trial(
+        session_id=SESSION_ID,
+        patient_state_version=0,
+        compiled_trial=degraded,
+        raw_trial=state.raw_trials["NCT05239624"],
+        proofs=state.proofs_by_trial["NCT05239624"],
+        retrieval_score=1.0,
+        degradation_codes=["PROTOCOL_OPAQUE_CRITERIA_REVIEW_REQUIRED"],
+    )
+
+    assert evaluation.decision is TrialDecision.REVIEW_REQUIRED
+    assert evaluation.degradation_codes == ["PROTOCOL_OPAQUE_CRITERIA_REVIEW_REQUIRED"]
+
+
+def test_degraded_protocol_candidates_do_not_dilute_actionable_question_risk() -> None:
+    state = _full_state()
+    baseline_risk = compute_topk_risk(state)
+    top_id = state.aggregate.ranked_nct_ids[0]
+    compiled = state.aggregate.compiled_trials[top_id]
+    evaluation = state.aggregate.trial_evaluations[top_id]
+    proofs = state.proofs_by_trial[top_id]
+    degraded_ids = [f"NCT9000000{index}" for index in range(1, 5)]
+    for nct_id in degraded_ids:
+        degraded_criteria = [
+            criterion.model_copy(update={"criterion_id": f"{nct_id}:criterion:{index}"})
+            for index, criterion in enumerate(compiled.criteria)
+        ]
+        state.aggregate.compiled_trials[nct_id] = compiled.model_copy(
+            update={"nct_id": nct_id, "criteria": degraded_criteria}
+        )
+        state.aggregate.trial_evaluations[nct_id] = evaluation.model_copy(
+            update={
+                "nct_id": nct_id,
+                "decision": TrialDecision.REVIEW_REQUIRED,
+                "degradation_codes": ["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"],
+            }
+        )
+        state.proofs_by_trial[nct_id] = [
+            proof.model_copy(
+                update={"nct_id": nct_id, "criterion_id": f"{nct_id}:criterion:{index}"}
+            )
+            for index, proof in enumerate(proofs)
+        ]
+    state.aggregate.ranked_nct_ids = [top_id, *degraded_ids]
+
+    assert compute_topk_risk(state) == baseline_risk
+    assert select_next_action(state).selected is not None
 
 
 def test_candidate_branch_inputs_preserve_canonical_rank_order(monkeypatch) -> None:

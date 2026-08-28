@@ -3,12 +3,19 @@ import type { RetrievalView } from "../types/api";
 
 export function RetrievalCandidates({ retrieval }: { retrieval: RetrievalView }) {
   const selected = new Set(retrieval.selected_for_compilation);
+  const candidateCount = retrieval.ranked_candidates.length;
+  const selectedCount = selected.size;
   return (
     <section className="panel retrieval-candidates" aria-label="Hybrid retrieval candidates">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="eyebrow">임상시험 검색 결과</p>
-          <h2 aria-label="20 retained candidates · top 8 selected" className="panel-title">검색 후보 20건 · 상위 8건 상세 평가</h2>
+          <h2
+            aria-label={`${candidateCount} retained candidates · top ${selectedCount} selected`}
+            className="panel-title"
+          >
+            검색 후보 {candidateCount}건 · 상위 {selectedCount}건 상세 평가
+          </h2>
           <p className="section-description">공식 영문 제목은 원문 그대로 표시하며, 검색 점수는 임상시험 적합 확률이 아닙니다.</p>
         </div>
         <p className="text-xs text-slate-500">

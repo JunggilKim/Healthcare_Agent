@@ -42,8 +42,8 @@ def test_stale_reservation_expires_after_twenty_minutes() -> None:
 
 def test_rate_limiter_uses_hash_only_and_enforces_fixed_limit() -> None:
     limiter = FixedWindowRateLimiter(salt="test-salt")
-    results = [limiter.consume("203.0.113.7", "live_session") for _ in range(6)]
-    assert all(result.allowed for result in results[:5])
-    assert not results[5].allowed
+    results = [limiter.consume("203.0.113.7", "live_session") for _ in range(11)]
+    assert all(result.allowed for result in results[:10])
+    assert not results[10].allowed
     assert "203.0.113.7" not in limiter.stored_subjects()
     assert results[0].subject_hash in limiter.stored_subjects()

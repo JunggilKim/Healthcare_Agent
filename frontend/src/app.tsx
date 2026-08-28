@@ -60,6 +60,31 @@ function initialStages(): Record<string, StageState> {
   return Object.fromEntries(stageNames.map((stage) => [stage, "pending"]));
 }
 
+function completedStatus(nextSession: SessionView): string {
+  if (nextSession.current_question?.selected) {
+    return "분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.";
+  }
+  if ((nextSession.trial_evaluation?.degradation_codes.length ?? 0) > 0) {
+    return "상위 후보 검토 필요 · 자동 판정에 사용할 수 없는 조건이 남아 있습니다.";
+  }
+  if (nextSession.degradation_codes.length > 0) {
+    return "분석 완료 · 일부 하위 후보는 원문 검토가 필요합니다.";
+  }
+  return "분석 완료 · 현재 기록에서 추가로 제안할 확인 항목이 없습니다.";
+}
+
+function displayDate(value: string): string {
+  return value.replaceAll("-", ".");
+}
+
+function localToday(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function AboutPage() {
   return (
     <main className="about-page min-h-screen px-6 py-16">
@@ -146,7 +171,9 @@ export function App() {
         setSession(restored);
         setDegradationCodes(restored.degradation_codes);
         setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
-        setStatusText("분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.");
+        setMode(restored.mode === "live" ? "live" : "snapshot");
+        setEvaluationDate(restored.evaluation_date);
+        setStatusText(completedStatus(restored));
         const parsed = retrievalSchema.safeParse(restored.retrieval);
         if (parsed.success) setRetrieval(parsed.data);
         else if (restored.top_trial?.nct_id === "NCT05239624") {
@@ -226,7 +253,7 @@ export function App() {
       const parsedRetrieval = retrievalSchema.safeParse(nextSession.retrieval);
       if (parsedRetrieval.success) setRetrieval(parsedRetrieval.data);
       setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
-      setStatusText("분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.");
+      setStatusText(completedStatus(nextSession));
       void navigate(
         `/session/${nextCredentials.sessionId}${showDemoTools ? "?demo-tools=1" : ""}`,
       );
@@ -267,11 +294,13 @@ export function App() {
 
   async function answer(input: {
     answerText?: string;
+    structuredValue?: Record<string, unknown>;
     unknown?: boolean;
     declined?: boolean;
   }) {
     if (!credentials || !session?.current_question?.selected) return;
     setBusy(true);
+    setError(null);
     setReplayStatus(null);
     setStatusText("답변을 반영해 관련 조건의 근거만 다시 평가하고 있습니다…");
     try {
@@ -293,6 +322,21 @@ export function App() {
           : "답변을 반영해 조건별 근거 평가를 완료했습니다.",
       );
     } catch (caught) {
+      if (
+        caught instanceof Error &&
+        caught.name === "SNAPSHOT_BRANCH_UNAVAILABLE" &&
+        session.mode === "snapshot"
+      ) {
+        try {
+          const recoveredSession = await readSession(credentials);
+          setSession(recoveredSession);
+          setDegradationCodes(recoveredSession.degradation_codes);
+          setStatusText(caught.message);
+          return;
+        } catch {
+          // Preserve the original actionable error if session recovery also fails.
+        }
+      }
       setError(caught instanceof Error ? caught.message : "재평가를 완료하지 못했습니다.");
     } finally {
       setBusy(false);
@@ -375,7 +419,25 @@ export function App() {
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "auto" }));
   }
 
+  function selectMode(nextMode: "snapshot" | "live") {
+    setMode(nextMode);
+    setEvaluationDate(
+      nextMode === "live"
+        ? localToday()
+        : (configQuery.data?.snapshot_data_date ?? "2026-08-11"),
+    );
+  }
+
   if (location.pathname === "/about") return <AboutPage />;
+
+  const hasDegradation = degradationCodes.length > 0;
+  const topDegradationCodes = session?.trial_evaluation?.degradation_codes ?? [];
+  const hasTopDegradation = topDegradationCodes.length > 0;
+  const completionLabel = hasTopDegradation
+    ? "상위 후보 검토 필요"
+    : hasDegradation
+      ? "일부 후보 검토 필요"
+      : "분석 완료";
 
   return (
     <main className="app-shell min-h-screen" aria-busy={busy}>
@@ -386,10 +448,10 @@ export function App() {
             <p className="brand-descriptor">{ko.product.descriptor}</p>
           </Link>
           <div className="header-meta flex flex-wrap items-center gap-2">
-            {session ? <span className="workspace-context">{inputMode === "seed" ? `${selectedCase} 데모` : "직접 입력 사례"} · 분석 완료</span> : null}
-            <span className="mode-badge">{!session ? ko.mode.snapshot : session.mode === "snapshot" ? ko.mode.snapshotShort : ko.mode.liveShort}</span>
-            <span className="mode-badge">기준일 2026.08.11</span>
-            <span className="mode-badge hidden sm:inline-flex">저장된 분석 · 비용 $0.000</span>
+            {session ? <span className="workspace-context">{inputMode === "seed" ? `${selectedCase} 데모` : "직접 입력 사례"} · {completionLabel}</span> : null}
+            <span className="mode-badge">{!session ? (mode === "snapshot" ? ko.mode.snapshot : ko.mode.live) : session.mode === "snapshot" ? ko.mode.snapshotShort : ko.mode.liveShort}</span>
+            <span className="mode-badge">기준일 {displayDate(session?.evaluation_date ?? evaluationDate)}</span>
+            <span className="mode-badge hidden sm:inline-flex">{(session?.mode ?? mode) === "live" ? "라이브 분석 · 비용 guard 적용" : "저장된 분석 · 비용 $0.000"}</span>
             {degradationCodes.length ? <span className="degraded-badge">일부 기능 제한 {degradationCodes.length}건</span> : null}
             <Link className="secondary-button px-3 py-2" to="/about">데모 안내</Link>
           </div>
@@ -424,10 +486,10 @@ export function App() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div><p className="eyebrow">STEP 1 OF 2 · 데모 입력</p><h2 id="input-title" className="panel-title">어떤 환자 정보로 시작할까요?</h2><p className="section-description">준비된 사례를 선택하거나 환자 정보를 직접 입력하세요.</p></div>
                 <div className="segmented-control flex rounded-xl p-1">
-                  {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => setMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? ko.mode.snapshot : ko.mode.live}</button>)}
+                  {(["snapshot", "live"] as const).map((item) => <button key={item} onClick={() => selectMode(item)} className={`segmented ${mode === item ? "segmented-active" : ""}`}>{item === "snapshot" ? ko.mode.snapshot : ko.mode.live}</button>)}
                 </div>
               </div>
-              {mode === "live" ? <p className="runtime-banner runtime-warning mt-3">{configQuery.data?.live_available ? "라이브 모드 활성화 · first-party Google Cloud ADC와 비용 guard를 사용합니다." : "라이브 모드는 Google Cloud ADC·결제·quota 외부 검증 전까지 비활성입니다. 스냅샷 데모는 계속 사용할 수 있습니다."}</p> : null}
+              {mode === "live" ? <p className="runtime-banner runtime-warning mt-3">{configQuery.isPending ? "라이브 모드 사용 가능 여부를 확인하고 있습니다…" : configQuery.data?.live_available ? "라이브 모드 활성화 · first-party Google Cloud ADC와 비용 guard를 사용합니다." : "라이브 모드는 Google Cloud ADC·결제·quota 외부 검증 전까지 비활성입니다. 스냅샷 데모는 계속 사용할 수 있습니다."}</p> : null}
               <div className="input-tabs mt-5 flex gap-2 pb-3">
                 <button className={`tab-button ${inputMode === "seed" ? "tab-active" : ""}`} onClick={() => setInputMode("seed")}>준비된 데모 사례</button>
                 <button className={`tab-button ${inputMode === "text" ? "tab-active" : ""}`} onClick={() => setInputMode("text")}>환자 설명 직접 입력</button>
@@ -450,7 +512,7 @@ export function App() {
                 </div>
               )}
               <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
-                <label className="text-xs font-bold text-slate-400">평가 기준일<input type="date" value={evaluationDate} onChange={(event) => setEvaluationDate(event.target.value)} className="clinical-input mt-1 block w-full px-3 py-2 text-sm" /></label>
+                <label className="text-xs font-bold text-slate-400">평가 기준일<input type="date" value={evaluationDate} max={mode === "live" ? localToday() : undefined} disabled={mode === "snapshot"} onChange={(event) => setEvaluationDate(event.target.value)} className="clinical-input mt-1 block w-full px-3 py-2 text-sm" /></label>
                 <button aria-label={busy ? "분석 중…" : mode === "live" ? "라이브 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} 데모 분석 시작` : "전체 데모가 준비되지 않은 사례"} className="primary-button self-end" disabled={!canStart} onClick={() => void start()}>{busy ? "근거 분석 중…" : mode === "live" ? "라이브 근거 분석 시작" : selectedCaseRecord?.has_full_snapshot ? `${selectedCase} 근거 분석 시작` : "전체 데모가 준비되지 않은 사례"}</button>
               </div>
               <p aria-live="polite" className="mt-3 text-center text-xs text-slate-500">{statusText}</p>
@@ -463,7 +525,7 @@ export function App() {
         <div className="session-layout">
           <aside className="clinical-sidebar" aria-label="Clinical intelligence navigation">
             <div className="sidebar-brand"><span aria-hidden="true">+</span><strong>TRIAL-OPT</strong></div>
-            <div className="sidebar-case"><small>{inputMode === "seed" ? "데모 사례" : "직접 입력 사례"}</small><strong>{inputMode === "seed" ? selectedCase : "직접 입력"} · {session.mode === "snapshot" ? "스냅샷" : "라이브"}</strong><span>조건별 근거 평가 완료</span></div>
+            <div className="sidebar-case"><small>{inputMode === "seed" ? "데모 사례" : "직접 입력 사례"}</small><strong>{inputMode === "seed" ? selectedCase : "직접 입력"} · {session.mode === "snapshot" ? "스냅샷" : "라이브"}</strong><span>{hasDegradation ? "조건별 근거 평가 제한적 완료" : "조건별 근거 평가 완료"}</span></div>
             <nav>
               <Link to="/" className="sidebar-nav-item"><span aria-hidden="true">⌂</span><span><strong>사전 선별</strong><small>새 사례 선택</small></span></Link>
               <button className={`sidebar-nav-item ${tab === "patient" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("patient")}><span aria-hidden="true">◇</span><span><strong>Trial Workspace</strong><small>조건별 판정과 다음 질문</small></span></button>
@@ -473,11 +535,12 @@ export function App() {
             <p className="sidebar-disclaimer">연구용 프로토타입<br />의료 조언이나 최종 적격 판정이 아닙니다.</p>
           </aside>
           <div className="workspace-shell mx-auto max-w-[1500px] px-5 py-4">
-          {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>완료된 분석 결과는 그대로 보존했습니다.</strong> 일부 외부 기능을 사용할 수 없어 대체 경로로 전환했습니다. <span className="status-code">{degradationCodes.join(" · ")}</span></p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>S004 스냅샷 데모로 새로 시작</button></div> : null}
+          {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>{hasTopDegradation ? "상위 후보는 전문가 검토가 필요합니다." : "일부 하위 후보는 원문 검토가 필요합니다."}</strong> 확인된 조건의 결과는 보존했지만 검증되지 않은 조건은 자동 판정과 우선순위에 유리하게 사용하지 않습니다. <span className="status-code">{degradationCodes.join(" · ")}</span></p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>S004 스냅샷 데모로 새로 시작</button></div> : null}
           <div className="workspace-toolbar mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-2">
             <p className="text-sm text-slate-300">{statusText}</p>
             <div className="flex flex-wrap gap-2"><button aria-label="Replay Proof" className="secondary-button py-2" onClick={() => void replay()}>{ko.action.replay}</button><button aria-label="Export report" className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : "일부 저장 기능을 사용할 수 없어 보고서를 저장할 수 없습니다."} onClick={() => credentials && void exportReport(credentials)}>{ko.action.export}</button><button aria-label="Reset session" className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>{ko.action.reset}</button><button aria-label="Delete session" className="danger-button py-2" disabled={busy} onClick={() => void deleteCurrentSession()}>{ko.action.delete}</button></div>
           </div>
+          {error ? <p role="alert" className="mb-4 rounded-xl border border-rose-300/40 bg-rose-300/10 p-3 text-sm text-rose-200">{error}</p> : null}
           {replayStatus ? <p aria-live="polite" className="mb-4 rounded-xl bg-emerald-300/10 p-3 text-sm text-emerald-200">{replayStatus}</p> : null}
           {showDemoTools ? <section className="mb-4 rounded-xl border border-dashed border-fuchsia-300/40 bg-fuchsia-300/5 p-3" aria-label="Failure simulation controls"><p className="text-xs font-bold text-fuchsia-200">발표 리허설 전용 · 장애 상태 재현</p><div className="mt-2 flex flex-wrap gap-2">{["GEMINI_UNAVAILABLE", "CTGOV_UNAVAILABLE", "EMBEDDING_UNAVAILABLE"].map((code) => <button key={code} className="secondary-button px-3 py-2 text-xs" onClick={() => toggleFailure(code)}>{degradationCodes.includes(code) ? "✓ " : ""}{code}</button>)}</div></section> : null}
 
