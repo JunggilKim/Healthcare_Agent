@@ -218,19 +218,23 @@ export async function submitAnswer(
 export async function replayProof(
   credentials: SessionCredentials,
   nctId: string,
-): Promise<{ passed: boolean; packetCount: number }> {
+): Promise<{ passed: boolean; packetCount: number; replayCount: number; patientStateVersion: number }> {
   const response = await fetch(
     `/api/v1/sessions/${credentials.sessionId}/trials/${encodeURIComponent(nctId)}/proof`,
     { headers: { "X-Session-Token": credentials.token } },
   );
   const payload = (await jsonOrThrow(response)) as {
-    proof_packets: Array<{ verifier_checks: Array<{ check_id: string; passed: boolean }> }>;
+    patient_state_version: number;
+    proof_packets: Array<unknown>;
+    replay_executed: boolean;
+    replay_passed: boolean;
+    replay_results: Array<{ passed: boolean }>;
   };
   return {
-    passed: payload.proof_packets.every(
-    (packet) => packet.verifier_checks.find((check) => check.check_id === "PV-012")?.passed,
-    ),
+    passed: payload.replay_executed && payload.replay_passed,
     packetCount: payload.proof_packets.length,
+    replayCount: payload.replay_results.filter((result) => result.passed).length,
+    patientStateVersion: payload.patient_state_version,
   };
 }
 

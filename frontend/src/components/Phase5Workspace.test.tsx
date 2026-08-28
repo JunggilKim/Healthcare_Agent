@@ -5,6 +5,7 @@ import { vi } from "vitest";
 import { sessionSchema } from "../types/api";
 import { AgentTimeline } from "./AgentTimeline";
 import { CriterionMatrix } from "./CriterionMatrix";
+import { EvidenceFirewall } from "./EvidenceFirewall";
 import { QuestionPanel } from "./QuestionPanel";
 import { TrialCard } from "./TrialCard";
 
@@ -82,6 +83,34 @@ test("criterion matrix exposes unresolved evidence and verifier state", () => {
   expect(screen.getByText("자동 검증 1/1 통과")).toBeVisible();
   fireEvent.click(screen.getByText("영어 원문 보기"));
   expect(screen.getByText("Pathology-confirmed urothelial histology")).toBeVisible();
+});
+
+test("evidence firewall follows the current histology proof state", () => {
+  const { rerender } = render(<EvidenceFirewall session={session} />);
+  expect(screen.getByText(/병리검사 결과가 없으므로/)).toBeVisible();
+
+  const confirmed = sessionSchema.parse({
+    ...session,
+    patient_state_version: 1,
+    facts: [
+      {
+        fact_id: "fact-pathology",
+        slot_id: "pathology.histology",
+        grade: "A",
+      },
+    ],
+    proofs: session.proofs.map((proof) => ({
+      ...proof,
+      final_verdict: "PASS",
+      evidence_fact_ids: ["fact-pathology"],
+      missing_slot_ids: [],
+    })),
+  });
+  rerender(<EvidenceFirewall session={confirmed} />);
+
+  expect(screen.getByText(/확인된 병리 근거만 조직형 판정에 반영합니다/)).toBeVisible();
+  expect(screen.getByText(/근육 침윤처럼 확인되지 않은 조건은 UNKNOWN/)).toBeVisible();
+  expect(screen.queryByText(/병리검사 결과가 없으므로/)).not.toBeInTheDocument();
 });
 
 test("question panel always offers unknown and record-decline controls", () => {

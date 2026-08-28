@@ -9,7 +9,9 @@ from uuid import uuid4
 
 import orjson
 
+from backend.app.application.proof_replay import replay_current_proofs
 from backend.app.domain.sessions import SessionState
+from backend.app.domain.trials import CompiledTrial
 from backend.app.infrastructure.gcp_store import GcpSessionStore
 from backend.app.infrastructure.local_store import LocalSessionStore
 from backend.app.infrastructure.resilient_gcp_store import PersistenceResilientStore
@@ -341,9 +343,34 @@ class SnapshotReplayService:
         if payload is None:
             return None
         case_root = self.root / payload["snapshot_case_root"]
-        proofs = self._load(case_root / "proofs.json")
-        packets = proofs.get("proofs_by_trial", {}).get(nct_id)
-        return {"nct_id": nct_id, "proof_packets": packets} if packets is not None else None
+        packets = [
+            item
+            for item in payload.get("proofs", [])
+            if isinstance(item, dict) and item.get("nct_id") == nct_id
+        ]
+        if not packets:
+            return None
+        compiled_payload = orjson.loads((case_root / "compiled_trials.json").read_bytes())
+        if not isinstance(compiled_payload, list):
+            raise ValueError("snapshot compiled-trial artifact is not a list")
+        compiled_trial = next(
+            (
+                CompiledTrial.model_validate(item)
+                for item in compiled_payload
+                if isinstance(item, dict) and item.get("nct_id") == nct_id
+            ),
+            None,
+        )
+        if compiled_trial is None:
+            return None
+        return replay_current_proofs(
+            nct_id=nct_id,
+            patient_state_version=int(payload.get("patient_state_version", 0)),
+            facts=list(payload.get("facts", [])),
+            conflicts=list(payload.get("conflicts", [])),
+            compiled_trial=compiled_trial,
+            proof_packets=packets,
+        )
 
     async def export_report(self, session_id: str) -> dict[str, object] | None:
         payload = await self.store.read_session(session_id)

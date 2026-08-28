@@ -56,6 +56,22 @@ before, after = (json.load(open(path)) for path in sys.argv[1:])
 assert after["patient_state_version"] > before["patient_state_version"]
 assert after["trial_evaluation"] != before["trial_evaluation"]
 PY
+request proof_after_answer GET "$BASE_URL/api/v1/sessions/$SESSION_ID/trials/NCT05239624/proof" "$TMP_DIR/proof-after-answer.json" "${AUTH[@]}"
+python3 - "$TMP_DIR/proof-after-answer.json" <<'PY'
+import json, sys
+replay = json.load(open(sys.argv[1]))
+assert replay["patient_state_version"] == 1
+assert replay["replay_executed"] is True
+assert replay["replay_method"] == "DETERMINISTIC_EVALUATOR_CURRENT_SESSION"
+assert replay["replay_passed"] is True
+assert len(replay["replay_results"]) == len(replay["proof_packets"]) == 7
+histology = next(
+    item for item in replay["replay_results"]
+    if item["criterion_id"] == "NCT05239624:INCLUSION:002:5f52ab88"
+)
+assert histology["patient_state_version"] == 1
+assert histology["passed"] is True
+PY
 python3 - "$TMP_DIR/updated.json" >"$TMP_DIR/snapshot-answer-2.json" <<'PY'
 import json, sys
 session = json.load(open(sys.argv[1]))

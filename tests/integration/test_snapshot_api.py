@@ -76,13 +76,20 @@ def test_s004_snapshot_api_vertical_slice(tmp_path, monkeypatch) -> None:
             f"/api/v1/sessions/{session_id}/trials/NCT05239624/proof", headers=headers
         )
         assert proof.status_code == 200
-        assert len(proof.json()["proof_packets"]) == 7
-        assert all(
-            next(check for check in packet["verifier_checks"] if check["check_id"] == "PV-012")[
-                "passed"
-            ]
-            for packet in proof.json()["proof_packets"]
+        replay = proof.json()
+        assert len(replay["proof_packets"]) == 7
+        assert replay["patient_state_version"] == 1
+        assert replay["replay_executed"] is True
+        assert replay["replay_method"] == "DETERMINISTIC_EVALUATOR_CURRENT_SESSION"
+        assert replay["replay_passed"] is True
+        assert len(replay["replay_results"]) == 7
+        assert all(item["passed"] for item in replay["replay_results"])
+        histology_replay = next(
+            item
+            for item in replay["replay_results"]
+            if item["criterion_id"] == "NCT05239624:INCLUSION:002:5f52ab88"
         )
+        assert histology_replay["patient_state_version"] == 1
         exported = client.get(f"/api/v1/sessions/{session_id}/export", headers=headers)
         assert exported.status_code == 200
         export_payload = exported.json()

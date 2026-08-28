@@ -69,9 +69,15 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
   const invasionRow = page.getByRole("row").filter({ hasText: "Muscle-invasive disease" });
   await expect(invasionRow.getByText("UNKNOWN", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: /근육 침윤 여부/ })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "확인된 병리 근거만 조직형 판정에 반영합니다." }),
+  ).toBeVisible();
+  await expect(page.getByText(/병리검사 결과가 없으므로/)).toHaveCount(0);
 
   await page.getByRole("button", { name: "Replay Proof" }).click();
-  await expect(page.getByText(/판정 근거 재검증 통과 · PV-012 7\/7/)).toBeVisible();
+  await expect(
+    page.getByText(/판정 근거 서버 재실행 통과 · Proof Replay 7\/7 · 상태 v1/),
+  ).toBeVisible();
 });
 
 test("unknown and failure-rehearsal paths remain usable", async ({ page }) => {

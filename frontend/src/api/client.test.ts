@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { analyzeSession, createSession, submitAnswer } from "./client";
+import { analyzeSession, createSession, replayProof, submitAnswer } from "./client";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -130,6 +130,33 @@ test("structured question branches preserve their typed value", async () => {
       unknown: false,
       declined: false,
     }),
+  });
+});
+
+test("proof replay trusts the server reexecution result instead of stored PV-012 flags", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          patient_state_version: 1,
+          proof_packets: [{ verifier_checks: [{ check_id: "PV-012", passed: false }] }],
+          replay_executed: true,
+          replay_passed: true,
+          replay_results: [{ passed: true }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+
+  await expect(
+    replayProof({ sessionId: "session-s004", token: "token-s004" }, "NCT05239624"),
+  ).resolves.toEqual({
+    passed: true,
+    packetCount: 1,
+    replayCount: 1,
+    patientStateVersion: 1,
   });
 });
 

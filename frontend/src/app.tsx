@@ -20,6 +20,7 @@ import { AgentTimeline, type StageState } from "./components/AgentTimeline";
 import { EmptyState } from "./components/ClinicalUI";
 import { CriterionMatrix } from "./components/CriterionMatrix";
 import { Disclaimer } from "./components/Disclaimer";
+import { EvidenceFirewall } from "./components/EvidenceFirewall";
 import { QuestionPanel } from "./components/QuestionPanel";
 import { ResearcherView } from "./components/ResearcherView";
 import { RetrievalCandidates } from "./components/RetrievalCandidates";
@@ -356,7 +357,7 @@ export function App() {
     const elapsed = Math.round(performance.now() - started);
     setReplayStatus(
       result.passed
-        ? `판정 근거 재검증 통과 · PV-012 ${result.packetCount}/${result.packetCount} · ${elapsed} ms`
+        ? `판정 근거 서버 재실행 통과 · Proof Replay ${result.replayCount}/${result.packetCount} · 상태 v${result.patientStateVersion} · ${elapsed} ms`
         : "판정 근거 재검증에 실패했습니다.",
     );
   }
@@ -547,7 +548,7 @@ export function App() {
           <div className={`workspace-grid workspace-primary ${tab === "patient" ? "" : "workspace-primary-evidence"}`}>
             <div className="flex min-h-0 flex-col gap-3"><AgentTimeline states={stages} /><QuestionPanel session={session} busy={busy} onAnswer={(branch) => void answer(branch)} /></div>
             <div className="min-h-0 space-y-3 overflow-y-auto"><TrialCard session={session} /><section className="panel patient-source-card p-4"><p className="eyebrow">환자 설명 원문</p><p className="patient-source-summary">{casePresentation[selectedCase]?.summary ?? "입력된 환자 설명"}</p><details className="source-original"><summary>영어 원문 보기</summary><div className="source-original-content"><p>{session.patient_text}</p></div></details></section></div>
-            <div className="flex min-h-0 flex-col gap-3"><section className="panel firewall-panel"><p className="eyebrow">근거 안전장치</p><h2>영상 소견만으로 병리 진단을 확정하지 않습니다.</h2><p>CT에서 방광 종괴가 관찰되었지만, 병리검사 결과가 없으므로 조직형은 아직 확인되지 않은 상태로 유지합니다. 검증 규칙 <span className="status-code">PV-007</span>이 추정 정보가 최종 판정 근거로 사용되지 않도록 차단합니다.</p></section><CriterionMatrix session={session} /></div>
+            <div className="flex min-h-0 flex-col gap-3"><EvidenceFirewall session={session} /><CriterionMatrix session={session} /></div>
           </div>
 
           <nav className="workspace-tabs mt-3 flex gap-1 p-1" aria-label="Workspace evidence tabs">{(["patient", "research", "experiment"] as const).map((item) => <button aria-label={item === "patient" ? "Patient Summary" : item === "research" ? "Researcher View" : "Experiment Evidence"} key={item} onClick={() => selectWorkspaceTab(item)} className={`workspace-tab ${tab === item ? "workspace-tab-active" : ""}`}>{item === "patient" ? "환자·판정" : item === "research" ? "연구 근거" : "실험 근거"}</button>)}</nav>

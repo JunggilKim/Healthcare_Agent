@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from backend.app.agents.report_renderer import validate_or_fallback_report
 from backend.app.application.catalog import load_slot_catalog
+from backend.app.application.proof_replay import replay_current_proofs
 from backend.app.application.state_machine import validate_transition
 from backend.app.application.vertical_slice import load_vertical_slice
 from backend.app.domain.evidence import EligibilityContext, FactConflict, PatientFact
@@ -506,12 +507,20 @@ class SnapshotSessionService:
         payload = await self.store.read_session(session_id)
         if payload is None or nct_id != "NCT05239624" or not payload.get("proofs"):
             return None
+        replay = replay_current_proofs(
+            nct_id=nct_id,
+            patient_state_version=int(payload.get("patient_state_version", 0)),
+            facts=list(payload.get("facts", [])),
+            conflicts=list(payload.get("conflicts", [])),
+            compiled_trial=self.fixture.compiled_trial,
+            proof_packets=list(payload["proofs"]),
+        )
         return {
+            **replay,
             "trial_evaluation": payload["trial_evaluation"],
             "criteria": [
                 item.model_dump(mode="json") for item in self.fixture.compiled_trial.criteria
             ],
-            "proof_packets": payload["proofs"],
             "registry": self.fixture.raw_trial.model_dump(mode="json"),
         }
 

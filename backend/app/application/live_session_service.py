@@ -27,6 +27,7 @@ from backend.app.application.compilation_service import (
     ProtocolCompilationService,
 )
 from backend.app.application.interactive_loop import InteractiveTrialOptLoop
+from backend.app.application.proof_replay import replay_current_proofs
 from backend.app.domain.canonical import canonical_json_bytes, canonical_sha256, load_yaml
 from backend.app.domain.evidence import EligibilityContext
 from backend.app.domain.model_outputs import PatientExtractionResult
@@ -1004,12 +1005,22 @@ class LiveSessionService:
         packets = payload["full_state"]["proofs_by_trial"].get(nct_id)
         if packets is None:
             return None
-        compiled = payload["full_state"]["aggregate"].get("compiled_trials", {}).get(nct_id)
+        aggregate = SessionAggregate.model_validate(payload["full_state"]["aggregate"])
+        compiled_trial = aggregate.compiled_trials.get(nct_id)
+        if compiled_trial is None:
+            return None
+        replay = replay_current_proofs(
+            nct_id=nct_id,
+            patient_state_version=aggregate.patient_state_version,
+            facts=[item.model_dump(mode="json") for item in aggregate.facts],
+            conflicts=[item.model_dump(mode="json") for item in aggregate.conflicts],
+            compiled_trial=compiled_trial,
+            proof_packets=packets,
+        )
         return {
-            "nct_id": nct_id,
+            **replay,
             "trial_evaluation": payload.get("trial_evaluations", {}).get(nct_id),
-            "criteria": compiled.get("criteria", []) if isinstance(compiled, dict) else [],
-            "proof_packets": packets,
+            "criteria": [item.model_dump(mode="json") for item in compiled_trial.criteria],
             "registry": payload["full_state"]["raw_trials"].get(nct_id),
         }
 
