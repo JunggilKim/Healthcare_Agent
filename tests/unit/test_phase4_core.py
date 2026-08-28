@@ -138,6 +138,26 @@ def test_opaque_critical_protocol_forces_review_and_preserves_degradation() -> N
     assert evaluation.degradation_codes == ["PROTOCOL_OPAQUE_CRITERIA_REVIEW_REQUIRED"]
 
 
+def test_protocol_limited_top_result_reports_the_real_question_stop_reason() -> None:
+    state = _full_state()
+    nct_id = state.aggregate.ranked_nct_ids[0]
+    evaluation = state.aggregate.trial_evaluations[nct_id].model_copy(
+        update={
+            "decision": TrialDecision.REVIEW_REQUIRED,
+            "degradation_codes": ["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"],
+        }
+    )
+    state.aggregate = state.aggregate.model_copy(
+        update={"trial_evaluations": {nct_id: evaluation}}
+    )
+
+    selection = select_next_action(state)
+
+    assert selection.selected is None
+    assert selection.stop_reason == "PROTOCOL_REVIEW_REQUIRED"
+    assert "조건 구조화 또는 검토" in selection.deterministic_rationale
+
+
 def test_degraded_protocol_candidates_do_not_dilute_actionable_question_risk() -> None:
     state = _full_state()
     baseline_risk = compute_topk_risk(state)

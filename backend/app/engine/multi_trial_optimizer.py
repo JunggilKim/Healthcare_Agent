@@ -149,6 +149,8 @@ def generate_slot_candidates(
             if (
                 proof is None
                 or criterion.criticality != "CRITICAL"
+                or criterion.opaque
+                or not criterion.protocol_verified
                 or proof.final_verdict not in {CriterionVerdict.UNKNOWN, CriterionVerdict.CONFLICT}
             ):
                 continue
@@ -525,6 +527,10 @@ def _stop(reason: str, candidates: list[QuestionCandidate]) -> QuestionSelection
     messages = {
         "NO_RELEVANT_TRIALS": "현재 상세 평가할 관련 임상시험이 없습니다.",
         "NO_ACTIONABLE_MISSING_SLOT": "현재 안전하게 확인할 수 있는 추가 정보가 없습니다.",
+        "PROTOCOL_REVIEW_REQUIRED": (
+            "상위 후보의 임상시험 조건 구조화 또는 검토가 완료되지 않아 "
+            "안전한 다음 질문을 생성하지 않습니다."
+        ),
         "UTILITY_BELOW_THRESHOLD": "추가 질문의 예상 효용이 중단 기준보다 낮습니다.",
         "MAX_QUESTION_BUDGET": "질문 예산에 도달했습니다.",
         "TOP_RESULT_STABLE": "상위 결과와 근거가 충분히 안정적입니다.",
@@ -557,6 +563,13 @@ def select_next_action(
         state, slot_level_deduplication=flags.slot_level_deduplication
     )
     if not candidates:
+        top_evaluations = [
+            aggregate.trial_evaluations[nct_id]
+            for nct_id in aggregate.ranked_nct_ids[: aggregate.config.top_k]
+        ]
+        unresolved = [item for item in top_evaluations if item.decision in _UNRESOLVED]
+        if unresolved and all(_has_protocol_degradation(item) for item in unresolved):
+            return _stop("PROTOCOL_REVIEW_REQUIRED", [])
         return _stop("NO_ACTIONABLE_MISSING_SLOT", [])
 
     before_risk = compute_topk_risk(state)

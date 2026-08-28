@@ -23,12 +23,17 @@ def build_sort_tuple(evaluation: TrialEvaluation) -> tuple[object, ...]:
             -key.last_update_epoch_days,
             key.nct_id,
         )
+    protocol_limited = bool(
+        evaluation.opaque_critical_count
+        or any(code.startswith("PROTOCOL_") for code in evaluation.degradation_codes)
+    )
     return (
         key.tier_order,
-        evaluation.opaque_critical_count,
-        key.critical_unknown_count,
+        protocol_limited,
         -proof,
         -retrieval,
+        evaluation.opaque_critical_count,
+        key.critical_unknown_count,
         -key.recruitment_status_priority,
         -key.last_update_epoch_days,
         key.nct_id,

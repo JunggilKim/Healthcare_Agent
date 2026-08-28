@@ -194,6 +194,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .stage-symbol-running { border-color: var(--blue-600); background: var(--blue-100); color: var(--blue-700); box-shadow: 0 0 0 4px var(--blue-50); }
 .stage-symbol-degraded { border-color: #d9a33f; background: var(--amber-100); color: var(--amber-700); }
 .stage-symbol-failed { border-color: #df647a; background: var(--rose-100); color: var(--rose-700); }
+.stage-symbol-skipped { border-color: var(--slate-300); background: var(--slate-100); color: var(--slate-500); }
 .stage-copy strong { display: block; color: var(--navy-900); font-size: 0.73rem; line-height: 1.35; }
 .stage-copy small { display: block; margin-top: 2px; color: var(--slate-500); font-size: 0.6rem; line-height: 1.3; }
 .stage-state { max-width: 64px; color: var(--slate-500); font-size: 0.57rem; line-height: 1.25; text-align: right; }
@@ -885,6 +886,7 @@ body {
 .stage-item-pending { border-color: var(--v4-line); background: #f8fafc; }
 .stage-item-degraded { border-color: #e8c66f; background: #fff8e8; }
 .stage-item-failed { border-color: #ef9ead; background: #fff2f4; }
+.stage-item-skipped { border-color: var(--v4-line); background: #f8fafc; opacity: .72; }
 .stage-symbol { width: 32px; height: 32px; border-radius: 9px; font-weight: 700; }
 .stage-copy strong { color: var(--v4-text); font-size: .76rem; font-weight: 600; line-height: 1.4; }
 .stage-state { color: #64748b; font-size: .67rem; }

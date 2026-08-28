@@ -1,0 +1,233 @@
+{
+  "base_url": "http://127.0.0.1:8765",
+  "generated_on": "2026-08-28",
+  "rows": [
+    {
+      "analysis_latency_seconds": 0.013,
+      "case_id": "S001",
+      "degradation_codes": [
+        "PATIENT_EXTRACTION_DETERMINISTIC_FALLBACK"
+      ],
+      "engine": "snapshot_replay",
+      "events": [
+        "fact_extracted",
+        "retrieval_completed",
+        "trial_compiled",
+        "trial_evaluated",
+        "proof_verified",
+        "rankings_updated",
+        "question_selected",
+        "completed"
+      ],
+      "mode": "snapshot",
+      "phase": "completed",
+      "question_id": "q_ed3910df-7353-4e30-8617-59d200b7bb9b",
+      "question_slot_id": "diagnosis.acute_pancreatitis.confirmed",
+      "ranked_nct_ids": [
+        "NCT06147635",
+        "NCT04990336",
+        "NCT06080789",
+        "NCT07375186",
+        "NCT06639516",
+        "NCT06409741",
+        "NCT07153809",
+        "NCT04760847"
+      ],
+      "retrieved_count": 0,
+      "selected_for_compilation": [],
+      "session_id": "56488113-98e4-4412-aa75-f6c7393af803",
+      "state": "QUESTION_READY",
+      "stop_rationale": "현재 상위 5개 임상시험 중 5개의 미확인 조건 6개에 영향을 주며, 답변 후 판정 불확실성이 약 6% 감소할 것으로 계산되어 먼저 선택했습니다.",
+      "stop_reason": null,
+      "top_criterion_count": 0,
+      "top_decision": null,
+      "top_degradation_codes": [],
+      "top_display_score": null,
+      "top_nct_id": "NCT06147635",
+      "top_opaque_count": 0,
+      "top_opaque_critical_count": null,
+      "top_proof_completeness": null,
+      "top_protocol_verified": null,
+      "total_latency_seconds": 0.043
+    },
+    {
+      "case_id": "S002",
+      "latency_seconds": 0.018,
+      "mode": "snapshot",
+      "phase": "create",
+      "problem": {
+        "code": "SNAPSHOT_BRANCH_UNAVAILABLE",
+        "detail": "SNAPSHOT_CASE_UNAVAILABLE:S002",
+        "status": 422,
+        "title": "Snapshot branch unavailable"
+      }
+    },
+    {
+      "case_id": "S003",
+      "latency_seconds": 0.018,
+      "mode": "snapshot",
+      "phase": "create",
+      "problem": {
+        "code": "SNAPSHOT_BRANCH_UNAVAILABLE",
+        "detail": "SNAPSHOT_CASE_UNAVAILABLE:S003",
+        "status": 422,
+        "title": "Snapshot branch unavailable"
+      }
+    },
+    {
+      "analysis_latency_seconds": 0.01,
+      "case_id": "S004",
+      "degradation_codes": [],
+      "engine": "snapshot_replay",
+      "events": [
+        "fact_extracted",
+        "retrieval_completed",
+        "trial_compiled",
+        "trial_evaluated",
+        "proof_verified",
+        "rankings_updated",
+        "question_selected",
+        "completed"
+      ],
+      "mode": "snapshot",
+      "phase": "completed",
+      "question_id": "q_4b4118fc-32ad-499a-9823-eb3ec6f0ee5a",
+      "question_slot_id": "pathology.histology",
+      "ranked_nct_ids": [
+        "NCT05239624",
+        "NCT06525571",
+        "NCT06378242",
+        "NCT07483970",
+        "NCT06571708",
+        "NCT05833867",
+        "NCT06255964",
+        "NCT07322263"
+      ],
+      "retrieved_count": 0,
+      "selected_for_compilation": [],
+      "session_id": "68f8a1c1-3b17-4889-b8e5-24d6be7a66a5",
+      "state": "QUESTION_READY",
+      "stop_rationale": "현재 상위 5개 임상시험 중 5개의 미확인 조건 5개에 영향을 주며, 답변 후 판정 불확실성이 약 1% 감소할 것으로 계산되어 먼저 선택했습니다.",
+      "stop_reason": null,
+      "top_criterion_count": 0,
+      "top_decision": null,
+      "top_degradation_codes": [],
+      "top_display_score": null,
+      "top_nct_id": "NCT05239624",
+      "top_opaque_count": 0,
+      "top_opaque_critical_count": null,
+      "top_proof_completeness": null,
+      "top_protocol_verified": null,
+      "total_latency_seconds": 0.052
+    },
+    {
+      "case_id": "S005",
+      "latency_seconds": 0.018,
+      "mode": "snapshot",
+      "phase": "create",
+      "problem": {
+        "code": "SNAPSHOT_BRANCH_UNAVAILABLE",
+        "detail": "SNAPSHOT_CASE_UNAVAILABLE:S005",
+        "status": 422,
+        "title": "Snapshot branch unavailable"
+      }
+    },
+    {
+      "case_id": "S006",
+      "latency_seconds": 0.018,
+      "mode": "snapshot",
+      "phase": "create",
+      "problem": {
+        "code": "SNAPSHOT_BRANCH_UNAVAILABLE",
+        "detail": "SNAPSHOT_CASE_UNAVAILABLE:S006",
+        "status": 422,
+        "title": "Snapshot branch unavailable"
+      }
+    },
+    {
+      "case_id": "S007",
+      "latency_seconds": 0.019,
+      "mode": "snapshot",
+      "phase": "create",
+      "problem": {
+        "code": "SNAPSHOT_BRANCH_UNAVAILABLE",
+        "detail": "SNAPSHOT_CASE_UNAVAILABLE:S007",
+        "status": 422,
+        "title": "Snapshot branch unavailable"
+      }
+    },
+    {
+      "analysis_latency_seconds": 0.025,
+      "case_id": "S008",
+      "degradation_codes": [
+        "PATIENT_EXTRACTION_DETERMINISTIC_FALLBACK"
+      ],
+      "engine": "snapshot_replay",
+      "events": [
+        "fact_extracted",
+        "retrieval_completed",
+        "trial_compiled",
+        "trial_evaluated",
+        "proof_verified",
+        "rankings_updated",
+        "question_selected",
+        "completed"
+      ],
+      "mode": "snapshot",
+      "phase": "completed",
+      "question_id": "q_1bc3a21a-0e96-4f1d-a7f6-ce3f811d2ac4",
+      "question_slot_id": "lab.fvc_percent_predicted",
+      "ranked_nct_ids": [
+        "NCT07284459",
+        "NCT07572383",
+        "NCT05986318",
+        "NCT06714123",
+        "NCT07600021",
+        "NCT06967805",
+        "NCT07679893",
+        "NCT05571059"
+      ],
+      "retrieved_count": 0,
+      "selected_for_compilation": [],
+      "session_id": "6ce578d1-d27f-402c-8b6d-3f9d9545e9a5",
+      "state": "QUESTION_READY",
+      "stop_rationale": "현재 상위 5개 임상시험 중 4개의 미확인 조건 4개에 영향을 주며, 답변 후 판정 불확실성이 약 2% 감소할 것으로 계산되어 먼저 선택했습니다.",
+      "stop_reason": null,
+      "top_criterion_count": 0,
+      "top_decision": null,
+      "top_degradation_codes": [],
+      "top_display_score": null,
+      "top_nct_id": "NCT07284459",
+      "top_opaque_count": 0,
+      "top_opaque_critical_count": null,
+      "top_proof_completeness": null,
+      "top_protocol_verified": null,
+      "total_latency_seconds": 0.07
+    },
+    {
+      "case_id": "S009",
+      "latency_seconds": 0.032,
+      "mode": "snapshot",
+      "phase": "create",
+      "problem": {
+        "code": "SNAPSHOT_BRANCH_UNAVAILABLE",
+        "detail": "SNAPSHOT_CASE_UNAVAILABLE:S009",
+        "status": 422,
+        "title": "Snapshot branch unavailable"
+      }
+    },
+    {
+      "case_id": "S010",
+      "latency_seconds": 0.021,
+      "mode": "snapshot",
+      "phase": "create",
+      "problem": {
+        "code": "SNAPSHOT_BRANCH_UNAVAILABLE",
+        "detail": "SNAPSHOT_CASE_UNAVAILABLE:S010",
+        "status": 422,
+        "title": "Snapshot branch unavailable"
+      }
+    }
+  ],
+  "schema_version": "trial-opt-demo-matrix-audit-v1"
+}

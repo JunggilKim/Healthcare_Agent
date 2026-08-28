@@ -54,8 +54,10 @@ export const questionSelectionSchema = z
 export const sessionSchema = z
   .object({
     session_id: z.string(),
+    seed_case_id: z.string().nullable().optional(),
     state: z.string(),
     mode: z.string(),
+    support_level: z.enum(["full_evaluation", "retrieval_only"]).default("full_evaluation"),
     evaluation_date: z.string(),
     degradation_codes: z.array(z.string()).default([]),
     export_available: z.boolean().default(true),

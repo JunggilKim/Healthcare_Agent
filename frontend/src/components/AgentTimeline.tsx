@@ -10,7 +10,7 @@ const stages = [
   "Next Question Optimization",
 ];
 
-export type StageState = "pending" | "running" | "completed" | "degraded" | "failed";
+export type StageState = "pending" | "running" | "completed" | "degraded" | "failed" | "skipped";
 
 export function AgentTimeline({ states }: { states: Record<string, StageState> }) {
   return (
@@ -28,7 +28,7 @@ export function AgentTimeline({ states }: { states: Record<string, StageState> }
           return (
           <li key={stage} title={label.en} className={`stage-item stage-item-${state}`}>
             <span className={`stage-symbol stage-symbol-${state}`} aria-hidden="true">
-              {state === "completed" ? "✓" : state === "failed" ? "!" : state === "degraded" ? "△" : index + 1}
+              {state === "completed" ? "✓" : state === "failed" ? "!" : state === "degraded" ? "△" : state === "skipped" ? "—" : index + 1}
             </span>
             <span className="stage-copy">
               <strong>{label.ko}</strong>

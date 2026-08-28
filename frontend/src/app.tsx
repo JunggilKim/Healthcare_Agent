@@ -61,7 +61,24 @@ function initialStages(): Record<string, StageState> {
   return Object.fromEntries(stageNames.map((stage) => [stage, "pending"]));
 }
 
+function finalStages(session: SessionView): Record<string, StageState> {
+  if (session.support_level !== "retrieval_only") {
+    return Object.fromEntries(stageNames.map((stage) => [stage, "completed"]));
+  }
+  return Object.fromEntries(
+    stageNames.map((stage, index) => [stage, index < 2 ? "completed" : "skipped"]),
+  );
+}
+
 function completedStatus(nextSession: SessionView): string {
+  if (nextSession.support_level === "retrieval_only") {
+    return "검색 완료 · 이 사례는 임상시험 검색 결과만 제공하며 적격성 판정은 생성하지 않습니다.";
+  }
+  if (nextSession.trial_evaluation?.decision === "REVIEW_REQUIRED") {
+    return nextSession.current_question?.selected
+      ? "상위 후보 검토 필요 · 검증된 조건에서 다음 확인 항목을 선택했습니다."
+      : "상위 후보 검토 필요 · 자동 판정할 수 없는 조건이 남아 있습니다.";
+  }
   if (nextSession.current_question?.selected) {
     return "분석 완료 · 판정에 가장 유용한 다음 확인 항목을 선택했습니다.";
   }
@@ -170,8 +187,9 @@ export function App() {
     void readSession(credentials)
       .then((restored) => {
         setSession(restored);
+        if (restored.seed_case_id) setSelectedCase(restored.seed_case_id);
         setDegradationCodes(restored.degradation_codes);
-        setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
+        setStages(finalStages(restored));
         setMode(restored.mode === "live" ? "live" : "snapshot");
         setEvaluationDate(restored.evaluation_date);
         setStatusText(completedStatus(restored));
@@ -253,7 +271,7 @@ export function App() {
       setDegradationCodes(nextSession.degradation_codes);
       const parsedRetrieval = retrievalSchema.safeParse(nextSession.retrieval);
       if (parsedRetrieval.success) setRetrieval(parsedRetrieval.data);
-      setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
+      setStages(finalStages(nextSession));
       setStatusText(completedStatus(nextSession));
       void navigate(
         `/session/${nextCredentials.sessionId}${showDemoTools ? "?demo-tools=1" : ""}`,
@@ -372,8 +390,9 @@ export function App() {
       setSession(null);
       setStages({ ...initialStages(), "Patient Evidence": "running" });
       await analyzeSession(nextCredentials, ({ event }) => updateStage(event));
-      setSession(await readSession(nextCredentials));
-      setStages(Object.fromEntries(stageNames.map((stage) => [stage, "completed"])));
+      const resetSessionView = await readSession(nextCredentials);
+      setSession(resetSessionView);
+      setStages(finalStages(resetSessionView));
       void navigate(`/session/${nextCredentials.sessionId}`);
       setStatusText("새 세션으로 근거 상태를 초기화했습니다.");
     } catch (caught) {
@@ -526,7 +545,7 @@ export function App() {
         <div className="session-layout">
           <aside className="clinical-sidebar" aria-label="Clinical intelligence navigation">
             <div className="sidebar-brand"><span aria-hidden="true">+</span><strong>TRIAL-OPT</strong></div>
-            <div className="sidebar-case"><small>{inputMode === "seed" ? "데모 사례" : "직접 입력 사례"}</small><strong>{inputMode === "seed" ? selectedCase : "직접 입력"} · {session.mode === "snapshot" ? "스냅샷" : "라이브"}</strong><span>{hasDegradation ? "조건별 근거 평가 제한적 완료" : "조건별 근거 평가 완료"}</span></div>
+            <div className="sidebar-case"><small>{inputMode === "seed" ? "데모 사례" : "직접 입력 사례"}</small><strong>{inputMode === "seed" ? selectedCase : "직접 입력"} · {session.mode === "snapshot" ? "스냅샷" : "라이브"}</strong><span>{session.support_level === "retrieval_only" ? "임상시험 검색 전용" : session.trial_evaluation?.decision === "REVIEW_REQUIRED" || hasDegradation ? "전문가 검토가 필요한 제한적 평가" : "조건별 근거 평가 완료"}</span></div>
             <nav>
               <Link to="/" className="sidebar-nav-item"><span aria-hidden="true">⌂</span><span><strong>사전 선별</strong><small>새 사례 선택</small></span></Link>
               <button className={`sidebar-nav-item ${tab === "patient" ? "sidebar-nav-active" : ""}`} onClick={() => selectWorkspaceTab("patient")}><span aria-hidden="true">◇</span><span><strong>Trial Workspace</strong><small>조건별 판정과 다음 질문</small></span></button>
@@ -539,7 +558,7 @@ export function App() {
           {degradationCodes.length ? <div role="status" className="runtime-banner runtime-warning mb-4"><p><strong>{hasTopDegradation ? "상위 후보는 전문가 검토가 필요합니다." : "일부 하위 후보는 원문 검토가 필요합니다."}</strong> 확인된 조건의 결과는 보존했지만 검증되지 않은 조건은 자동 판정과 우선순위에 유리하게 사용하지 않습니다. <span className="status-code">{degradationCodes.join(" · ")}</span></p><button className="secondary-button mt-2 py-2" onClick={prepareSnapshotFallback}>S004 스냅샷 데모로 새로 시작</button></div> : null}
           <div className="workspace-toolbar mb-3 flex flex-wrap items-center justify-between gap-3 px-4 py-2">
             <p className="text-sm text-slate-300">{statusText}</p>
-            <div className="flex flex-wrap gap-2"><button aria-label="Replay Proof" className="secondary-button py-2" onClick={() => void replay()}>{ko.action.replay}</button><button aria-label="Export report" className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : "일부 저장 기능을 사용할 수 없어 보고서를 저장할 수 없습니다."} onClick={() => credentials && void exportReport(credentials)}>{ko.action.export}</button><button aria-label="Reset session" className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>{ko.action.reset}</button><button aria-label="Delete session" className="danger-button py-2" disabled={busy} onClick={() => void deleteCurrentSession()}>{ko.action.delete}</button></div>
+            <div className="flex flex-wrap gap-2"><button aria-label="Replay Proof" className="secondary-button py-2" disabled={!session.durable_replay} title={session.durable_replay ? undefined : "검색 전용 사례에는 다시 검증할 판정 근거가 없습니다."} onClick={() => void replay()}>{ko.action.replay}</button><button aria-label="Export report" className="secondary-button py-2" disabled={!session.export_available} title={session.export_available ? undefined : session.support_level === "retrieval_only" ? "검색 전용 사례는 적격성 판정 보고서를 생성하지 않습니다." : "일부 저장 기능을 사용할 수 없어 보고서를 저장할 수 없습니다."} onClick={() => credentials && void exportReport(credentials)}>{ko.action.export}</button><button aria-label="Reset session" className="secondary-button py-2" disabled={busy} onClick={() => void resetCurrentSession()}>{ko.action.reset}</button><button aria-label="Delete session" className="danger-button py-2" disabled={busy} onClick={() => void deleteCurrentSession()}>{ko.action.delete}</button></div>
           </div>
           {error ? <p role="alert" className="mb-4 rounded-xl border border-rose-300/40 bg-rose-300/10 p-3 text-sm text-rose-200">{error}</p> : null}
           {replayStatus ? <p aria-live="polite" className="mb-4 rounded-xl bg-emerald-300/10 p-3 text-sm text-emerald-200">{replayStatus}</p> : null}

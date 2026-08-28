@@ -13,9 +13,26 @@ def _normalized_condition(value: str) -> str:
     return re.sub(r"[^0-9a-z가-힣]+", " ", normalized).strip()
 
 
-def exact_condition_match(candidate: RegistryCandidate, query_conditions: list[str]) -> bool:
+def exact_condition_match(
+    candidate: RegistryCandidate,
+    query_conditions: list[str],
+    *,
+    allow_qualified_condition: bool = True,
+) -> bool:
     trial_conditions = {_normalized_condition(value) for value in candidate.trial.conditions}
-    return any(_normalized_condition(query) in trial_conditions for query in query_conditions)
+    normalized_queries = {_normalized_condition(value) for value in query_conditions}
+    return any(
+        query
+        and (
+            query == trial_condition
+            or (
+                allow_qualified_condition
+                and f" {query} " in f" {trial_condition} "
+            )
+        )
+        for query in normalized_queries
+        for trial_condition in trial_conditions
+    )
 
 
 def rrf_score(*ranks: int, k: int = 60, exact_match: bool = False, bonus: float = 0.05) -> float:

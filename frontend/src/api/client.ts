@@ -60,6 +60,7 @@ export interface DemoCase {
   id: string;
   text: string;
   has_full_snapshot: boolean;
+  support_level: "full_evaluation" | "retrieval_only";
 }
 
 async function jsonOrThrow(response: Response) {

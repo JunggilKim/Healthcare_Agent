@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
-
 import orjson
 from fastapi import APIRouter
 
+from backend.app.application.demo_cases import load_demo_cases
 from backend.app.infrastructure.local_artifacts import LocalArtifactStore
 from backend.app.infrastructure.snapshot_loader import (
     SnapshotIntegrityError,
@@ -21,8 +20,6 @@ router = APIRouter(tags=["demo"])
 
 @router.get("/demo/cases")
 async def demo_cases() -> dict[str, object]:
-    path = REPOSITORY_ROOT / "data" / "seeds" / "synthetic-patients.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
     complete_cases = {"S004"}
     try:
         manifest = load_verified_snapshot(get_settings().demo_snapshot_dir, require_complete=True)
@@ -35,8 +32,9 @@ async def demo_cases() -> dict[str, object]:
                 "id": item["num"],
                 "text": item["title"],
                 "has_full_snapshot": item["num"] in complete_cases,
+                "support_level": item.get("support_level", "retrieval_only"),
             }
-            for item in payload["topics"]
+            for item in load_demo_cases()
         ]
     }
 

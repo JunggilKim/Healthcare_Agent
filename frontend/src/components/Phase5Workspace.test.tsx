@@ -76,6 +76,60 @@ test("trial card labels the score as nonprobabilistic", () => {
   expect(screen.getByText("POTENTIAL_MATCH")).toBeVisible();
 });
 
+test("review-required trials are not presented as a confirmed first-place result", () => {
+  const reviewRequired = sessionSchema.parse({
+    ...session,
+    trial_evaluation: {
+      ...session.trial_evaluation,
+      decision: "REVIEW_REQUIRED",
+      degradation_codes: ["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"],
+    },
+  });
+
+  render(<TrialCard session={reviewRequired} />);
+  expect(screen.getByText("순위 보류")).toBeVisible();
+  expect(screen.getByText("전문가 검토 대기")).toBeVisible();
+  expect(screen.queryByText("1순위")).not.toBeInTheDocument();
+});
+
+test("retrieval-only cases never show an eligibility rank or score", () => {
+  const retrievalOnly = sessionSchema.parse({
+    ...session,
+    support_level: "retrieval_only",
+    trial_evaluation: null,
+    top_trial: null,
+    proofs: [],
+    criteria: [],
+  });
+
+  render(<TrialCard session={retrievalOnly} />);
+  expect(screen.getByText("검색 전용 사례")).toBeVisible();
+  expect(screen.getByText("후보 순위와 적합 점수를 생성하지 않았습니다.")).toBeVisible();
+  expect(screen.queryByText("1순위")).not.toBeInTheDocument();
+});
+
+test("retrieval-only evidence panels do not leak the S004 bladder-specific fixture", () => {
+  const retrievalOnly = sessionSchema.parse({
+    ...session,
+    support_level: "retrieval_only",
+    trial_evaluation: null,
+    top_trial: null,
+    proofs: [],
+    criteria: [],
+  });
+
+  render(
+    <>
+      <EvidenceFirewall session={retrievalOnly} />
+      <CriterionMatrix session={retrievalOnly} />
+    </>,
+  );
+  expect(screen.getByText("검색 가설은 적격성 판정 근거가 아닙니다.")).toBeVisible();
+  expect(screen.getByText("0개 선정 조건")).toBeVisible();
+  expect(screen.getByText(/조건 구조화와 적격성 판정을 실행하지 않았습니다/)).toBeVisible();
+  expect(screen.queryByText(/CT에서 방광 종괴/)).not.toBeInTheDocument();
+});
+
 test("criterion matrix exposes unresolved evidence and verifier state", () => {
   render(<CriterionMatrix session={session} />);
   expect(screen.getByText("병리검사로 요로상피암 조직형이 확인됨")).toBeVisible();
@@ -245,6 +299,24 @@ test("limited sessions do not claim that every evidence check is complete", () =
   expect(screen.queryByText(/근거 평가를 모두 마쳤습니다/)).not.toBeInTheDocument();
 });
 
+test("protocol degradation explains why no safe next question was generated", () => {
+  const limited = sessionSchema.parse({
+    ...session,
+    degradation_codes: ["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"],
+    current_question: {
+      selected: null,
+      stop_reason: "PROTOCOL_REVIEW_REQUIRED",
+      top_alternatives: [],
+      patient_facing_question: null,
+      deterministic_rationale: "상위 후보의 임상시험 조건 구조화 또는 검토가 완료되지 않았습니다.",
+    },
+  });
+
+  render(<QuestionPanel session={limited} busy={false} onAnswer={() => undefined} />);
+  expect(screen.getByText("프로토콜 검토 전에는 다음 질문을 생성하지 않습니다.")).toBeVisible();
+  expect(screen.getByText(/조건 구조화 또는 검토/)).toBeVisible();
+});
+
 test("snapshot branch exhaustion is presented as a completed frozen demo path", () => {
   const completed = sessionSchema.parse({
     ...session,
@@ -277,4 +349,17 @@ test("agent timeline communicates degraded state in text", () => {
   );
   expect(screen.getByText("대체 경로 사용")).toBeVisible();
   expect(screen.getByText("완료")).toBeVisible();
+});
+
+test("agent timeline marks non-executed retrieval-only stages as out of scope", () => {
+  render(
+    <AgentTimeline
+      states={{
+        "Patient Evidence": "completed",
+        "Trial Retrieval": "completed",
+        "Protocol Compilation": "skipped",
+      }}
+    />,
+  );
+  expect(screen.getByText("검색 전용 범위 밖")).toBeVisible();
 });

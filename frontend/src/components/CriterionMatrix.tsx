@@ -13,12 +13,18 @@ const labels: Record<string, string> = {
 };
 
 export function CriterionMatrix({ session }: { session: SessionView }) {
+  const empty = session.proofs.length === 0;
   return (
     <section className="panel criterion-panel min-h-0 overflow-hidden" aria-labelledby="criteria-title">
       <div className="criterion-heading">
         <div><p className="eyebrow">조건별 판정 근거</p><h2 id="criteria-title" aria-label="Criterion proof table" className="panel-title">어떤 조건이 확인됐고, 무엇이 부족한가요?</h2><p className="section-description">등록 기준 원문은 그대로 보존하고, 현재 환자 기록으로 확인 가능한 근거만 연결합니다.</p></div>
-        <span className="mode-badge">7개 선정 조건</span>
+        <span className="mode-badge">{session.proofs.length}개 선정 조건</span>
       </div>
+      {empty ? (
+        <p className="section-description mt-4">
+          이 검색 전용 사례에서는 조건 구조화와 적격성 판정을 실행하지 않았습니다.
+        </p>
+      ) : (
       <div
         aria-label="Criterion proof table horizontal scroll area"
         className="criterion-scroll"
@@ -45,6 +51,7 @@ export function CriterionMatrix({ session }: { session: SessionView }) {
           </tbody>
         </table>
       </div>
+      )}
     </section>
   );
 }

@@ -10,26 +10,40 @@ import time
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from functools import lru_cache
 from typing import Any
 from uuid import uuid4
 
 import orjson
 
 from backend.app.agents.answer_interpreter import proposal_from_structured_answer
-from backend.app.agents.patient_evidence import PatientEvidenceAgent
+from backend.app.agents.patient_evidence import (
+    PatientEvidenceAgent,
+    deterministic_surface_fallback,
+    materialize_patient_extraction,
+)
 from backend.app.agents.prompts import render_prompt
 from backend.app.agents.question_renderer import render_question
 from backend.app.agents.report_renderer import validate_or_fallback_report
 from backend.app.agents.retrieval_query import RetrievalQueryAgent
 from backend.app.application.catalog import load_slot_catalog
-from backend.app.application.compilation_service import (
-    CompilationWorkflowResult,
-    ProtocolCompilationService,
+from backend.app.application.compilation_service import ProtocolCompilationService
+from backend.app.application.demo_cases import (
+    demo_case,
+    demo_retrieval_concept,
+    demo_support_level,
 )
 from backend.app.application.interactive_loop import InteractiveTrialOptLoop
 from backend.app.application.proof_replay import replay_current_proofs
 from backend.app.domain.canonical import canonical_json_bytes, canonical_sha256, load_yaml
-from backend.app.domain.evidence import EligibilityContext
+from backend.app.domain.enums import EvidenceGrade
+from backend.app.domain.evidence import (
+    EligibilityContext,
+    PatientFact,
+    PatientState,
+    RetrievalHypothesis,
+    SourceSpan,
+)
 from backend.app.domain.model_outputs import PatientExtractionResult
 from backend.app.domain.proof import ProofPacket
 from backend.app.domain.questions import (
@@ -41,6 +55,7 @@ from backend.app.domain.ranking import TrialEvaluation
 from backend.app.domain.rendering import AnswerInterpretationProposal, QuestionRenderProposal
 from backend.app.domain.sessions import SessionAggregate, SessionState
 from backend.app.domain.trials import CompiledTrial, ProtocolReviewArtifact, RawTrialRecord
+from backend.app.domain.values import StringValue
 from backend.app.engine.multi_trial_optimizer import FullOptimizationState
 from backend.app.engine.proof_verifier import build_verified_proof
 from backend.app.engine.ranker import rank_trials
@@ -59,6 +74,7 @@ from backend.app.infrastructure.structured_generation import (
 from backend.app.infrastructure.usage_guard import InMemoryUsageGuard, default_pricing_estimator
 from backend.app.retrieval.ctgov_client import ClinicalTrialsGovClient, CtgovUnavailableError
 from backend.app.retrieval.embeddings import GeminiEmbeddingProvider, RecordedEmbeddingProvider
+from backend.app.retrieval.query_builder import build_deterministic_query
 from backend.app.retrieval.retriever import HybridRetriever
 from backend.app.settings import REPOSITORY_ROOT, Settings
 
@@ -102,13 +118,109 @@ def _live_stage_log(
 
 
 def _seed_text(case_id: str) -> str:
-    payload = json.loads(
-        (REPOSITORY_ROOT / "data/seeds/synthetic-patients.json").read_text(encoding="utf-8")
+    return str(demo_case(case_id)["title"])
+
+
+def _retrieval_only_seed_state(
+    *, case_id: str, patient_text: str, source_id: str, asserted_at: datetime
+) -> PatientState:
+    """Create auditable retrieval input without promoting a seed diagnosis to evidence."""
+
+    surface = materialize_patient_extraction(
+        patient_text=patient_text,
+        source_id=source_id,
+        proposal=deterministic_surface_fallback(patient_text, language="en"),
+        slot_catalog=load_slot_catalog(),
+        asserted_at=asserted_at,
+    ).state
+    quote_hash = hashlib.sha256(patient_text.encode()).hexdigest()
+    presentation_fact = PatientFact(
+        fact_id=f"fact_seed_presentation_{case_id.lower()}",
+        slot_id="custom.seed_presentation",
+        value=StringValue(kind="string", value=patient_text),
+        grade=EvidenceGrade.A_DIRECT,
+        source_spans=[
+            SourceSpan(
+                source_id=source_id,
+                start=0,
+                end=len(patient_text),
+                quote=patient_text,
+                sha256=quote_hash,
+                language="en",
+            )
+        ],
+        asserted_at=asserted_at,
+        admissible_for_hard_decision=False,
     )
-    for item in payload["topics"]:
-        if item["num"] == case_id:
-            return str(item["title"])
-    raise ValueError(f"seed case not found: {case_id}")
+    concept = demo_retrieval_concept(case_id)
+    hypothesis = RetrievalHypothesis(
+        hypothesis_id=f"hyp_seed_retrieval_{case_id.lower()}",
+        concept=concept,
+        normalized_concept=concept,
+        source_fact_ids=[presentation_fact.fact_id],
+        rationale_code="CURATED_SYNTHETIC_SEED_RETRIEVAL_ONLY",
+        grade=EvidenceGrade.H_HYPOTHESIS,
+        admissible_for_eligibility=False,
+    )
+    return PatientState(
+        confirmed_facts=[*surface.confirmed_facts, presentation_fact],
+        retrieval_hypotheses=[hypothesis],
+        conflicts=surface.conflicts,
+    )
+
+
+@lru_cache(maxsize=3)
+def _reviewed_seed_protocols(
+    case_id: str,
+) -> dict[str, tuple[RawTrialRecord, CompiledTrial, ProtocolReviewArtifact]]:
+    root = REPOSITORY_ROOT / "data" / "demo" / "current" / "sessions" / case_id
+    if not root.exists():
+        return {}
+    raw_trials = {
+        item.nct_id: item
+        for item in (
+            RawTrialRecord.model_validate(value)
+            for value in json.loads((root / "raw_trials.json").read_text(encoding="utf-8"))
+        )
+    }
+    compiled_trials = {
+        item.nct_id: item
+        for item in (
+            CompiledTrial.model_validate(value)
+            for value in json.loads(
+                (root / "compiled_trials.json").read_text(encoding="utf-8")
+            )
+        )
+    }
+    reviews = {
+        item.nct_id: item
+        for item in (
+            ProtocolReviewArtifact.model_validate(value)
+            for value in json.loads((root / "reviews.json").read_text(encoding="utf-8"))
+        )
+        if item.approved
+    }
+    return {
+        nct_id: (raw_trial, compiled_trials[nct_id], reviews[nct_id])
+        for nct_id, raw_trial in raw_trials.items()
+        if nct_id in compiled_trials and nct_id in reviews
+    }
+
+
+def _same_protocol_compilation_input(
+    current: RawTrialRecord, reviewed: RawTrialRecord
+) -> bool:
+    fields = (
+        "eligibility_criteria",
+        "sex",
+        "minimum_age",
+        "maximum_age",
+        "healthy_volunteers",
+        "study_type",
+        "overall_status",
+        "conditions",
+    )
+    return all(getattr(current, field) == getattr(reviewed, field) for field in fields)
 
 
 def _pinned_seed_proposal(case_id: str | None, patient_text: str) -> PatientExtractionResult | None:
@@ -320,6 +432,7 @@ class LiveSessionService:
         if mode != "live":
             raise ValueError("LiveSessionService accepts Live Mode only")
         text = patient_text if patient_text is not None else _seed_text(seed_case_id)
+        support_level = demo_support_level(seed_case_id or None)
         session_id = str(uuid4())
         token = secrets.token_urlsafe(32)
         payload: dict[str, Any] = {
@@ -330,6 +443,7 @@ class LiveSessionService:
             "evaluation_date": evaluation_date.isoformat(),
             "language": language,
             "patient_text": text,
+            "support_level": support_level,
             "patient_state_version": 0,
             "question_count": 0,
             "facts": [],
@@ -590,28 +704,38 @@ class LiveSessionService:
             {},
         )
         yield "stage_started", {**event, "stage": "Patient Evidence"}
-        pinned_proposal = _pinned_seed_proposal(
-            payload.get("seed_case_id"), payload["patient_text"]
-        )
+        seed_case_id = payload.get("seed_case_id")
+        retrieval_only = payload.get("support_level") == "retrieval_only"
+        pinned_proposal = _pinned_seed_proposal(seed_case_id, payload["patient_text"])
         extraction_source_id = (
-            f"seed:{payload['seed_case_id']}"
-            if pinned_proposal is not None
+            f"seed:{seed_case_id}"
+            if seed_case_id
             else f"session:{session_id}:input"
         )
-        materialized, extraction_degraded = await self.patient_agent.extract(
-            patient_text=payload["patient_text"],
-            source_id=extraction_source_id,
-            language_hint=payload["language"],
-            evaluation_date=date.fromisoformat(payload["evaluation_date"]),
-            asserted_at=now,
-            pinned_fallback=pinned_proposal,
-            prefer_pinned_fallback=pinned_proposal is not None,
-            primary_max_attempts=1,
-            generation_attempt_timeout_seconds=(
-                self.settings.live_generation_attempt_timeout_seconds
-            ),
-            session_id=session_id,
-        )
+        if retrieval_only and seed_case_id:
+            patient_state = _retrieval_only_seed_state(
+                case_id=seed_case_id,
+                patient_text=payload["patient_text"],
+                source_id=extraction_source_id,
+                asserted_at=now,
+            )
+            extraction_degraded = False
+        else:
+            materialized, extraction_degraded = await self.patient_agent.extract(
+                patient_text=payload["patient_text"],
+                source_id=extraction_source_id,
+                language_hint=payload["language"],
+                evaluation_date=date.fromisoformat(payload["evaluation_date"]),
+                asserted_at=now,
+                pinned_fallback=pinned_proposal,
+                prefer_pinned_fallback=pinned_proposal is not None,
+                primary_max_attempts=1,
+                generation_attempt_timeout_seconds=(
+                    self.settings.live_generation_attempt_timeout_seconds
+                ),
+                session_id=session_id,
+            )
+            patient_state = materialized.state
         if extraction_degraded:
             payload["degradation_codes"].append(
                 "PATIENT_EXTRACTION_PINNED_FALLBACK"
@@ -626,7 +750,6 @@ class LiveSessionService:
                     "degradation_codes": payload["degradation_codes"],
                 },
             )
-        patient_state = materialized.state
         payload.update(
             {
                 "facts": [item.model_dump(mode="json") for item in patient_state.confirmed_facts],
@@ -646,8 +769,14 @@ class LiveSessionService:
             {"fact_count": len(patient_state.confirmed_facts)},
         )
         yield "fact_extracted", event
-        query = await self.query_agent.generate(
-            patient_state, self.catalog.version, session_id=session_id
+        query = (
+            build_deterministic_query(
+                patient_state.confirmed_facts, patient_state.retrieval_hypotheses
+            )
+            if retrieval_only
+            else await self.query_agent.generate(
+                patient_state, self.catalog.version, session_id=session_id
+            )
         )
         retrieval_started = time.monotonic()
         try:
@@ -695,14 +824,36 @@ class LiveSessionService:
             yield "degraded", event
             yield "completed", event
             return
-        if len(retrieval.selected_for_compilation) > self.settings.live_compilation_candidate_limit:
-            retrieval = retrieval.model_copy(
-                update={
-                    "selected_for_compilation": retrieval.selected_for_compilation[
-                        : self.settings.live_compilation_candidate_limit
-                    ]
-                }
+        reviewed_protocols = (
+            _reviewed_seed_protocols(str(seed_case_id))
+            if seed_case_id and not retrieval_only
+            else {}
+        )
+        reviewed_match_ids = [
+            candidate.nct_id
+            for candidate in retrieval.ranked_candidates
+            if candidate.nct_id in reviewed_protocols
+            and _same_protocol_compilation_input(
+                candidate.trial, reviewed_protocols[candidate.nct_id][0]
             )
+        ]
+        compilation_limit = self.settings.live_compilation_candidate_limit
+        if reviewed_match_ids:
+            selected_ids = reviewed_match_ids[:compilation_limit]
+            if len(reviewed_match_ids) == 1 and len(selected_ids) < compilation_limit:
+                unmatched_ids = [
+                    nct_id
+                    for nct_id in retrieval.selected_for_compilation
+                    if nct_id not in selected_ids
+                ]
+                selected_ids.extend(
+                    unmatched_ids[: compilation_limit - len(selected_ids)]
+                )
+        else:
+            selected_ids = retrieval.selected_for_compilation[:compilation_limit]
+        retrieval = retrieval.model_copy(update={"selected_for_compilation": selected_ids})
+        if retrieval_only:
+            retrieval = retrieval.model_copy(update={"selected_for_compilation": []})
         logger.info(
             _live_stage_log(
                 session_id=session_id,
@@ -725,6 +876,41 @@ class LiveSessionService:
             {"candidate_count": len(retrieval.ranked_candidates)},
         )
         yield "retrieval_completed", event
+        if retrieval_only:
+            selection = QuestionSelection(
+                selected=None,
+                stop_reason="RETRIEVAL_ONLY_CASE",
+                top_alternatives=[],
+                patient_facing_question=None,
+                deterministic_rationale=(
+                    "이 데모 사례는 관련 임상시험 검색 경로만 제공합니다. 검토된 조건 구조와 "
+                    "판정 슬롯이 없어 적격성 판정, 후보 순위, 점수 및 다음 질문은 "
+                    "생성하지 않습니다."
+                ),
+            )
+            payload.update(
+                {
+                    "export_available": False,
+                    "durable_replay": False,
+                    "proofs": [],
+                    "criteria": [],
+                    "trial_evaluation": None,
+                    "top_trial": None,
+                    "current_question": selection.model_dump(mode="json"),
+                    "ranked_nct_ids": [],
+                    "trial_evaluations": {},
+                }
+            )
+            event = await self._transition(
+                payload,
+                SessionState.CANDIDATES_READY,
+                SessionState.COMPLETE,
+                "STOP_AND_REPORT",
+                {"question_id": None, "stop_reason": selection.stop_reason},
+            )
+            yield "question_selected", event
+            yield "completed", event
+            return
         state = SessionState.CANDIDATES_READY
         event = await self._transition(
             payload, state, SessionState.COMPILING, "COMPILATION_STARTED", {}
@@ -740,8 +926,21 @@ class LiveSessionService:
         compilation_semaphore = asyncio.Semaphore(4)
         compilation_started = time.monotonic()
 
-        async def compile_one(nct_id: str) -> tuple[str, CompilationWorkflowResult]:
+        async def compile_one(
+            nct_id: str,
+        ) -> tuple[
+            str,
+            CompiledTrial,
+            ProtocolReviewArtifact | None,
+            list[str],
+            bool,
+        ]:
             candidate = candidate_by_id[nct_id]
+            reviewed = reviewed_protocols.get(nct_id)
+            if reviewed is not None and _same_protocol_compilation_input(
+                candidate.trial, reviewed[0]
+            ):
+                return nct_id, reviewed[1], reviewed[2], [], True
             async with compilation_semaphore:
                 result = await self.compiler.compile_and_review(
                     trial=candidate.trial,
@@ -749,7 +948,13 @@ class LiveSessionService:
                     now=now,
                     session_id=session_id,
                 )
-            return nct_id, result
+            return (
+                nct_id,
+                result.compilation.compiled_trial,
+                result.review_artifact,
+                result.degradation_codes,
+                False,
+            )
 
         async with self._cold_session_semaphore:
             compilation_results = await asyncio.gather(
@@ -765,20 +970,22 @@ class LiveSessionService:
                 degradation_codes=list(
                     dict.fromkeys(
                         code
-                        for _nct_id, result in compilation_results
-                        for code in result.degradation_codes
+                        for _nct_id, _compiled, _review, codes, _reused in compilation_results
+                        for code in codes
                     )
                 ),
             )
         )
-        for nct_id, result in compilation_results:
+        reused_protocol_ids: list[str] = []
+        for nct_id, compiled, review, degradation_codes, reused in compilation_results:
             candidate = candidate_by_id[nct_id]
-            compiled = result.compilation.compiled_trial
             compiled_trials[nct_id] = compiled
-            reviews[nct_id] = result.review_artifact or _unapproved_review(compiled, now)
+            reviews[nct_id] = review or _unapproved_review(compiled, now)
             raw_trials[nct_id] = candidate.trial
-            compilation_degradations[nct_id] = result.degradation_codes
-            payload["degradation_codes"].extend(result.degradation_codes)
+            compilation_degradations[nct_id] = degradation_codes
+            payload["degradation_codes"].extend(degradation_codes)
+            if reused:
+                reused_protocol_ids.append(nct_id)
             yield (
                 "trial_compiled",
                 {
@@ -788,6 +995,7 @@ class LiveSessionService:
                     "protocol_verified": compiled.protocol_verified,
                 },
             )
+        payload["reviewed_protocol_reuse_ids"] = reused_protocol_ids
         payload["degradation_codes"] = list(dict.fromkeys(payload["degradation_codes"]))
         state = SessionState.COMPILING
         event = await self._transition(

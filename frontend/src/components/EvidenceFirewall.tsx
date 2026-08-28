@@ -16,6 +16,34 @@ function confirmedHistology(session: SessionView): boolean {
 }
 
 export function EvidenceFirewall({ session }: { session: SessionView }) {
+  if (session.support_level === "retrieval_only") {
+    return (
+      <section className="panel firewall-panel">
+        <p className="eyebrow">근거 안전장치</p>
+        <h2>검색 가설은 적격성 판정 근거가 아닙니다.</h2>
+        <p>
+          합성 사례의 질환 개념은 ClinicalTrials.gov 검색에만 사용합니다. 조건 구조와 판정 슬롯이
+          검토되지 않은 상태에서는 검색 후보를 PASS·FAIL로 평가하거나 우선순위를 생성하지
+          않습니다.
+        </p>
+      </section>
+    );
+  }
+  const hasHistologyCriterion = session.criteria.some((criterion) =>
+    /histolog|조직형/i.test(`${criterion.normalized_summary} ${criterion.source_quote}`),
+  );
+  if (!hasHistologyCriterion) {
+    return (
+      <section className="panel firewall-panel">
+        <p className="eyebrow">근거 안전장치</p>
+        <h2>검색 단서와 판정 근거를 분리합니다.</h2>
+        <p>
+          Grade H 검색 가설은 후보 탐색에만 사용합니다. 확인되지 않은 조건은 UNKNOWN으로
+          유지하고, 출처가 연결된 근거와 검증된 프로토콜만 조건별 판정에 반영합니다.
+        </p>
+      </section>
+    );
+  }
   const pathologyConfirmed = confirmedHistology(session);
   return (
     <section className="panel firewall-panel">

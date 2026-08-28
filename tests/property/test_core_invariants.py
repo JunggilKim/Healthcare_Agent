@@ -218,6 +218,33 @@ def test_opaque_review_required_trial_cannot_outrank_transparent_peer() -> None:
     assert rank_trials([opaque, transparent]) == [transparent, opaque]
 
 
+def test_collapsed_opaque_protocol_is_not_rewarded_for_having_fewer_criteria() -> None:
+    richer = _evaluation(
+        nct_id="NCT00000001",
+        decision=TrialDecision.REVIEW_REQUIRED,
+        retrieval=0.8,
+        completeness=0.4,
+    ).model_copy(
+        update={
+            "opaque_critical_count": 9,
+            "degradation_codes": ["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"],
+        }
+    )
+    collapsed = _evaluation(
+        nct_id="NCT00000002",
+        decision=TrialDecision.REVIEW_REQUIRED,
+        retrieval=0.9,
+        completeness=0.0,
+    ).model_copy(
+        update={
+            "opaque_critical_count": 1,
+            "degradation_codes": ["PROTOCOL_COMPILATION_OPAQUE_FALLBACK"],
+        }
+    )
+
+    assert rank_trials([collapsed, richer]) == [richer, collapsed]
+
+
 @settings(max_examples=30)
 @given(keep_facts=st.lists(st.booleans(), min_size=1, max_size=12))
 def test_replay_is_deterministic_for_the_same_state(keep_facts: list[bool]) -> None:

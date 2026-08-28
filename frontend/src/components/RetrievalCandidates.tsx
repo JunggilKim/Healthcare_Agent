@@ -14,7 +14,7 @@ export function RetrievalCandidates({ retrieval }: { retrieval: RetrievalView })
             aria-label={`${candidateCount} retained candidates · top ${selectedCount} selected`}
             className="panel-title"
           >
-            검색 후보 {candidateCount}건 · 상위 {selectedCount}건 상세 평가
+            검색 후보 {candidateCount}건 · {selectedCount > 0 ? `상위 ${selectedCount}건 상세 평가` : "상세 평가는 제공하지 않음"}
           </h2>
           <p className="section-description">공식 영문 제목은 원문 그대로 표시하며, 검색 점수는 임상시험 적합 확률이 아닙니다.</p>
         </div>

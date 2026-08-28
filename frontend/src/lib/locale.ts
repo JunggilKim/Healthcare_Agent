@@ -48,6 +48,7 @@ export const stageStateLabels = {
   completed: "완료",
   degraded: "대체 경로 사용",
   failed: "실패",
+  skipped: "검색 전용 범위 밖",
 } as const;
 
 export const verdictLabels: Record<string, string> = {

@@ -168,7 +168,12 @@ class HybridRetriever:
         ranks = bm25_ranks([item.trial for item in candidates], query_text, self.tokenizer)
         query_conditions = [item.text for item in query.condition_queries]
         exact = {
-            item.trial.nct_id: exact_condition_match(item, query_conditions) for item in candidates
+            item.trial.nct_id: exact_condition_match(
+                item,
+                query_conditions,
+                allow_qualified_condition=result_mode == "live",
+            )
+            for item in candidates
         }
         lexical = {
             item.trial.nct_id: rrf_score(
