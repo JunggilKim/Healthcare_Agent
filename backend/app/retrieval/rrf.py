@@ -25,10 +25,7 @@ def exact_condition_match(
         query
         and (
             query == trial_condition
-            or (
-                allow_qualified_condition
-                and f" {query} " in f" {trial_condition} "
-            )
+            or (allow_qualified_condition and f" {query} " in f" {trial_condition} ")
         )
         for query in normalized_queries
         for trial_condition in trial_conditions

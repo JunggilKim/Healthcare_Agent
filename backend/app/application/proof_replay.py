@@ -23,9 +23,7 @@ def replay_current_proofs(
     context = EligibilityContext.model_validate({"facts": facts, "conflicts": conflicts})
     criteria = {criterion.criterion_id: criterion for criterion in compiled_trial.criteria}
     packets = [
-        ProofPacket.model_validate(item)
-        for item in proof_packets
-        if item.get("nct_id") == nct_id
+        ProofPacket.model_validate(item) for item in proof_packets if item.get("nct_id") == nct_id
     ]
     results: list[dict[str, object]] = []
     for packet in packets:

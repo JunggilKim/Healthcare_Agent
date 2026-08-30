@@ -12,9 +12,7 @@ DemoSupportLevel = Literal["full_evaluation", "retrieval_only"]
 @lru_cache(maxsize=1)
 def load_demo_cases() -> tuple[dict[str, Any], ...]:
     payload = json.loads(
-        (REPOSITORY_ROOT / "data/seeds/synthetic-patients.json").read_text(
-            encoding="utf-8"
-        )
+        (REPOSITORY_ROOT / "data/seeds/synthetic-patients.json").read_text(encoding="utf-8")
     )
     return tuple(dict(item) for item in payload["topics"])
 

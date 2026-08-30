@@ -19,12 +19,20 @@ def test_all_ten_demo_cases_have_an_explicit_truthful_support_contract() -> None
     cases = load_demo_cases()
 
     assert [item["num"] for item in cases] == [f"S{index:03d}" for index in range(1, 11)]
-    assert {
-        item["num"] for item in cases if item["support_level"] == "full_evaluation"
-    } == {"S001", "S004", "S008"}
-    assert {
-        item["num"] for item in cases if item["support_level"] == "retrieval_only"
-    } == {"S002", "S003", "S005", "S006", "S007", "S009", "S010"}
+    assert {item["num"] for item in cases if item["support_level"] == "full_evaluation"} == {
+        "S001",
+        "S004",
+        "S008",
+    }
+    assert {item["num"] for item in cases if item["support_level"] == "retrieval_only"} == {
+        "S002",
+        "S003",
+        "S005",
+        "S006",
+        "S007",
+        "S009",
+        "S010",
+    }
     assert all(demo_retrieval_concept(str(item["num"])) for item in cases)
 
 
@@ -45,17 +53,13 @@ def test_retrieval_only_seed_hypothesis_is_grade_h_and_never_eligibility_evidenc
         fact for fact in state.confirmed_facts if fact.slot_id == "custom.seed_presentation"
     )
     assert presentation.admissible_for_hard_decision is False
-    query = build_deterministic_query(
-        state.confirmed_facts, state.retrieval_hypotheses
-    )
+    query = build_deterministic_query(state.confirmed_facts, state.retrieval_hypotheses)
     assert query.condition_queries[0].text == "mucormycosis"
     assert query.must_not_use_as_eligibility_evidence is True
 
 
 def test_reviewed_protocol_reuse_requires_the_complete_compiler_input_to_match() -> None:
-    reviewed_raw, _compiled, review = next(
-        iter(_reviewed_seed_protocols("S001").values())
-    )
+    reviewed_raw, _compiled, review = next(iter(_reviewed_seed_protocols("S001").values()))
 
     assert review.approved is True
     assert _same_protocol_compilation_input(reviewed_raw, reviewed_raw)

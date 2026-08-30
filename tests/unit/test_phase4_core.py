@@ -147,9 +147,7 @@ def test_protocol_limited_top_result_reports_the_real_question_stop_reason() -> 
             "degradation_codes": ["PROTOCOL_COMPILATION_PARTIAL_COVERAGE"],
         }
     )
-    state.aggregate = state.aggregate.model_copy(
-        update={"trial_evaluations": {nct_id: evaluation}}
-    )
+    state.aggregate = state.aggregate.model_copy(update={"trial_evaluations": {nct_id: evaluation}})
 
     selection = select_next_action(state)
 

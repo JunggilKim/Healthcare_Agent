@@ -224,7 +224,12 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .trial-card-footer a { color: var(--blue-700); font-weight: 750; }
 .firewall-panel { border-left: 4px solid var(--teal-600); }
 .firewall-panel h2 { margin-top: 6px; color: var(--navy-950); font-size: .86rem; font-weight: 850; }
-.firewall-panel > p:last-child { margin-top: 6px; color: var(--navy-700); font-size: .67rem; line-height: 1.5; }
+.firewall-panel > p:not(.eyebrow) { margin-top: 6px; color: var(--navy-700); font-size: .67rem; line-height: 1.5; }
+
+.firewall-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.firewall-flow-item { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.1fr); align-items: center; gap: 7px; border: 1px solid var(--slate-200); border-radius: 10px; padding: 9px 10px; background: var(--slate-50); color: var(--navy-700); font-size: .68rem; line-height: 1.4; }
+.firewall-flow-item > span:nth-child(2) { color: var(--teal-600); font-weight: 900; }
+.firewall-flow-item strong { color: var(--navy-950); font-weight: 850; }
 
 .criterion-panel { min-height: 0; overflow-y: auto; }
 .criterion-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -433,7 +438,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 .runtime-banner { border-radius: 12px; }
 .workspace-primary { height: auto !important; overflow: visible !important; }
 .workspace-primary-evidence { display: none !important; }
-.workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 380px); grid-template-areas: "timeline timeline" "trial question" "criteria firewall" "criteria patient"; gap: 14px; }
+.workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 380px); grid-template-areas: "timeline timeline" "trial question" "firewall patient" "criteria criteria"; gap: 14px; }
 .workspace-grid > div { display: contents !important; }
 .workspace-grid .timeline-panel { grid-area: timeline; }
 .workspace-grid .question-panel { grid-area: question; }
@@ -542,8 +547,8 @@ button, a { -webkit-tap-highlight-color: transparent; }
   .workspace-grid .timeline-panel { order: 0; }
   .workspace-grid .trial-card { order: 1; }
   .workspace-grid .question-panel { order: 2; }
-  .workspace-grid .criterion-panel { order: 3; }
-  .workspace-grid .firewall-panel { order: 4; }
+  .workspace-grid .firewall-panel { order: 3; }
+  .workspace-grid .criterion-panel { order: 4; }
   .workspace-grid > div:nth-child(2) > section:last-child { order: 5; }
   .timeline-panel { overflow-x: auto; padding: 10px !important; }
   .stage-list { display: flex; width: max-content; min-width: 100%; gap: 6px; }
@@ -685,7 +690,7 @@ body { font-size: 16px; }
 .question-panel button strong { display: grid; width: 26px; height: 26px; flex: 0 0 26px; place-items: center; border-radius: 50%; background: var(--clinical-blue-500); color: white; }
 
 .firewall-panel h2 { font-size: 1.08rem; line-height: 1.55; }
-.firewall-panel > p:last-child { font-size: .82rem; line-height: 1.7; }
+.firewall-panel > p:not(.eyebrow) { font-size: .82rem; line-height: 1.7; }
 .patient-source-summary { margin-top: 9px; color: var(--clinical-text-primary); font-size: .92rem; font-weight: 750; line-height: 1.65; }
 
 .criterion-panel { overflow: visible; }
@@ -876,7 +881,7 @@ body {
 .workspace-shell { padding: 22px 28px 38px !important; }
 .workspace-toolbar { min-height: 58px; border-color: var(--v4-line); border-radius: 12px; background: white; }
 .workspace-toolbar > p { color: #334155 !important; }
-.workspace-grid { grid-template-columns: minmax(0, 1fr) minmax(350px, 394px); grid-template-areas: "timeline timeline" "trial question" "criteria criteria" "firewall patient"; gap: 18px; }
+.workspace-grid { grid-template-columns: minmax(0, 1fr) minmax(350px, 394px); grid-template-areas: "timeline timeline" "trial question" "firewall patient" "criteria criteria"; gap: 18px; }
 .workspace-grid .panel { padding: 22px; }
 
 .timeline-panel { border-radius: 14px; padding: 16px 18px !important; }
@@ -941,6 +946,8 @@ body {
 .criterion-ko { color: var(--v4-text); font-size: .91rem; font-weight: 600; }
 .firewall-panel { border: 1px solid var(--v4-line); border-left: 4px solid var(--v4-teal); }
 .firewall-panel::before { color: var(--v4-teal); }
+.firewall-flow-item { border-color: #b9ddd7; background: #f0fdfa; }
+.firewall-flow-item > span:nth-child(2) { color: var(--v4-teal); }
 .patient-source-card { border-color: var(--v4-line); }
 
 .workspace-tabs { border-color: var(--v4-line); border-radius: 12px; background: white; }
@@ -976,6 +983,7 @@ body {
   .question-panel { padding: 20px !important; }
   .criterion-heading { margin: -20px -20px 0; padding: 18px 20px; }
   .criterion-scroll { margin: 0 -20px -20px; }
+  .firewall-flow { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 480px) {

@@ -65,12 +65,9 @@ def _session_summary(session: dict[str, Any]) -> dict[str, Any]:
         "support_level": session.get("support_level", "full_evaluation"),
         "degradation_codes": session.get("degradation_codes") or [],
         "retrieved_count": len(retrieval_candidates),
-        "retrieval_top_nct_ids": [
-            item.get("nct_id") for item in retrieval_candidates[:3]
-        ],
+        "retrieval_top_nct_ids": [item.get("nct_id") for item in retrieval_candidates[:3]],
         "retrieval_top_titles": [
-            (item.get("trial") or {}).get("brief_title")
-            for item in retrieval_candidates[:3]
+            (item.get("trial") or {}).get("brief_title") for item in retrieval_candidates[:3]
         ],
         "selected_for_compilation": retrieval.get("selected_for_compilation") or [],
         "reviewed_protocol_reuse_ids": session.get("reviewed_protocol_reuse_ids") or [],
