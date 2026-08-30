@@ -187,9 +187,7 @@ def _reviewed_seed_protocols(
         item.nct_id: item
         for item in (
             CompiledTrial.model_validate(value)
-            for value in json.loads(
-                (root / "compiled_trials.json").read_text(encoding="utf-8")
-            )
+            for value in json.loads((root / "compiled_trials.json").read_text(encoding="utf-8"))
         )
     }
     reviews = {
@@ -207,9 +205,7 @@ def _reviewed_seed_protocols(
     }
 
 
-def _same_protocol_compilation_input(
-    current: RawTrialRecord, reviewed: RawTrialRecord
-) -> bool:
+def _same_protocol_compilation_input(current: RawTrialRecord, reviewed: RawTrialRecord) -> bool:
     fields = (
         "eligibility_criteria",
         "sex",
@@ -708,9 +704,7 @@ class LiveSessionService:
         retrieval_only = payload.get("support_level") == "retrieval_only"
         pinned_proposal = _pinned_seed_proposal(seed_case_id, payload["patient_text"])
         extraction_source_id = (
-            f"seed:{seed_case_id}"
-            if seed_case_id
-            else f"session:{session_id}:input"
+            f"seed:{seed_case_id}" if seed_case_id else f"session:{session_id}:input"
         )
         if retrieval_only and seed_case_id:
             patient_state = _retrieval_only_seed_state(
@@ -846,9 +840,7 @@ class LiveSessionService:
                     for nct_id in retrieval.selected_for_compilation
                     if nct_id not in selected_ids
                 ]
-                selected_ids.extend(
-                    unmatched_ids[: compilation_limit - len(selected_ids)]
-                )
+                selected_ids.extend(unmatched_ids[: compilation_limit - len(selected_ids)])
         else:
             selected_ids = retrieval.selected_for_compilation[:compilation_limit]
         retrieval = retrieval.model_copy(update={"selected_for_compilation": selected_ids})
