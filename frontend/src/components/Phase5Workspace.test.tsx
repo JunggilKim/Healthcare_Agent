@@ -141,7 +141,12 @@ test("criterion matrix exposes unresolved evidence and verifier state", () => {
 
 test("evidence firewall follows the current histology proof state", () => {
   const { rerender } = render(<EvidenceFirewall session={session} />);
+  expect(screen.getByText("Evidence Firewall · 근거 안전장치")).toBeVisible();
   expect(screen.getByText(/병리검사 결과가 없으므로/)).toBeVisible();
+  expect(screen.getByText("CT 영상 소견")).toBeVisible();
+  expect(screen.getByText("검색 단서로만 사용")).toBeVisible();
+  expect(screen.getByText("병리 기록 없음")).toBeVisible();
+  expect(screen.getByText("조직형 UNKNOWN 유지")).toBeVisible();
 
   const confirmed = sessionSchema.parse({
     ...session,
@@ -164,6 +169,8 @@ test("evidence firewall follows the current histology proof state", () => {
 
   expect(screen.getByText(/확인된 병리 근거만 조직형 판정에 반영합니다/)).toBeVisible();
   expect(screen.getByText(/근육 침윤처럼 확인되지 않은 조건은 UNKNOWN/)).toBeVisible();
+  expect(screen.getByText("Grade A 병리 근거")).toBeVisible();
+  expect(screen.getByText("조직형 PASS 허용")).toBeVisible();
   expect(screen.queryByText(/병리검사 결과가 없으므로/)).not.toBeInTheDocument();
 });
 

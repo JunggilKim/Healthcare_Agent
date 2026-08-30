@@ -25,6 +25,17 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
   await expect(page.getByText("병리검사로 요로상피암 조직형이 확인됨")).toBeVisible();
   await expect(page.getByRole("heading", { name: /병리검사 결과지/ })).toBeVisible();
   await expect(page.getByText("영상 소견만으로 병리 진단을 확정하지 않습니다.")).toBeVisible();
+  const evidenceFirewall = page.getByRole("region", {
+    name: "영상 소견만으로 병리 진단을 확정하지 않습니다.",
+  });
+  await expect(evidenceFirewall.getByText("Evidence Firewall · 근거 안전장치")).toBeVisible();
+  await expect(evidenceFirewall.getByText("CT 영상 소견")).toBeVisible();
+  await expect(evidenceFirewall.getByText("조직형 UNKNOWN 유지")).toBeVisible();
+  const firewallBox = await evidenceFirewall.boundingBox();
+  const criterionBox = await page.locator(".criterion-panel").boundingBox();
+  expect(firewallBox).not.toBeNull();
+  expect(criterionBox).not.toBeNull();
+  expect(firewallBox!.y).toBeLessThan(criterionBox!.y);
   await expect(
     page.getByRole("heading", { name: "20 retained candidates · top 8 selected" }),
   ).toBeVisible();
