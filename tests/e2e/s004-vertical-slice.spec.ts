@@ -21,6 +21,9 @@ test("S004 frozen vertical slice works with outbound network blocked", async ({ 
   await expect(page.getByText("NCT05239624")).toBeVisible();
   await page.reload();
   await expect(page.getByText("NCT05239624")).toBeVisible();
+  const firewallJump = page.getByRole("link", { name: "Evidence Firewall · ACTIVE" });
+  await expect(firewallJump).toBeVisible();
+  await expect(firewallJump).toBeInViewport();
   await expect(page.getByRole("heading", { name: "Criterion proof table" })).toBeVisible();
   await expect(page.getByText("병리검사로 요로상피암 조직형이 확인됨")).toBeVisible();
   await expect(page.getByRole("heading", { name: /병리검사 결과지/ })).toBeVisible();
