@@ -45,7 +45,7 @@ ClinicalTrials.gov API v2.
 
 The independently verified offline path is S004/NCT05239624. The complete S004/S008/S001 release
 snapshot is pending exact-hash model review and project adjudication; see
-`docs/PENDING_EXTERNAL_VALIDATION.md`.
+`docs/operations/PENDING_EXTERNAL_VALIDATION.md`.
 
 ```bash
 git clone <repository-url>
@@ -122,7 +122,7 @@ uv run python scripts/render_eval_report.py --latest
 
 The reviewed Dataset A handoff uses `scripts/prepare_annotations.py` and
 `scripts/validate_annotations.py`. They produce blinded, exact-hash JSONL assignments and reject
-incomplete or non-independent adjudication. See `docs/ANNOTATION_GUIDE.md` for the versioned
+incomplete or non-independent adjudication. See `docs/guides/ANNOTATION_GUIDE.md` for the versioned
 world-generation, two-pass paraphrase validation, and review-row commands.
 
 Release evaluation additionally uses these non-imputable evidence stages:
@@ -149,7 +149,8 @@ After project, billing, and role approval, run `scripts/bootstrap_gcp.sh`, then 
 frozen production command uses Cloud Run in `asia-northeast3`, one Uvicorn worker, concurrency 4,
 two named Secret Manager mappings, and no service-account key. Run
 `scripts/smoke_test_deployment.sh --base-url URL`; `--live` is explicit and makes exactly one live
-session. Full instructions are in the scripts and `TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`.
+session. Full instructions are in the scripts and
+`docs/spec/TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`.
 
 The current release candidate is deployed at
 `https://trial-opt-web-ubvr3b22dq-du.a.run.app`. Snapshot smoke, one explicit Live smoke, the
@@ -158,16 +159,17 @@ candidate commit. Commit-bound machine-readable evidence is written under `artif
 
 ## Data sources and terms
 
-See [DATA_SOURCES.md](DATA_SOURCES.md) for organizer seeds, ClinicalTrials.gov attribution and
+See [DATA_SOURCES.md](docs/reference/DATA_SOURCES.md) for organizer seeds, ClinicalTrials.gov attribution and
 terms, the exact TREC adapter status, and project-generated synthetic benchmark limitations. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency licensing.
+[THIRD_PARTY_NOTICES.md](docs/reference/THIRD_PARTY_NOTICES.md) for dependency licensing.
 
 ## Models and cost assumptions
 
 Frozen routing uses `gemini-3.6-flash`, `gemini-3.5-flash-lite`, and
 `gemini-embedding-001`; deterministic code controls verdicts, proof replay, ranking, and policy.
 The normal cold-session target is $0.45 and the hard reservation cap is $1.25. These are engineering
-budgets, not billing guarantees. Details are in [MODEL_AND_COST_CARD.md](MODEL_AND_COST_CARD.md).
+budgets, not billing guarantees. Details are in
+[MODEL_AND_COST_CARD.md](docs/reference/MODEL_AND_COST_CARD.md).
 
 ## Known limitations
 
@@ -177,14 +179,14 @@ metrics. The one observed production cold Live analysis took 206.17 seconds, abo
 release target; it is reported as measured and is not imputed away. The bounded AST cannot
 formalize all protocol language; material unsupported text stays `OPAQUE`. ClinicalTrials.gov
 records, APIs, models, and prices can become stale. False positives and false negatives remain
-possible. See [SAFETY_AND_LIMITATIONS.md](SAFETY_AND_LIMITATIONS.md).
+possible. See [SAFETY_AND_LIMITATIONS.md](docs/reference/SAFETY_AND_LIMITATIONS.md).
 
 ## References
 
 - ClinicalTrials.gov API v2 and [Terms and Conditions](https://clinicaltrials.gov/about-site/terms-conditions)
 - [TREC 2022 Clinical Trials Track](https://trec.nist.gov/data/trials2022.html)
 - [ir_datasets Clinical Trials adapter](https://ir-datasets.com/clinicaltrials.html)
-- Full contract: `TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`
+- Full contract: [`TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`](docs/spec/TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md)
 
 ## Release artifact identifiers
 

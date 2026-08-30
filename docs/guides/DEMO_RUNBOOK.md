@@ -69,4 +69,5 @@ remote fault-injection API.
 
 The final three-case full snapshot, live Gemini/embedding calls, GCP persistence/deployment, and
 Docker image digest remain pending until the required user-controlled credentials, billing/quota,
-clinical review artifacts, and Docker storage are available. See `docs/PENDING_EXTERNAL_VALIDATION.md`.
+clinical review artifacts, and Docker storage are available. See
+`docs/operations/PENDING_EXTERNAL_VALIDATION.md`.
