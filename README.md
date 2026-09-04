@@ -5,6 +5,10 @@ in interactive clinical-trial pre-screening. Instead of guessing from an incompl
 it separates retrieval hypotheses from admissible eligibility evidence, produces replayable
 criterion verdicts, and asks for one existing record or value with the highest fixed utility.
 
+> 🏆 **Healthcare Agentic AI Challenge 2026 우수상 (3위)**
+> Competition result and archival artifacts are recorded in
+> [the final project archive](docs/operations/FINAL_PROJECT_ARCHIVE_20260905.md).
+
 ## Research contribution
 
 - **Active evidence acquisition:** a bounded B6 policy simulates answer branches and selects one
@@ -45,7 +49,7 @@ ClinicalTrials.gov API v2.
 
 The independently verified offline path is S004/NCT05239624. The complete S004/S008/S001 release
 snapshot is pending exact-hash model review and project adjudication; see
-`docs/PENDING_EXTERNAL_VALIDATION.md`.
+`docs/operations/PENDING_EXTERNAL_VALIDATION.md`.
 
 ```bash
 git clone <repository-url>
@@ -122,7 +126,7 @@ uv run python scripts/render_eval_report.py --latest
 
 The reviewed Dataset A handoff uses `scripts/prepare_annotations.py` and
 `scripts/validate_annotations.py`. They produce blinded, exact-hash JSONL assignments and reject
-incomplete or non-independent adjudication. See `docs/ANNOTATION_GUIDE.md` for the versioned
+incomplete or non-independent adjudication. See `docs/guides/ANNOTATION_GUIDE.md` for the versioned
 world-generation, two-pass paraphrase validation, and review-row commands.
 
 Release evaluation additionally uses these non-imputable evidence stages:
@@ -149,25 +153,30 @@ After project, billing, and role approval, run `scripts/bootstrap_gcp.sh`, then 
 frozen production command uses Cloud Run in `asia-northeast3`, one Uvicorn worker, concurrency 4,
 two named Secret Manager mappings, and no service-account key. Run
 `scripts/smoke_test_deployment.sh --base-url URL`; `--live` is explicit and makes exactly one live
-session. Full instructions are in the scripts and `TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`.
+session. Full instructions are in the scripts and
+`docs/spec/TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`.
 
-The current release candidate is deployed at
-`https://trial-opt-web-ubvr3b22dq-du.a.run.app`. Snapshot smoke, one explicit Live smoke, the
-frozen-model access probe, and an immutable Artifact Registry digest were validated on the release
-candidate commit. Commit-bound machine-readable evidence is written under `artifacts/release/`.
+The public competition demo ran on Cloud Run in `asia-northeast3`. Its final revision served
+commit `8a9c300` at the recorded immutable image digest, and the deployment passed the bounded
+Snapshot and Live smoke checks documented in this repository. The service and project-specific
+runtime resources were decommissioned after the competition on 2026-09-05 to stop ongoing costs.
+The source, submitted package, presentation, hashes, and final cloud identifiers remain available
+through the repository and its archival GitHub release; see
+[the final project archive](docs/operations/FINAL_PROJECT_ARCHIVE_20260905.md).
 
 ## Data sources and terms
 
-See [DATA_SOURCES.md](DATA_SOURCES.md) for organizer seeds, ClinicalTrials.gov attribution and
+See [DATA_SOURCES.md](docs/reference/DATA_SOURCES.md) for organizer seeds, ClinicalTrials.gov attribution and
 terms, the exact TREC adapter status, and project-generated synthetic benchmark limitations. See
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency licensing.
+[THIRD_PARTY_NOTICES.md](docs/reference/THIRD_PARTY_NOTICES.md) for dependency licensing.
 
 ## Models and cost assumptions
 
 Frozen routing uses `gemini-3.6-flash`, `gemini-3.5-flash-lite`, and
 `gemini-embedding-001`; deterministic code controls verdicts, proof replay, ranking, and policy.
 The normal cold-session target is $0.45 and the hard reservation cap is $1.25. These are engineering
-budgets, not billing guarantees. Details are in [MODEL_AND_COST_CARD.md](MODEL_AND_COST_CARD.md).
+budgets, not billing guarantees. Details are in
+[MODEL_AND_COST_CARD.md](docs/reference/MODEL_AND_COST_CARD.md).
 
 ## Known limitations
 
@@ -177,20 +186,20 @@ metrics. The one observed production cold Live analysis took 206.17 seconds, abo
 release target; it is reported as measured and is not imputed away. The bounded AST cannot
 formalize all protocol language; material unsupported text stays `OPAQUE`. ClinicalTrials.gov
 records, APIs, models, and prices can become stale. False positives and false negatives remain
-possible. See [SAFETY_AND_LIMITATIONS.md](SAFETY_AND_LIMITATIONS.md).
+possible. See [SAFETY_AND_LIMITATIONS.md](docs/reference/SAFETY_AND_LIMITATIONS.md).
 
 ## References
 
 - ClinicalTrials.gov API v2 and [Terms and Conditions](https://clinicaltrials.gov/about-site/terms-conditions)
 - [TREC 2022 Clinical Trials Track](https://trec.nist.gov/data/trials2022.html)
 - [ir_datasets Clinical Trials adapter](https://ir-datasets.com/clinicaltrials.html)
-- Full contract: `TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`
+- Full contract: [`TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`](docs/spec/TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md)
 
 ## Release artifact identifiers
 
 - Source commit: run `git rev-parse HEAD`; final tag remains gated on strict acceptance.
 - Snapshot hash: `data/demo/current/manifest.json` (three cases; exact-hash review pending).
-- Docker image digest and production URL: `artifacts/release/IMAGE_DIGEST.txt` and
-  `artifacts/release/PRODUCTION_URL.txt` after deployment.
+- Historical Docker image digest and production URL: recorded in the final project archive; the
+  endpoint is intentionally offline after decommissioning.
 - Evaluation run IDs: recorded in `artifacts/eval/latest/metrics.json` (fixture smoke only).
 - Tag `v1.0.0-challenge`: pending strict acceptance; not fabricated here.

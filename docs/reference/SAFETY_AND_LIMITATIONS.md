@@ -48,6 +48,5 @@ freshness. Live results can degrade to a reviewed snapshot, but that snapshot mu
 This prototype is not a HIPAA/compliance system and intentionally rejects real-patient use.
 
 Report security or safety issues through the repository's GitHub issue tracker or private security
-advisory using [SECURITY.md](SECURITY.md). Never include patient data, secrets, or exploit details in
+advisory using [SECURITY.md](../../.github/SECURITY.md). Never include patient data, secrets, or exploit details in
 a public report. No personal email address is published by default.
-

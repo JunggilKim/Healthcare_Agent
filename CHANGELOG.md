@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Recorded the Healthcare Agentic AI Challenge 2026 우수상 (3위), preserved the final submission
+  and presentation as archival release assets, and documented the post-competition GCP
+  decommissioning boundary.
+- Reorganized project documentation by purpose while keeping verification and packaging paths in
+  sync with the new locations.
 - Added the complete local/live/snapshot session router, first-party Live orchestration, shared GCP
   persistence/cache/cost/rate-limit adapters, leases, answer idempotency, lifecycle endpoints, and
   exact public/export/report API contracts.

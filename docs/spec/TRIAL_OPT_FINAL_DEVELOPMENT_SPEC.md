@@ -32,7 +32,7 @@ If a requirement is technically impossible because an external service, quota, o
 
 1. preserve the public interfaces and safety invariants;
 2. select the nearest first-party Google Cloud replacement;
-3. record the change in `docs/IMPLEMENTATION_DEVIATIONS.md` with evidence;
+3. record the change in `docs/engineering/IMPLEMENTATION_DEVIATIONS.md` with evidence;
 4. keep Snapshot Demo Mode fully operational.
 
 ### 0.1 Approved Compatibility Erratum (2026-08-12)
@@ -4252,10 +4252,25 @@ Repository root: `trial-opt/`.
 trial-opt/
 ├── README.md
 ├── LICENSE
-├── THIRD_PARTY_NOTICES.md
-├── DATA_SOURCES.md
-├── MODEL_AND_COST_CARD.md
-├── SAFETY_AND_LIMITATIONS.md
+├── docs/
+│   ├── README.md
+│   ├── engineering/
+│   │   ├── ARCHITECTURE_DECISIONS.md
+│   │   └── IMPLEMENTATION_DEVIATIONS.md
+│   ├── guides/
+│   │   ├── ANNOTATION_GUIDE.md
+│   │   ├── DEMO_RUNBOOK.md
+│   │   └── FIGMA_DESIGN_ATTRIBUTION.md
+│   ├── operations/
+│   │   ├── LOCAL_CLEANUP_20260813.md
+│   │   └── PENDING_EXTERNAL_VALIDATION.md
+│   ├── reference/
+│   │   ├── THIRD_PARTY_NOTICES.md
+│   │   ├── DATA_SOURCES.md
+│   │   ├── MODEL_AND_COST_CARD.md
+│   │   └── SAFETY_AND_LIMITATIONS.md
+│   └── spec/
+│       └── TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md
 ├── CHANGELOG.md
 ├── Makefile
 ├── Dockerfile
@@ -4263,6 +4278,7 @@ trial-opt/
 ├── .gitignore
 ├── .env.example
 ├── .github/
+│   ├── SECURITY.md
 │   └── workflows/
 │       ├── ci.yml
 │       └── release-check.yml
@@ -4506,8 +4522,8 @@ Do not add:
 
 - Original repository source code MUST use the MIT License in `LICENSE`.
 - The MIT License applies only to project-authored code unless a file states otherwise.
-- Organizer-provided seed cases and ClinicalTrials.gov records are not relicensed under MIT; `DATA_SOURCES.md` records their provenance and source-specific terms.
-- Third-party library licenses are listed in `THIRD_PARTY_NOTICES.md`.
+- Organizer-provided seed cases and ClinicalTrials.gov records are not relicensed under MIT; `docs/reference/DATA_SOURCES.md` records their provenance and source-specific terms.
+- Third-party library licenses are listed in `docs/reference/THIRD_PARTY_NOTICES.md`.
 - No claim of U.S. government or trial-sponsor endorsement is permitted.
 
 ## 104.5 Continuous Integration
@@ -4603,7 +4619,7 @@ Do not create polished UI before the deterministic vertical slice passes its gol
 4. Implement core enums and typed values.
 5. Implement state machine transition table.
 6. Add empty adapters/interfaces and health endpoint.
-7. Write `SAFETY_AND_LIMITATIONS.md`, initial disclaimer component, and forbidden-model/config test.
+7. Write `docs/reference/SAFETY_AND_LIMITATIONS.md`, initial disclaimer component, and forbidden-model/config test.
 
 ### Exit Criteria
 
@@ -4770,7 +4786,7 @@ Branch B must leave histology `UNKNOWN`, mark the record unavailable for that qu
 4. Implement simulated failure toggle.
 5. Add export/report, data timestamp, model/cost badges.
 6. Run visual and Playwright tests at 1440×900.
-7. Write `docs/DEMO_RUNBOOK.md` and rehearse timing.
+7. Write `docs/guides/DEMO_RUNBOOK.md` and rehearse timing.
 
 ### Exit Criteria
 
@@ -5447,7 +5463,7 @@ README must clearly state that Google AI Studio billing is not used by this proj
 
 ## 139. Data Source and Terms Documentation
 
-`DATA_SOURCES.md` must distinguish:
+`docs/reference/DATA_SOURCES.md` must distinguish:
 
 ### 139.1 Organizer Synthetic Cases
 
@@ -5483,7 +5499,7 @@ README must clearly state that Google AI Studio billing is not used by this proj
 
 ## 140. Model and Cost Card
 
-`MODEL_AND_COST_CARD.md` must include:
+`docs/reference/MODEL_AND_COST_CARD.md` must include:
 
 - model routing table;
 - why first-party Google Cloud was selected;
@@ -5498,7 +5514,7 @@ README must clearly state that Google AI Studio billing is not used by this proj
 
 ## 141. Safety and Limitations Document
 
-`SAFETY_AND_LIMITATIONS.md` must include:
+`docs/reference/SAFETY_AND_LIMITATIONS.md` must include:
 
 - proof meaning and non-meaning;
 - pre-screening versus final eligibility;
@@ -5510,7 +5526,7 @@ README must clearly state that Google AI Studio billing is not used by this proj
 - API/model staleness;
 - false-negative/false-positive risks;
 - requirement for trial-team confirmation;
-- reporting route through the repository's GitHub issue tracker and `SECURITY.md`; do not publish a personal email address in the generated prototype by default.
+- reporting route through the repository's GitHub issue tracker and `.github/SECURITY.md`; do not publish a personal email address in the generated prototype by default.
 
 ## 142. Final Submission Directory
 

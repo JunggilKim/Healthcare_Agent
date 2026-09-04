@@ -40,11 +40,11 @@ from backend.app.infrastructure.snapshot_loader import (  # noqa: E402
 
 REQUIRED_FILES = (
     "README.md",
-    "DATA_SOURCES.md",
-    "MODEL_AND_COST_CARD.md",
-    "SAFETY_AND_LIMITATIONS.md",
-    "THIRD_PARTY_NOTICES.md",
-    "SECURITY.md",
+    "docs/reference/DATA_SOURCES.md",
+    "docs/reference/MODEL_AND_COST_CARD.md",
+    "docs/reference/SAFETY_AND_LIMITATIONS.md",
+    "docs/reference/THIRD_PARTY_NOTICES.md",
+    ".github/SECURITY.md",
     "CHANGELOG.md",
     "LICENSE",
     ".env.example",
@@ -55,8 +55,8 @@ REQUIRED_FILES = (
     "config/models.yaml",
     "config/pricing.yaml",
     "config/eval.yaml",
-    "docs/ANNOTATION_GUIDE.md",
-    "docs/DEMO_RUNBOOK.md",
+    "docs/guides/ANNOTATION_GUIDE.md",
+    "docs/guides/DEMO_RUNBOOK.md",
     "presentation/demo_script.md",
     "presentation/submission_checklist.md",
     "scripts/acquire_release_corpus.py",
@@ -215,7 +215,7 @@ class Verifier:
         )
         combined = "\n".join(
             (REPOSITORY_ROOT / path).read_text(encoding="utf-8").lower()
-            for path in ("README.md", "SAFETY_AND_LIMITATIONS.md")
+            for path in ("README.md", "docs/reference/SAFETY_AND_LIMITATIONS.md")
         )
         missing = [term for term in DISCLAIMER_TERMS if term not in combined]
         self.add(
@@ -224,8 +224,10 @@ class Verifier:
             "medical/data disclaimer is present",
             ", ".join(missing),
         )
-        data_doc = (REPOSITORY_ROOT / "DATA_SOURCES.md").read_text(encoding="utf-8")
-        notices = (REPOSITORY_ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+        data_doc = (REPOSITORY_ROOT / "docs/reference/DATA_SOURCES.md").read_text(encoding="utf-8")
+        notices = (REPOSITORY_ROOT / "docs/reference/THIRD_PARTY_NOTICES.md").read_text(
+            encoding="utf-8"
+        )
         data_ok = all(
             term in data_doc
             for term in (
