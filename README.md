@@ -5,6 +5,10 @@ in interactive clinical-trial pre-screening. Instead of guessing from an incompl
 it separates retrieval hypotheses from admissible eligibility evidence, produces replayable
 criterion verdicts, and asks for one existing record or value with the highest fixed utility.
 
+> 🏆 **Healthcare Agentic AI Challenge 2026 우수상 (3위)**
+> Competition result and archival artifacts are recorded in
+> [the final project archive](docs/operations/FINAL_PROJECT_ARCHIVE_20260905.md).
+
 ## Research contribution
 
 - **Active evidence acquisition:** a bounded B6 policy simulates answer branches and selects one
@@ -152,10 +156,13 @@ two named Secret Manager mappings, and no service-account key. Run
 session. Full instructions are in the scripts and
 `docs/spec/TRIAL_OPT_FINAL_DEVELOPMENT_SPEC.md`.
 
-The current release candidate is deployed at
-`https://trial-opt-web-ubvr3b22dq-du.a.run.app`. Snapshot smoke, one explicit Live smoke, the
-frozen-model access probe, and an immutable Artifact Registry digest were validated on the release
-candidate commit. Commit-bound machine-readable evidence is written under `artifacts/release/`.
+The public competition demo ran on Cloud Run in `asia-northeast3`. Its final revision served
+commit `8a9c300` at the recorded immutable image digest, and the deployment passed the bounded
+Snapshot and Live smoke checks documented in this repository. The service and project-specific
+runtime resources were decommissioned after the competition on 2026-09-05 to stop ongoing costs.
+The source, submitted package, presentation, hashes, and final cloud identifiers remain available
+through the repository and its archival GitHub release; see
+[the final project archive](docs/operations/FINAL_PROJECT_ARCHIVE_20260905.md).
 
 ## Data sources and terms
 
@@ -192,7 +199,7 @@ possible. See [SAFETY_AND_LIMITATIONS.md](docs/reference/SAFETY_AND_LIMITATIONS.
 
 - Source commit: run `git rev-parse HEAD`; final tag remains gated on strict acceptance.
 - Snapshot hash: `data/demo/current/manifest.json` (three cases; exact-hash review pending).
-- Docker image digest and production URL: `artifacts/release/IMAGE_DIGEST.txt` and
-  `artifacts/release/PRODUCTION_URL.txt` after deployment.
+- Historical Docker image digest and production URL: recorded in the final project archive; the
+  endpoint is intentionally offline after decommissioning.
 - Evaluation run IDs: recorded in `artifacts/eval/latest/metrics.json` (fixture smoke only).
 - Tag `v1.0.0-challenge`: pending strict acceptance; not fabricated here.

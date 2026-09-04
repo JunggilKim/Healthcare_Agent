@@ -15,6 +15,7 @@ Project documents are grouped by purpose so the repository root remains focused 
 
 ## Operations
 
+- [Final project archive](operations/FINAL_PROJECT_ARCHIVE_20260905.md)
 - [Local cleanup record](operations/LOCAL_CLEANUP_20260813.md)
 - [Pending external validation](operations/PENDING_EXTERNAL_VALIDATION.md)
 
